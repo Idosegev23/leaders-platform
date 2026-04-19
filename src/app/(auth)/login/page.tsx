@@ -66,7 +66,12 @@ function LoginContent() {
 
         {(error || authError) && (
           <div className="p-4 border border-red-500/30 bg-red-500/10 text-red-400 text-sm text-center mb-6">
-            {error || (authError === 'auth_failed' ? 'ההתחברות נכשלה. נסה שוב.' : authError)}
+            {error ||
+              (authError === 'auth_failed'
+                ? 'ההתחברות נכשלה. נסה שוב.'
+                : authError === 'not_authorized'
+                ? 'המייל הזה לא רשום כעובד לידרס. פנה למנהל המערכת.'
+                : authError)}
           </div>
         )}
 

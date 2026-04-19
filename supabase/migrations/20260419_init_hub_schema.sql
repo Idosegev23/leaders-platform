@@ -145,8 +145,8 @@ CREATE TABLE IF NOT EXISTS document_types (
 INSERT INTO document_types (slug, name, description, icon, target_url, flow_type, sort_order) VALUES
   ('client-brief',           'בריף לקוח',           'שליחת טופס בריף ללקוח',                 'brief',        '/forms/client-brief', 'send_link',    10),
   ('inner-meeting',          'פגישת התנעה',         'מסמך התנעה פנימי אחרי קבלת הבריף',        'meeting',      '/inner-meeting',      'direct_form',  20),
-  ('price-quote',            'הצעת מחיר',           'יצירת הצעת מחיר ללקוח',                  'quote',        '/quote',              'direct_form',  30),
-  ('creative-presentation',  'מצגת קריאייטיבית',    'מצגת קריאייטיב ללקוח',                   'presentation', '/deck',               'direct_form',  40),
+  ('price-quote',            'הצעת מחיר',           'יצירת הצעת מחיר ללקוח',                  'quote',        '/price-quote',        'direct_form',  30),
+  ('creative-presentation',  'מצגת קריאייטיבית',    'מצגת קריאייטיב ללקוח',                   'presentation', '/create-proposal',    'direct_form',  40),
   ('summary-presentation',   'מצגת סיכום',          'מצגת סיכום קמפיין (בבנייה)',              'summary',      '/summary',            'coming_soon',  50)
 ON CONFLICT (slug) DO NOTHING;
 

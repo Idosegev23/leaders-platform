@@ -63,7 +63,13 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Protected routes
-  const protectedPaths = ['/dashboard', '/admin', '/create', '/documents', '/preview', '/create-proposal', '/price-quote', '/wizard', '/research', '/generate', '/edit']
+  const protectedPaths = [
+    '/dashboard', '/admin', '/create', '/documents', '/preview',
+    '/create-proposal', '/price-quote', '/wizard', '/research',
+    '/generate', '/edit',
+    // New hub rubrics (Phases 2–5)
+    '/inner-meeting', '/summary',
+  ]
   const isProtectedPath = protectedPaths.some(path =>
     request.nextUrl.pathname.startsWith(path)
   )

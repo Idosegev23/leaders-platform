@@ -42,13 +42,34 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
 
     if (!error) {
-      // Auto-assign admin role for matching emails
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user?.email) {
           const emailLower = user.email.toLowerCase()
-          const isAdmin = ADMIN_EMAILS.includes(emailLower)
-          if (isAdmin) {
+
+          // Leaders whitelist check — email must exist in `contacts`.
+          // Bypassed in dev mode so local development doesn't require seeded data.
+          const skipWhitelist = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
+          if (!skipWhitelist) {
+            const serviceClient = createClient(
+              process.env.NEXT_PUBLIC_SUPABASE_URL!,
+              process.env.SUPABASE_SERVICE_ROLE_KEY!,
+            )
+            const { data: contact } = await serviceClient
+              .from('contacts')
+              .select('id')
+              .eq('email', emailLower)
+              .maybeSingle()
+
+            if (!contact) {
+              console.warn(`[Auth] Rejected non-Leaders email: ${user.email}`)
+              await supabase.auth.signOut()
+              return NextResponse.redirect(`${origin}/login?error=not_authorized`)
+            }
+          }
+
+          // Auto-assign admin role for matching emails
+          if (ADMIN_EMAILS.includes(emailLower)) {
             const serviceClient = createClient(
               process.env.NEXT_PUBLIC_SUPABASE_URL!,
               process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -58,7 +79,7 @@ export async function GET(request: Request) {
           }
         }
       } catch (e) {
-        console.error('[Auth] Admin role check failed:', e)
+        console.error('[Auth] Post-login checks failed:', e)
       }
 
       return NextResponse.redirect(`${origin}${redirect}`)
