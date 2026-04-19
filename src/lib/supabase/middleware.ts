@@ -68,7 +68,9 @@ export async function updateSession(request: NextRequest) {
     '/create-proposal', '/price-quote', '/wizard', '/research',
     '/generate', '/edit',
     // New hub rubrics (Phases 2–5)
-    '/inner-meeting', '/summary',
+    '/inner-meeting', '/summary', '/send',
+    // Note: /forms/* is intentionally public — clients without an account
+    // use `/forms/client-brief?token=xxx` to fill the brief.
   ]
   const isProtectedPath = protectedPaths.some(path =>
     request.nextUrl.pathname.startsWith(path)

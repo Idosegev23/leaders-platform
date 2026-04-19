@@ -1,0 +1,228 @@
+import { StepConfig, SERVICES_LIST, PLATFORMS_LIST, CAMPAIGN_GOAL_TYPES, TIMING_TYPES } from '@/types/client-brief'
+
+export const formSteps: StepConfig[] = [
+  {
+    title: 'פרטים כלליים',
+    description: 'פרטי הבריף הבסיסיים',
+    fields: [
+      {
+        name: 'date',
+        label: 'תאריך',
+        type: 'date',
+        required: true,
+      },
+      {
+        name: 'submitterName',
+        label: 'מגיש הבריף',
+        type: 'text',
+        placeholder: 'שם מלא',
+        required: true,
+      },
+      {
+        name: 'clientName',
+        label: 'שם הלקוח',
+        type: 'text',
+        placeholder: 'שם הלקוח',
+        required: true,
+      },
+      {
+        name: 'productService',
+        label: 'המוצר/השירות',
+        type: 'text',
+        placeholder: 'תיאור קצר',
+        required: true,
+      },
+      {
+        name: 'services',
+        label: 'אילו שירותים אתה מעוניין?',
+        type: 'checkbox-group',
+        required: true,
+        options: SERVICES_LIST,
+      },
+      {
+        name: 'platforms',
+        label: 'פלטפורמות רלוונטיות',
+        type: 'checkbox-group',
+        required: true,
+        options: PLATFORMS_LIST,
+      },
+      {
+        name: 'campaignLaunchDate',
+        label: 'תאריך עליית הקמפיין',
+        type: 'date',
+        required: true,
+      },
+    ],
+  },
+  {
+    title: 'רקע',
+    description: 'מידע על השוק והמתחרים',
+    fields: [
+      {
+        name: 'marketCategory',
+        label: 'באיזה שוק ובאיזו קטגוריה אנחנו פועלים?',
+        type: 'textarea',
+        placeholder: 'תאר את השוק והקטגוריה',
+        required: true,
+      },
+      {
+        name: 'productDescription',
+        label: 'תיאור המוצר/שירות/מותג. מה הבשורה? מה הUSP?',
+        type: 'textarea',
+        placeholder: 'תאר את המוצר והיתרון הייחודי שלו',
+        required: true,
+      },
+      {
+        name: 'competitors',
+        label: 'מי הם המתחרים ואילו מהלכים הם עושים?',
+        type: 'textarea',
+        placeholder: 'פרט על המתחרים ומהלכים שלהם',
+        required: true,
+      },
+      {
+        name: 'challenge',
+        label: 'מה הבעיה/האתגר איתם אנחנו צריכים להתמודד?',
+        type: 'textarea',
+        placeholder: 'תאר את האתגר העיקרי',
+        required: true,
+      },
+    ],
+  },
+  {
+    title: 'קהל היעד',
+    description: 'הבנת קהל היעד',
+    fields: [
+      {
+        name: 'targetAudience',
+        label: 'למי אנחנו פונים?',
+        type: 'textarea',
+        placeholder: 'תאר את קהל היעד',
+        required: true,
+      },
+      {
+        name: 'audienceCharacteristics',
+        label: 'מאפיינים רלוונטיים של קהל היעד?',
+        type: 'textarea',
+        placeholder: 'גיל, מין, תחומי עניין, הרגלים וכו\'',
+        required: true,
+      },
+      {
+        name: 'audienceInsights',
+        label: 'מה חשוב שנדע על הקהל?',
+        type: 'textarea',
+        placeholder: 'תובנות חשובות על הקהל',
+        required: true,
+      },
+    ],
+  },
+  {
+    title: 'מטרות',
+    description: 'מטרות וציפיות מהמהלך',
+    fields: [
+      {
+        name: 'campaignGoalTypes',
+        label: 'סוגי מטרות המהלך (בחר אפשרויות)',
+        type: 'checkbox-group',
+        required: true,
+        options: CAMPAIGN_GOAL_TYPES,
+      },
+      {
+        name: 'campaignGoalsDescription',
+        label: 'תאר את המטרות בפירוט',
+        type: 'textarea',
+        placeholder: 'פרט מה אנחנו רוצים להשיג',
+        required: true,
+      },
+      {
+        name: 'desiredResponse',
+        label: 'מה היינו רוצים שהקהל ירגיש/יעשה בעקבות המהלך?',
+        type: 'textarea',
+        placeholder: 'תגובה רצויה מהקהל',
+        required: true,
+      },
+      {
+        name: 'timingType',
+        label: 'טיימינג ספציפי למהלך',
+        type: 'select',
+        required: true,
+        options: TIMING_TYPES,
+      },
+      {
+        name: 'timingDetails',
+        label: 'פרטי טיימינג (עונה / השקת מוצר חדש / אירוע נקודתי)',
+        type: 'textarea',
+        placeholder: 'למשל: עונת הקיץ, השקת מוצר חדש, אירוע פסח',
+        required: false,
+      },
+    ],
+  },
+  {
+    title: 'תובנה ומסר',
+    description: 'התובנה העיקרית והמסר',
+    fields: [
+      {
+        name: 'insight',
+        label: 'מהו המתח, הדיסוננס או משאלת הלב בחייו של קהל היעד שלנו?',
+        type: 'textarea',
+        placeholder: 'תאר את התובנה המרכזית',
+        required: true,
+      },
+      {
+        name: 'solution',
+        label: 'איך המותג/המוצר או השירות שלנו פותר את הבעיה הזו?',
+        type: 'textarea',
+        placeholder: 'תאר איך אתם פותרים את הבעיה',
+        required: true,
+      },
+      {
+        name: 'mainMessage',
+        label: 'במשפט אחד! מה הכי חשוב להגיד?',
+        type: 'textarea',
+        placeholder: 'המסר העיקרי במשפט אחד',
+        required: true,
+      },
+      {
+        name: 'keyTakeaway',
+        label: 'מה אנחנו רוצים שהצרכן יזכור מהמהלך?',
+        type: 'textarea',
+        placeholder: 'מה צריך להישאר בזיכרון',
+        required: true,
+      },
+    ],
+  },
+  {
+    title: 'דרישות ותקציב',
+    description: 'דרישות פרקטיות ותקציב',
+    fields: [
+      {
+        name: 'requirements',
+        label: 'מה נדרש? (big idea, תסריט, רעיונות לשת"פים וכו\')',
+        type: 'textarea',
+        placeholder: 'פרט מה נדרש למהלך',
+        required: true,
+      },
+      {
+        name: 'campaignType',
+        label: 'איזה סוג מהלך אנחנו מחפשים? (סרטון, סדרה, פריט תוכן, שת"פ וכו\')',
+        type: 'textarea',
+        placeholder: 'תאר את סוג המהלך',
+        required: true,
+      },
+      {
+        name: 'budget',
+        label: 'תקציב',
+        type: 'text',
+        placeholder: 'לדוגמה: 8000$',
+        required: true,
+      },
+      {
+        name: 'notes',
+        label: 'הערות, רעיונות והגיגים...',
+        type: 'textarea',
+        placeholder: 'הערות נוספות (אופציונלי)',
+        required: false,
+      },
+    ],
+  },
+]
+

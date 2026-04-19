@@ -47,7 +47,7 @@ const RUBRICS: Rubric[] = [
     slug: 'client-brief',
     name: 'בריף לקוח',
     description: 'שליחת טופס בריף ללקוח ומעקב אחרי המילוי',
-    targetUrl: '/forms/client-brief',
+    targetUrl: '/send/client-brief',
     flowType: 'send_link',
     gradient: 'from-rose-900 to-red-800 hover:from-rose-800 hover:to-red-700',
     icon: BriefIcon,

@@ -39,7 +39,13 @@
       "maxDuration": 600,
       "memory": 1024
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "0 8 * * *"
+    }
+  ]
 }
 
 

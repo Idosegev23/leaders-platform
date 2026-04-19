@@ -6,30 +6,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `leaders-platform` is the unified internal platform for Leaders — **one Next.js app, one DB, one Google OAuth** — replacing a constellation of small apps (`innerMeeting`, `costumerbrief`/`leadersBrief`, `docs-hub`, `chatbrief`, `qoute1`) that each had their own auth and database.
 
-This repo was forked from `pptmaker` because pptmaker is the largest component (AI presentation pipeline — Gemini agents, Playwright PDF, PPTX export, storage) and the other apps are small enough to merge into it.
+Forked from `pptmaker` because pptmaker is the largest component (AI presentation pipeline — Gemini agents, Playwright PDF, PPTX export, storage) and the other apps are small enough to merge into it.
 
 The five rubrics on the dashboard:
 
-| Slug | Name | Source app (legacy) | Status |
-|------|------|---------------------|--------|
-| `client-brief` | בריף לקוח | `costumerbrief` (aka leadersBrief) — 6-step client form | to migrate |
-| `inner-meeting` | פגישת התנעה | `innerMeeting` — collaborative internal kick-off form | to migrate |
-| `price-quote` | הצעת מחיר | pptmaker `/price-quote` | in place |
-| `creative-presentation` | מצגת קריאייטיבית | pptmaker `/create-proposal` → `/deck` | in place (rename) |
-| `summary-presentation` | מצגת סיכום | — | `coming_soon` placeholder |
+| Slug | Name | Route | Flow | Status |
+|------|------|-------|------|--------|
+| `client-brief` | בריף לקוח | `/send/client-brief` → `/forms/client-brief?token=…` | send_link | wired |
+| `inner-meeting` | פגישת התנעה | `/inner-meeting` | direct_form (collaborative) | wired |
+| `price-quote` | הצעת מחיר | `/price-quote` | direct_form | inherited from pptmaker |
+| `creative-presentation` | מצגת קריאייטיבית | `/create-proposal` | direct_form | inherited from pptmaker |
+| `summary-presentation` | מצגת סיכום | `/summary` | coming_soon | placeholder |
 
-## Current phase
+## Phases status
 
-**Phase 0** — fork + schema migration prepared, nothing wired to the unified dashboard yet. pptmaker's existing flows (`/dashboard`, `/price-quote`, `/create-proposal`, etc.) still work as they did.
+- **Phase 0 — Setup** ✓ fork + migration written + env vars pushed.
+- **Phase 1 — Dashboard + auth whitelist** ✓ `/dashboard` rewritten with 5 rubrics + `contacts` whitelist in the auth callback.
+- **Phase 2 — Inner-meeting port** ✓ Realtime/Presence form mounted at `/inner-meeting`.
+- **Phase 3 — Client-brief port** ✓ 6-step form at `/forms/client-brief`, send-link flow at `/send/[slug]`, unified link tracking via `document_links`.
+- **Phase 4 — Quote + deck** ✓ Dashboard cards link directly to the existing pptmaker flows.
+- **Phase 5 — Summary placeholder** ✓ `/summary` shows "בבנייה".
+- **Phase 6 — Reminders** ✓ `/api/cron/reminders` (daily 08:00 UTC via `vercel.json`); POSTs consolidated reminder batch to `REMINDERS_WEBHOOK_URL` (Make.com) for actual email delivery.
+- **Phase 7 — Cleanup** pending: delete legacy apps (`innerMeeting`, `costumerbrief`, `chatbrief`, `qoute1`, `docs-hub`).
 
-Upcoming phases (see the planning conversation for details):
-1. Dashboard shell + Google OAuth whitelist via `contacts`
-2. Migrate `inner-meeting` (the hard one — has Supabase Realtime + Presence)
-3. Migrate `client-brief`
-4. Wire `/quote` + `/deck` into dashboard cards
-5. `summary-presentation` placeholder
-6. History + reminders (Vercel Cron: unopened briefs > 3d, stale drafts > 7d, deadlines in 48h)
-7. Cleanup — delete the legacy apps
+## Manual setup still required
+
+Code alone isn't enough — these live-system tweaks must be done once:
+
+1. **Run the SQL migration** in [supabase/migrations/20260419_init_hub_schema.sql](supabase/migrations/20260419_init_hub_schema.sql) on the Supabase SQL Editor.
+2. **Seed contacts** via `node scripts/seed-contacts.mjs` (needs `SUPABASE_SERVICE_ROLE_KEY` locally).
+3. **Google Cloud Console** → Authorized redirect URI: `https://fhgggqnaplshwbrzgima.supabase.co/auth/v1/callback`.
+4. **Supabase → Auth → URL Configuration** → add `{origin}/api/auth/callback` for both dev and prod origins.
+5. **Vercel env**: set `REMINDERS_WEBHOOK_URL` to the Make.com scenario URL that sends reminder emails. (Also `ADMIN_EMAILS` optional for auto-promoting admins; `CRON_SECRET` optional to gate the cron route.)
+6. **`NEXT_PUBLIC_DEV_MODE`** — currently `true` in all environments. Flip to `false` in prod before real launch (`vercel env rm NEXT_PUBLIC_DEV_MODE production` then `echo false | vercel env add NEXT_PUBLIC_DEV_MODE production`).
 
 ## Commands
 
@@ -38,44 +47,57 @@ npm run dev         # Next dev (port 3000 by default)
 npm run build
 npm start
 npm run lint
-node scripts/seed-contacts.mjs    # one-shot: seed `contacts` from scripts/contacts.csv (needs SUPABASE_SERVICE_ROLE_KEY)
+node scripts/seed-contacts.mjs    # seed `contacts` from scripts/contacts.csv
 ```
 
-No automated tests. There's a large `scripts/` dir of one-off QA / benchmarking scripts (`critic-*`, `test-*`) left from pptmaker — most of them are model experiments, not CI.
+No automated tests. There's a large `scripts/` dir of one-off QA / benchmarking scripts (`critic-*`, `test-*`) inherited from pptmaker — those are model experiments, not CI.
 
 ## Database
 
-**Supabase project:** `fhgggqnaplshwbrzgima.supabase.co` (pptmaker's original). The other project (`rdhlmqzunnuhmsclhimq`, formerly used by `innerMeeting` + `docs-hub` + the now-deleted `chatbrief`) is being retired. All new tables go on this project.
+**Supabase project:** `fhgggqnaplshwbrzgima.supabase.co`. The second project (`rdhlmqzunnuhmsclhimq`, formerly used by `innerMeeting` + `docs-hub` + `chatbrief`) is retired — all new tables live on the first.
 
-### Schema origin
-- **From pptmaker (already in DB):** `documents` (type: `quote` | `deck`), `users`, `admin_config`, `admin_config_history`, `brief_links`, `user_google_tokens`, plus the `assets` storage bucket.
-- **Added by [supabase/migrations/20260419_init_hub_schema.sql](supabase/migrations/20260419_init_hub_schema.sql):** `contacts`, `client_folders`, `forms`, `inner_meeting_forms`, `form_participants`, `form_activity_logs`, `document_types`, `document_links`.
+### Tables
+- **Inherited from pptmaker:** `documents` (type: `quote` | `deck`), `users`, `admin_config`, `admin_config_history`, `brief_links` (legacy), `user_google_tokens`, plus the `assets` storage bucket.
+- **Added by the migration:** `contacts` (Leaders employee whitelist), `client_folders`, `forms`, `inner_meeting_forms`, `form_participants`, `form_activity_logs`, `document_types`, `document_links`.
 
-The migration must be run manually in the Supabase SQL Editor — there is no automated migration runner in the repo.
+Idempotent migration — safe to re-run.
 
-### Two `brief`-related paths
-- `brief_links` (already existed in pptmaker's DB, from the costumerbrief/leadersBrief app) — the legacy brief-sending flow.
-- `document_links` (new, from the migration) — the unified link-tracking table for all five rubrics.
-
-During Phase 3, the client-brief flow is ported from `brief_links` to `document_links` (one history source, not two). Until then both tables exist.
+### Unified vs. legacy link tracking
+- `brief_links` — legacy, from costumerbrief/leadersBrief. Not read by this app.
+- `document_links` — the unified tracker. Every rubric with a `send_link` flow lands here. The dashboard's "recent activity" merges `documents` (pptmaker's records) + `document_links`.
 
 ## Auth
 
-Google OAuth via Supabase Auth, plus a whitelist layer: after login, the user's email must exist in the `contacts` table, otherwise `signOut()` is called and they're redirected to `/login?error=not_authorized`. The middleware handles session refresh; the whitelist check happens at the React layer (`hooks/useAuth` or equivalent when migrated from innerMeeting).
+Google OAuth via Supabase Auth. Three-layer check:
 
-**Supabase Redirect URLs** must include `http://localhost:3000/auth/callback` (dev) and the production origin's callback.
+1. **OAuth handshake** — `/api/auth/callback` exchanges the code for a session.
+2. **`contacts` whitelist** — callback looks up the session email in `contacts`. Not present → `signOut()` + redirect to `/login?error=not_authorized`. Bypassed when `NEXT_PUBLIC_DEV_MODE=true`.
+3. **Admin role** — if the email is in `ADMIN_EMAILS` (env var), the user's `users.role` is upgraded to `admin` after callback.
 
-## Architecture
+Middleware (`src/lib/supabase/middleware.ts`) protects `/dashboard`, `/send`, `/inner-meeting`, `/summary`, and all pptmaker routes (`/create-proposal`, `/price-quote`, `/wizard`, etc.). `/forms/*` is **public** so clients can fill briefs without a Leaders account.
 
-Next.js 14 App Router, TypeScript strict, Supabase (auth + postgres + realtime + storage), Tailwind, react-hook-form + Zod, framer-motion. Heavy pipeline dependencies: `@google/genai`, `@anthropic-ai/sdk`, Playwright (for PDF), `pptxgenjs` (for PPTX).
+## Architecture notes
 
-Path alias: `@/*` → `./src/*`. UI is Hebrew, RTL.
+Next.js 14 App Router, TypeScript strict, Supabase (auth + postgres + realtime + storage), Tailwind, react-hook-form + Zod, framer-motion. Heavy pipeline deps: `@google/genai`, `@anthropic-ai/sdk`, `puppeteer-core` + `@sparticuz/chromium` (for PDF), `pptxgenjs` (for PPTX).
 
-## Non-obvious things to know
+Path alias `@/*` → `./src/*`. UI is Hebrew, RTL.
 
-- **Two `brief`-related tables coexist.** Don't conflate them — `brief_links` is legacy, `document_links` is the new unified tracker.
-- **Migration schema is idempotent** (all `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`) so it's safe to re-run.
-- **The `contacts` table is load-bearing for auth.** An empty `contacts` table = nobody can log in. Run `seed-contacts.mjs` after the schema migration.
-- **pptmaker had its own `users` table.** It's orthogonal to `contacts` — `users` stores pptmaker-app state (admin roles, doc ownership), while `contacts` is the Leaders employee directory. Don't merge them; they serve different purposes.
-- **`.env.local` must include `SUPABASE_SERVICE_ROLE_KEY`** for the seed script (service role bypasses RLS). The anon key is not enough.
-- **Realtime publication** — `inner_meeting_forms` and `forms` must be in the `supabase_realtime` publication (the migration does this) for the collaborative editing experience to work when inner-meeting is ported.
+### Module organisation
+- `src/app/inner-meeting/` — the port of the kick-off flow.
+- `src/app/forms/client-brief/` — the public client-facing 6-step brief.
+- `src/app/send/[slug]/` — authed employee creates + shares a link for `send_link` rubrics.
+- `src/app/api/links/` + `src/app/api/links/[token]/` — CRUD for `document_links`. Public GET on `[token]` bumps status to `opened`.
+- `src/app/api/cron/reminders/` — daily cron; POSTs consolidated reminder batch to `REMINDERS_WEBHOOK_URL`.
+- `src/lib/inner-meeting/`, `src/lib/client-brief/` — per-module services + types.
+- `src/hooks/inner-meeting/` — Realtime, Presence, forms-list, and contact-mapping hooks.
+- `src/components/inner-meeting/`, `src/components/client-brief/` — per-module React.
+
+## Non-obvious things
+
+- **The `contacts` table is load-bearing for auth.** Empty `contacts` = nobody can log in (unless `NEXT_PUBLIC_DEV_MODE=true`). Seed it first.
+- **`users` vs `contacts`.** `users` = pptmaker's own per-account state (admin roles, doc ownership). `contacts` = the Leaders employee directory used for whitelisting + participant selection in inner-meeting. They are not the same, do not merge.
+- **Realtime publication** — `inner_meeting_forms` and `forms` must be in the `supabase_realtime` publication for collaborative editing (the migration does this).
+- **Webhook sanitization** — `completeForm` in `src/lib/inner-meeting/formService.ts` replaces `"` with `'` in free-text fields; the downstream Make.com scenario breaks on embedded double quotes. Preserve that behaviour.
+- **`ClientFolderSelector` intentionally ignores `client_briefs`.** In legacy innerMeeting it filtered to folders that *had a brief but no meeting yet*. Here the `client_briefs` table is not used (chatbrief was retired) so the selector just filters out folders that already have an inner-meeting. If you reintroduce client_briefs, restore the filter.
+- **Reminders cron needs a real webhook.** `REMINDERS_WEBHOOK_URL` is a placeholder; until you set it, the cron silently no-ops on the webhook call and still returns the reminders payload (useful for manual inspection at `/api/cron/reminders`).
+- **`dashboard/page.tsx` hard-codes the 5 rubrics.** The `document_types` table is the source of truth for the API side (link tracking + target URLs for `/send/[slug]`), not the dashboard UI. If you add a rubric: update both places.
