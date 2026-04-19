@@ -2,6 +2,73 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚡ If you're resuming this project — start here
+
+Everything below this section is reference. This section is **what to do right now**.
+
+### Current state (checkpoint as of last commit `69d8898`)
+- All code for phases 0–6 is merged to `main` and deployed on Vercel.
+- The Vercel project is `idosegev23s-projects/leaders-platform`. GitHub remote is `git@github.com:Idosegev23/leaders-platform.git`.
+- Env vars are pushed to all three Vercel environments. `NEXT_PUBLIC_DEV_MODE=true` is still active across all envs (so auth is effectively bypassed until the user flips it).
+- Supabase MCP server is wired up in [.mcp.json](.mcp.json) for project ref `fhgggqnaplshwbrzgima`. The user must authenticate it once via `claude /mcp` in a regular terminal (not an IDE session). After that, you have direct SQL/DB tools.
+
+### Immediate open items (in priority order)
+
+1. **Run the SQL migration.** [supabase/migrations/20260419_init_hub_schema.sql](supabase/migrations/20260419_init_hub_schema.sql) has not been applied yet. Without it:
+   - `document_links` / `document_types` / `contacts` / `forms` / `inner_meeting_forms` / `form_participants` / `form_activity_logs` / `client_folders` don't exist
+   - The dashboard's "recent activity" query returns nothing (it's wrapped in try/catch, so the UI survives)
+   - `/inner-meeting` and `/send/client-brief` can't create rows
+   - The auth whitelist check against `contacts` returns "not in whitelist" for everyone — but it's bypassed because `NEXT_PUBLIC_DEV_MODE=true`
+   - **How to run:** if the Supabase MCP is authenticated, use the `apply_migration` / `execute_sql` tool with the contents of that file. Otherwise direct the user to [the SQL editor](https://supabase.com/dashboard/project/fhgggqnaplshwbrzgima/sql/new).
+
+2. **Seed the `contacts` table.** After migration, run `node scripts/seed-contacts.mjs`. This requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` (it's already there from the pptmaker fork). The CSV source is `scripts/contacts.csv`.
+
+3. **Debug "בריף הלקוח" (client-brief) card — user reports it "not active" (לא פעיל).** Likely causes to investigate in order:
+   - `document_types` row for `client-brief` doesn't exist yet (fix: run the migration, seeds the row automatically via `ON CONFLICT DO NOTHING`).
+   - The `/send/client-brief` route loads but the `SELECT` on `document_types` returns null because the migration hasn't run — resulting in `notFound()`.
+   - The dashboard card is linked correctly (`targetUrl: '/send/client-brief'` in [src/app/dashboard/page.tsx](src/app/dashboard/page.tsx)), so it's not a UI wiring issue — it's almost certainly "DB not ready".
+   - Verify by hitting `/send/client-brief` after migration. If it still fails, check `/api/links/route.ts` which queries `document_types.slug = 'client-brief'`.
+
+4. **Supabase Auth URL Configuration — user already completed.** Google Cloud redirect URI already set to `https://fhgggqnaplshwbrzgima.supabase.co/auth/v1/callback` under the `LDRSAGENT` OAuth client.
+
+5. **Remaining manual setup (optional / future):**
+   - `REMINDERS_WEBHOOK_URL` → Make.com scenario for cron reminders (the route silently no-ops without it).
+   - `CRON_SECRET` → gate `/api/cron/reminders` endpoint.
+   - `ADMIN_EMAILS` → auto-promote matching emails to `users.role='admin'`.
+   - Flip `NEXT_PUBLIC_DEV_MODE` to `false` in production when ready to enforce the whitelist.
+
+### Handy commands for the next session
+
+```bash
+# Verify env on Vercel
+vercel env ls
+
+# Type-check (fast)
+npx tsc --noEmit
+
+# Local dev
+npm run dev
+
+# Seed contacts after the migration has been applied
+node scripts/seed-contacts.mjs
+
+# Check git state
+git status && git log --oneline -5
+```
+
+### Phase 7 (cleanup) is still pending
+The user approved deletion of `chatbrief` and `qoute1` "later". The full deletion list:
+- `/Users/idosegev/Downloads/TriRoars/Leaders/chatbrief`
+- `/Users/idosegev/Downloads/TriRoars/Leaders/qoute1` (also `qoute` — it's a stale HTML/JS preview, no DB)
+- `/Users/idosegev/Downloads/TriRoars/Leaders/innerMeeting` (port verified working first)
+- `/Users/idosegev/Downloads/TriRoars/Leaders/costumerbrief` (port verified working first)
+- `/Users/idosegev/Downloads/TriRoars/Leaders/docs-hub` (functionality absorbed into leaders-platform dashboard + /send/[slug])
+- Do not delete `pptmaker` — it still contains the original code leaders-platform was forked from; delete only after leaders-platform is in stable production and the user confirms.
+
+**IMPORTANT:** All destructive deletes need explicit user confirmation. Never `rm -rf` legacy apps without a "go ahead" in the current session.
+
+---
+
 ## What this repo is
 
 `leaders-platform` is the unified internal platform for Leaders — **one Next.js app, one DB, one Google OAuth** — replacing a constellation of small apps (`innerMeeting`, `costumerbrief`/`leadersBrief`, `docs-hub`, `chatbrief`, `qoute1`) that each had their own auth and database.
