@@ -1,0 +1,47 @@
+[
+  {
+    "model": "gpt-5.2-pro-2025-12-11",
+    "label": "GPT-5.2 Pro",
+    "provider": "openai",
+    "durationMs": 83355,
+    "success": true,
+    "brandName": "צ'רי",
+    "goalsCount": 1
+  },
+  {
+    "model": "gpt-5.2-2025-12-11",
+    "label": "GPT-5.2",
+    "provider": "openai",
+    "durationMs": 17872,
+    "success": true,
+    "brandName": "צ'רי",
+    "goalsCount": 1
+  },
+  {
+    "model": "gemini-3.1-pro-preview",
+    "label": "Gemini 3.1 Pro",
+    "provider": "gemini",
+    "durationMs": 73916,
+    "success": true,
+    "brandName": "צ'רי CHERY",
+    "goalsCount": 2
+  },
+  {
+    "model": "gemini-3-flash-preview",
+    "label": "Gemini 3 Flash",
+    "provider": "gemini",
+    "durationMs": 15147,
+    "success": true,
+    "brandName": "צ'רי CHERY",
+    "goalsCount": 3
+  },
+  {
+    "model": "claude-sonnet-4-6",
+    "label": "Claude Sonnet 4.6",
+    "provider": "claude",
+    "durationMs": 51477,
+    "success": true,
+    "brandName": "צ'רי CHERY",
+    "goalsCount": 5
+  }
+]

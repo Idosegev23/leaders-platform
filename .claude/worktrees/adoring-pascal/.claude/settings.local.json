@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm ls:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx next build:*)",
+      "Bash(node -e:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git stash:*)",
+      "Bash(git push:*)",
+      "Bash(git status:*)",
+      "Bash(git -C /Users/idosegev/Downloads/TriRoars/Leaders/pptmaker diff --stat)",
+      "Bash(git -C /Users/idosegev/Downloads/TriRoars/Leaders/pptmaker log --oneline -5)",
+      "Bash(git -C:*)",
+      "WebFetch(domain:skywork.ai)",
+      "WebFetch(domain:docs.cloud.google.com)",
+      "Bash(npx tsx:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "WebFetch(domain:docs.scrapecreators.com)",
+      "WebFetch(domain:scrapecreators.com)"
+    ]
+  }
+}
