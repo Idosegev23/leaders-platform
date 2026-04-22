@@ -15,7 +15,7 @@ export default function HomePage() {
         />
 
         <p className="mt-10 text-[11px] md:text-[12px] tracking-[0.5em] uppercase text-white/40 font-rubik">
-          הפלטפורמה של לידרס
+          Leaders <span className="mx-1 text-white/60">x</span> OS
         </p>
 
         <Link

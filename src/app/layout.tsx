@@ -30,7 +30,7 @@ const cormorant = Cormorant_Garamond({
 })
 
 export const metadata: Metadata = {
-  title: 'Leaders OS — מערכת ההפעלה של לידרס',
+  title: 'Leaders x OS',
   description: 'מבריף ועד השקה. מערכת פנימית של לידרס לניהול זרימת העבודה עם לקוחות.',
 }
 
