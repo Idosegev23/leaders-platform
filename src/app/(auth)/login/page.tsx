@@ -23,7 +23,7 @@ function LoginContent() {
         provider: 'google',
         options: {
           redirectTo: `${window.location.origin}/api/auth/callback?redirect=${encodeURIComponent(redirectTo)}`,
-          scopes: 'openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar.events',
+          scopes: 'openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.send',
           queryParams: {
             access_type: 'offline',
             prompt: 'select_account consent',

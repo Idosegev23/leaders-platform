@@ -39,13 +39,36 @@ export async function GET(request: Request) {
       }
     )
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    const { data: sessionData, error } = await supabase.auth.exchangeCodeForSession(code)
 
     if (!error) {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user?.email) {
           const emailLower = user.email.toLowerCase()
+
+          // Persist Google refresh_token so the reminders cron can send mail
+          // as the user later. Supabase populates provider_refresh_token only
+          // when access_type=offline + prompt=consent are set on signInWithOAuth.
+          const providerRefreshToken = sessionData?.session?.provider_refresh_token
+          const providerAccessToken = sessionData?.session?.provider_token
+          if (providerRefreshToken) {
+            const tokenClient = createClient(
+              process.env.NEXT_PUBLIC_SUPABASE_URL!,
+              process.env.SUPABASE_SERVICE_ROLE_KEY!,
+            )
+            await tokenClient
+              .from('user_google_tokens')
+              .upsert(
+                {
+                  user_id: user.id,
+                  refresh_token: providerRefreshToken,
+                  access_token: providerAccessToken ?? null,
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: 'user_id' },
+              )
+          }
 
           // Leaders whitelist check — email must exist in `contacts`.
           // Bypassed in dev mode so local development doesn't require seeded data.
