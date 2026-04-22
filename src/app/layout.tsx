@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { Heebo, Assistant, Rubik } from 'next/font/google'
+import { Heebo, Assistant, Rubik, Cormorant_Garamond } from 'next/font/google'
 import { Toaster } from 'sonner'
 import './globals.css'
 
@@ -21,9 +21,17 @@ const rubik = Rubik({
   display: 'swap',
 })
 
+const cormorant = Cormorant_Garamond({
+  subsets: ['latin'],
+  weight: ['300', '400', '500'],
+  style: ['normal', 'italic'],
+  variable: '--font-cormorant',
+  display: 'swap',
+})
+
 export const metadata: Metadata = {
-  title: 'Leaders AI — מצגות קריאטיב מבריף',
-  description: 'סוכן AI שחוקר, מנסח ומעצב מצגות הצעת מחיר פרימיום למותגים',
+  title: 'Leaders OS — מערכת ההפעלה של לידרס',
+  description: 'מבריף ועד השקה. מערכת פנימית של לידרס לניהול זרימת העבודה עם לקוחות.',
 }
 
 export default function RootLayout({
@@ -32,7 +40,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="he" dir="rtl" className={`${heebo.variable} ${assistant.variable} ${rubik.variable}`}>
+    <html
+      lang="he"
+      dir="rtl"
+      className={`${heebo.variable} ${assistant.variable} ${rubik.variable} ${cormorant.variable}`}
+    >
       <body className="font-heebo antialiased bg-background text-foreground min-h-screen">
         {children}
         <Toaster dir="rtl" position="top-center" richColors closeButton />

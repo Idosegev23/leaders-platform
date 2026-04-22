@@ -404,3 +404,32 @@
 }
 
 
+
+/* -------------------------------------------------------------- */
+/* Landing-page micro-animations (used in src/app/page.tsx tiles) */
+/* -------------------------------------------------------------- */
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.95; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(1.35); }
+}
+
+@keyframes drift-line {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(4px); }
+}
+
+@keyframes orbit {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes horizon-sun {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+.animate-pulse-soft   { animation: pulse-soft 2.8s ease-in-out infinite; }
+.animate-drift-line   { animation: drift-line 6s ease-in-out infinite; transform-origin: center; }
+.animate-orbit        { animation: orbit 14s linear infinite; }
+.animate-horizon-sun  { animation: horizon-sun 5s ease-in-out infinite; transform-origin: center; }

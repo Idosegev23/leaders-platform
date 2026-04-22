@@ -13,6 +13,7 @@ const config: Config = {
         heebo: ['var(--font-heebo)', 'sans-serif'],
         assistant: ['var(--font-assistant)', 'sans-serif'],
         rubik: ['var(--font-rubik)', 'sans-serif'],
+        cormorant: ['var(--font-cormorant)', 'Times New Roman', 'serif'],
       },
       colors: {
         border: 'rgb(var(--border) / <alpha-value>)',
