@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import { formatDate } from '@/lib/utils'
 import { isDevMode, DEV_USER } from '@/lib/auth/dev-mode'
 
@@ -9,84 +8,52 @@ export const dynamic = 'force-dynamic'
 type Rubric = {
   slug: string
   name: string
+  english: string
   description: string
   targetUrl: string
-  gradient: string
   flowType: 'direct_form' | 'send_link' | 'coming_soon'
-  icon: React.ReactNode
 }
-
-const BriefIcon = (
-  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-  </svg>
-)
-const MeetingIcon = (
-  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-10a4 4 0 110 8 4 4 0 010-8zm6 4a3 3 0 110 6 3 3 0 010-6zM5 11a3 3 0 110 6 3 3 0 010-6z" />
-  </svg>
-)
-const QuoteIcon = (
-  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l9-4 9 4M3 8v10l9 4 9-4V8M3 8l9 4m0 0l9-4m-9 4v10" />
-  </svg>
-)
-const PresentationIcon = (
-  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M5 4v11a2 2 0 002 2h10a2 2 0 002-2V4M9 21l3-4 3 4" />
-  </svg>
-)
-const SummaryIcon = (
-  <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2a2 2 0 012-2h2a2 2 0 012 2v2M7 7h10M7 11h4m-1 10h6a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-  </svg>
-)
 
 const RUBRICS: Rubric[] = [
   {
     slug: 'client-brief',
     name: 'בריף לקוח',
-    description: 'שליחת טופס בריף ללקוח ומעקב אחרי המילוי',
+    english: 'Client Brief',
+    description: 'שליחת טופס בריף ללקוח',
     targetUrl: '/send/client-brief',
     flowType: 'send_link',
-    gradient: 'from-rose-900 to-red-800 hover:from-rose-800 hover:to-red-700',
-    icon: BriefIcon,
   },
   {
     slug: 'inner-meeting',
     name: 'פגישת התנעה',
-    description: 'מסמך התנעה פנימי לאחר קבלת הבריף מהלקוח',
+    english: 'Kick-off',
+    description: 'מסמך פנימי אחרי קבלת הבריף',
     targetUrl: '/inner-meeting',
     flowType: 'direct_form',
-    gradient: 'from-amber-900 to-orange-800 hover:from-amber-800 hover:to-orange-700',
-    icon: MeetingIcon,
   },
   {
     slug: 'price-quote',
     name: 'הצעת מחיר',
-    description: 'יצירת הצעת מחיר עם טבלת שירותים ותמחור',
+    english: 'Price Quote',
+    description: 'טבלת שירותים ותמחור',
     targetUrl: '/price-quote',
     flowType: 'direct_form',
-    gradient: 'from-emerald-900 to-teal-800 hover:from-emerald-800 hover:to-teal-700',
-    icon: QuoteIcon,
   },
   {
     slug: 'creative-presentation',
     name: 'מצגת קריאייטיבית',
-    description: 'הסוכן בונה הצעה מלאה ומצגת מהבריף',
+    english: 'Creative Deck',
+    description: 'הסוכן בונה הצעה מלאה מהבריף',
     targetUrl: '/create-proposal',
     flowType: 'direct_form',
-    gradient: 'from-indigo-900 to-purple-800 hover:from-indigo-800 hover:to-purple-700',
-    icon: PresentationIcon,
   },
   {
     slug: 'summary-presentation',
     name: 'מצגת סיכום',
+    english: 'Summary',
     description: 'סיכום קמפיין בסוף הפעילות',
     targetUrl: '/summary',
     flowType: 'coming_soon',
-    gradient: 'from-slate-800 to-slate-700',
-    icon: SummaryIcon,
   },
 ]
 
@@ -108,9 +75,10 @@ export default async function DashboardPage() {
     firstName = DEV_USER.full_name?.split(' ')[0] || 'משתמש'
   } else {
     const supabase = await createClient()
-    const { data: { user: authUser } } = await supabase.auth.getUser()
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser()
 
-    // Profile (pptmaker's users table — name/avatar)
     const { data: prof } = await supabase
       .from('users')
       .select('full_name')
@@ -118,9 +86,6 @@ export default async function DashboardPage() {
       .single()
     firstName = prof?.full_name?.split(' ')[0] || authUser?.email?.split('@')[0] || 'משתמש'
 
-    // Unified recent activity: merge pptmaker's `documents` with hub's `document_links`.
-    // Both queries are best-effort — a missing table (migration not yet run) should not
-    // blow up the dashboard.
     const [docsRes, linksRes] = await Promise.all([
       supabase
         .from('documents')
@@ -139,7 +104,7 @@ export default async function DashboardPage() {
     const docsItems: RecentItem[] = (docsRes.data ?? []).map((d) => ({
       id: d.id,
       title: d.title || '(ללא שם)',
-      source: 'documents',
+      source: 'documents' as const,
       status: d.status ?? 'draft',
       created_at: d.created_at,
       href: d.type === 'quote' ? `/price-quote?id=${d.id}` : `/edit/${d.id}`,
@@ -165,108 +130,121 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div dir="rtl" className="max-w-6xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-10">
-        <p className="text-sm text-muted-foreground mb-1">Leaders Platform</p>
-        <h1 className="text-3xl font-bold mb-1">שלום, {firstName}</h1>
-        <p className="text-muted-foreground">בחר רובריקה כדי ליצור מסמך חדש, או המשך מסמך קיים למטה</p>
-      </div>
+    <div dir="rtl" className="max-w-7xl mx-auto px-4 md:px-8 py-12 md:py-16 text-white">
+      {/* Greeting */}
+      <header className="mb-16 md:mb-24">
+        <p className="text-[10px] tracking-[0.5em] uppercase text-white/40 font-rubik mb-5">
+          Leaders <span className="mx-1 text-white/60">x</span> OS
+        </p>
+        <h1 className="text-[34px] md:text-[44px] leading-[1.05] font-light tracking-tight">
+          שלום, <span className="font-medium">{firstName}</span>.
+        </h1>
+        <p className="mt-3 text-[13px] md:text-[14px] text-white/45 max-w-lg">
+          בחר רובריקה כדי להתחיל, או המשך מסמך קיים מרשימת הפעילות.
+        </p>
+      </header>
 
-      {/* Rubrics grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
-        {RUBRICS.map((r) => {
+      {/* Rubrics — 5 minimalist tiles */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-20 md:mb-28">
+        {RUBRICS.map((r, idx) => {
+          const num = String(idx + 1).padStart(2, '0')
           const isComingSoon = r.flowType === 'coming_soon'
-          const card = (
+          const inner = (
             <div
-              className={`relative p-6 h-full rounded-xl border-0 text-white bg-gradient-to-l ${r.gradient} transition-all duration-300 ${
+              className={`group relative h-48 md:h-56 p-6 ring-1 ring-white/10 rounded-sm bg-white/[0.02] transition-all duration-300 ${
                 isComingSoon
-                  ? 'opacity-60 cursor-not-allowed'
-                  : 'cursor-pointer group-hover:-translate-y-1 group-hover:shadow-xl'
+                  ? 'opacity-40'
+                  : 'hover:bg-white/[0.05] hover:ring-white/25 hover:-translate-y-[2px]'
               }`}
             >
-              {isComingSoon && (
-                <span className="absolute top-3 left-3 text-[10px] tracking-[0.2em] uppercase px-2 py-0.5 rounded-full bg-white/10 text-white/70">
-                  בבנייה
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] tracking-[0.32em] uppercase text-white/40 font-rubik">
+                  {num}
                 </span>
-              )}
-              <div className="flex items-start gap-4">
-                <div className="p-3 rounded-xl bg-white/10 shrink-0">{r.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-lg font-bold mb-1">{r.name}</h3>
-                  <p className="text-white/70 text-sm leading-relaxed">{r.description}</p>
-                </div>
                 {!isComingSoon && (
-                  <span className="text-white/60 group-hover:text-white text-lg shrink-0">&larr;</span>
+                  <span className="text-white/30 text-base transition-colors group-hover:text-white">
+                    ←
+                  </span>
                 )}
+                {isComingSoon && (
+                  <span className="text-[9px] tracking-[0.32em] uppercase text-white/30 font-rubik">
+                    בקרוב
+                  </span>
+                )}
+              </div>
+              <div className="absolute bottom-6 start-6 end-6">
+                <p className="text-[19px] md:text-[20px] font-medium leading-tight">{r.name}</p>
+                <p className="mt-1 font-cormorant italic text-[13px] text-white/45">{r.english}</p>
+                <p className="mt-3 text-[11px] text-white/40 leading-relaxed line-clamp-2">
+                  {r.description}
+                </p>
               </div>
             </div>
           )
           return isComingSoon ? (
-            <div key={r.slug} className="group block" aria-disabled>
-              {card}
+            <div key={r.slug} aria-disabled>
+              {inner}
             </div>
           ) : (
-            <Link key={r.slug} href={r.targetUrl} className="group block">
-              {card}
+            <Link key={r.slug} href={r.targetUrl} className="block">
+              {inner}
             </Link>
           )
         })}
-      </div>
+      </section>
 
-      {/* Recent activity */}
-      <Card>
-        <CardHeader>
-          <CardTitle>פעילות אחרונה</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recent.length > 0 ? (
-            <div className="space-y-1">
-              {recent.map((item) => (
+      {/* Recent activity — thin list */}
+      <section>
+        <div className="flex items-center gap-4 mb-6">
+          <span className="text-[10px] tracking-[0.32em] uppercase text-white/40 font-rubik">
+            פעילות אחרונה
+          </span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+
+        {recent.length === 0 ? (
+          <p className="text-[13px] text-white/40 py-10 text-center">עדיין אין פעילות</p>
+        ) : (
+          <ul className="divide-y divide-white/5">
+            {recent.map((item) => (
+              <li key={`${item.source}-${item.id}`}>
                 <Link
-                  key={`${item.source}-${item.id}`}
                   href={item.href}
-                  className="flex items-center justify-between p-3 rounded-lg hover:bg-muted transition-colors"
+                  className="flex items-center justify-between py-4 px-2 -mx-2 rounded-sm hover:bg-white/[0.03] transition-colors"
                 >
-                  <div className="flex items-center gap-4 min-w-0">
-                    <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
-                      {item.title.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">{item.title}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.typeLabel} · {formatDate(item.created_at)}
-                      </p>
-                    </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15px] font-medium truncate">{item.title}</p>
+                    <p className="mt-1 text-[10px] tracking-[0.18em] uppercase text-white/40 font-rubik">
+                      {item.typeLabel} · {formatDate(item.created_at)}
+                    </p>
                   </div>
-                  <StatusBadge status={item.status} source={item.source} />
+                  <StatusDot status={item.status} />
                 </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-center text-muted-foreground py-10 text-sm">עדיין אין פעילות</p>
-          )}
-        </CardContent>
-      </Card>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   )
 }
 
-function StatusBadge({ status, source }: { status: string; source: RecentItem['source'] }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    draft: { label: 'טיוטה', cls: 'bg-slate-100 text-slate-700' },
-    completed: { label: 'הושלם', cls: 'bg-green-100 text-green-700' },
-    archived: { label: 'בארכיון', cls: 'bg-zinc-100 text-zinc-600' },
-    pending: { label: 'נשלח', cls: 'bg-amber-100 text-amber-700' },
-    opened: { label: 'נפתח', cls: 'bg-blue-100 text-blue-700' },
-    generated: { label: 'מוכן', cls: 'bg-emerald-100 text-emerald-700' },
+function StatusDot({ status }: { status: string }) {
+  const map: Record<string, { label: string; color: string }> = {
+    draft:     { label: 'טיוטה',   color: 'bg-white/40' },
+    completed: { label: 'הושלם',   color: 'bg-brand-accent' },
+    pending:   { label: 'נשלח',    color: 'bg-brand-gold' },
+    opened:    { label: 'נפתח',    color: 'bg-white' },
+    archived:  { label: 'בארכיון', color: 'bg-white/20' },
+    generated: { label: 'מוכן',    color: 'bg-brand-accent' },
   }
-  const entry = map[status] ?? { label: status, cls: 'bg-gray-100 text-gray-600' }
-  const suffix = source === 'document_links' ? ' · לינק' : ''
+  const entry = map[status] ?? { label: status, color: 'bg-white/30' }
   return (
-    <span className={`px-2.5 py-1 rounded-full text-xs font-medium shrink-0 ${entry.cls}`}>
-      {entry.label}
-      {suffix}
+    <span className="flex items-center gap-2 shrink-0 ms-4">
+      <span className={`h-1.5 w-1.5 rounded-full ${entry.color}`} />
+      <span className="text-[10px] tracking-[0.32em] uppercase text-white/50 font-rubik">
+        {entry.label}
+      </span>
     </span>
   )
 }

@@ -8,43 +8,30 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  // In dev mode, use mock user
   if (isDevMode) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-[#0a0a0f] text-white">
         <DashboardNav user={DEV_USER} />
-        <main className="pt-16">
-          {children}
-        </main>
+        <main className="pt-16">{children}</main>
       </div>
     )
   }
 
   const supabase = await createClient()
-  
-  const { data: { user } } = await supabase.auth.getUser()
-  
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
   if (!user) {
     redirect('/login')
   }
 
-  // Get user profile
-  const { data: profile } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+  const { data: profile } = await supabase.from('users').select('*').eq('id', user.id).single()
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#0a0a0f] text-white">
       <DashboardNav user={profile} />
-      <main className="pt-16">
-        {children}
-      </main>
+      <main className="pt-16">{children}</main>
     </div>
   )
 }
-
-
-
-
