@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
+import { CLICKUP_STATUS_TO_LEAD, LEAD_STATUS_TO_CLICKUP } from '@/lib/clickup/client'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -139,17 +140,76 @@ export async function POST(request: Request) {
   const actor = pickActor(payload)
   const summary = buildSummary(payload, actor.name)
 
-  const { error } = await supabase.from('activity_log').insert({
-    source: 'clickup',
-    source_ref: taskId,
-    action_type: payload.event,
-    summary,
-    entity_type: entityType,
-    entity_id: entityId,
-    actor_email: actor.email,
-    actor_name: actor.name,
-    payload,
-  })
+  // Reverse-sync: if this is a status change and we know the lead,
+  // map the new ClickUp status back to our lead lifecycle. Loop guard:
+  // skip if the NEW ClickUp status is already the forward-map of the
+  // lead's CURRENT status (meaning this event was triggered by us).
+  let reverseSyncApplied: { from: string; to: string } | null = null
+  if (entityType === 'lead' && entityId && payload.event === 'taskStatusUpdated') {
+    const first = payload.history_items?.[0]
+    const newClickUpStatus = typeof first?.after === 'object' && first?.after
+      ? ((first.after as { status?: string }).status ?? null)
+      : typeof first?.after === 'string' ? first.after : null
+
+    if (newClickUpStatus) {
+      const nextLeadStatus = CLICKUP_STATUS_TO_LEAD[newClickUpStatus]
+      if (nextLeadStatus) {
+        const { data: leadRow } = await supabase
+          .from('leads')
+          .select('status')
+          .eq('id', entityId)
+          .maybeSingle()
+
+        const currentLeadStatus = leadRow?.status as keyof typeof LEAD_STATUS_TO_CLICKUP | undefined
+        const forwardEquivalent = currentLeadStatus ? LEAD_STATUS_TO_CLICKUP[currentLeadStatus] : null
+        const isLoopback = forwardEquivalent === newClickUpStatus
+
+        if (!isLoopback && nextLeadStatus !== currentLeadStatus) {
+          const patch: Record<string, unknown> = { status: nextLeadStatus }
+          if (nextLeadStatus === 'contacted' || nextLeadStatus === 'qualified') {
+            patch.contacted_at = new Date().toISOString()
+          }
+          if (nextLeadStatus === 'converted') {
+            patch.converted_at = new Date().toISOString()
+          }
+          await supabase.from('leads').update(patch).eq('id', entityId)
+          reverseSyncApplied = {
+            from: currentLeadStatus ?? 'unknown',
+            to: nextLeadStatus,
+          }
+        }
+      }
+    }
+  }
+
+  const logRows: Array<Record<string, unknown>> = [
+    {
+      source: 'clickup',
+      source_ref: taskId,
+      action_type: payload.event,
+      summary,
+      entity_type: entityType,
+      entity_id: entityId,
+      actor_email: actor.email,
+      actor_name: actor.name,
+      payload,
+    },
+  ]
+  if (reverseSyncApplied) {
+    logRows.push({
+      source: 'leaders_ui',
+      source_ref: taskId,
+      action_type: 'lead_status_synced_from_clickup',
+      summary: `סטטוס ליד עודכן אוטומטית מ־"${reverseSyncApplied.from}" ל־"${reverseSyncApplied.to}" (סנכרון מ-ClickUp)`,
+      entity_type: 'lead',
+      entity_id: entityId,
+      actor_email: actor.email,
+      actor_name: actor.name,
+      payload: reverseSyncApplied,
+    })
+  }
+
+  const { error } = await supabase.from('activity_log').insert(logRows)
 
   if (error) {
     console.error('[clickup-webhook] activity_log insert failed:', error)
@@ -160,6 +220,7 @@ export async function POST(request: Request) {
     ok: true,
     linked: entityType !== null,
     entity: entityType ? { type: entityType, id: entityId } : null,
+    reverse_sync: reverseSyncApplied,
   })
 }
 

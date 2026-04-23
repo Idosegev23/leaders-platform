@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createServiceClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/links
- * Create a new document_link. Body: { slug, client_email?, client_name? }
+ * Create a new document_link. Body: { slug, client_email?, client_name?, lead_id? }
  * Requires authenticated employee session.
+ *
+ * If `lead_id` is supplied, the link is linked to that lead explicitly.
+ * Otherwise, we try to auto-link by matching `client_email` against
+ * `leads.email` (case-insensitive).
  */
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -19,11 +24,12 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { slug, client_email, client_name, metadata } = body as {
+  const { slug, client_email, client_name, metadata, lead_id } = body as {
     slug?: string
     client_email?: string | null
     client_name?: string | null
     metadata?: Record<string, unknown>
+    lead_id?: string | null
   }
   if (!slug) {
     return NextResponse.json({ error: 'slug is required' }, { status: 400 })
@@ -38,6 +44,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unknown document type' }, { status: 404 })
   }
 
+  // Resolve which lead this link belongs to: explicit > auto-match by email.
+  let resolvedLeadId: string | null = lead_id ?? null
+  if (!resolvedLeadId && client_email) {
+    const service = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false } },
+    )
+    const { data: matchedLead } = await service
+      .from('leads')
+      .select('id')
+      .ilike('email', client_email)
+      .limit(1)
+      .maybeSingle()
+    if (matchedLead?.id) resolvedLeadId = matchedLead.id
+  }
+
   const { data, error } = await supabase
     .from('document_links')
     .insert({
@@ -46,6 +69,7 @@ export async function POST(request: Request) {
       created_by_name: user.user_metadata?.full_name ?? user.email,
       client_email: client_email || null,
       client_name: client_name || null,
+      lead_id: resolvedLeadId,
       metadata: {
         created_by_avatar: user.user_metadata?.avatar_url ?? null,
         ...(metadata ?? {}),
@@ -59,13 +83,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  // If the link is tied to a lead, stamp activity_log so the lead's
+  // timeline picks it up (feeds ticker + /leads/[id]).
+  if (resolvedLeadId) {
+    const service = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false } },
+    )
+    const actorName = user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? null
+    await service.from('activity_log').insert({
+      source: 'leaders_ui',
+      action_type: `${docType.name}_sent`,
+      summary: `${actorName ?? 'משתמש'} שלח ${docType.name} ל־${client_name ?? client_email ?? 'לקוח'}`,
+      entity_type: 'lead',
+      entity_id: resolvedLeadId,
+      actor_email: user.email,
+      actor_name: actorName,
+      payload: {
+        document_link_id: data.id,
+        document_type_slug: docType.name,
+        token: data.token,
+      },
+    })
+  }
+
   const origin = request.headers.get('origin') ?? new URL(request.url).origin
   const fullLink =
     docType.flow_type === 'external'
       ? docType.target_url
       : `${origin}${docType.target_url}?token=${data.token}`
 
-  return NextResponse.json({ ...data, full_link: fullLink })
+  return NextResponse.json({ ...data, full_link: fullLink, linked_lead_id: resolvedLeadId })
 }
 
 /**
