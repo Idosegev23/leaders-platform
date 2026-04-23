@@ -159,7 +159,13 @@ export default function PriceQuotePage() {
     <div dir="rtl" className="min-h-screen bg-gray-50">
       {/* Top bar */}
       <div className="bg-white border-b px-6 py-4 flex items-center justify-between sticky top-0 z-50">
-        <h1 className="text-xl font-bold text-gray-800">הצעת מחיר</h1>
+        <div className="flex items-center gap-4">
+          <a href="/dashboard" className="text-sm text-gray-500 hover:text-gray-800 transition-colors">
+            ← חזרה לדשבורד
+          </a>
+          <div className="h-4 w-px bg-gray-300" />
+          <h1 className="text-xl font-bold text-gray-800">הצעת מחיר</h1>
+        </div>
         <div className="flex gap-3">
           <button
             onClick={refreshPreview}
