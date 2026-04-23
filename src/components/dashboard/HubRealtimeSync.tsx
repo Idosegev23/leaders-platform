@@ -30,6 +30,7 @@ export function HubRealtimeSync() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inner_meeting_forms' },scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'form_activity_logs' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' },          scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_log' },       scheduleRefresh)
       .subscribe()
 
     return () => {
