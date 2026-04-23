@@ -55,18 +55,29 @@ export async function GET(
 
 /**
  * PATCH /api/links/{token}
- * Body: { status: 'opened' | 'completed' | 'archived' }
- * Public for 'completed' (so the client-facing form can finalize). For
- * 'archived' we require the creator's session.
+ * Body:
+ *   - { status: 'opened' | 'completed' | 'archived' }
+ *   - { progress: { step: number, total: number } }  // brief fill progress
+ * 'archived' requires the creator's session. Other mutations are public
+ * (the client-facing form doesn't have a Supabase session).
  */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params
-  const body = await request.json()
-  const status = body?.status as 'opened' | 'completed' | 'archived' | undefined
-  if (!status || !['opened', 'completed', 'archived'].includes(status)) {
+  const body = await request.json().catch(() => null) as {
+    status?: 'opened' | 'completed' | 'archived'
+    progress?: { step: number; total: number }
+  } | null
+
+  if (!body) {
+    return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
+  }
+
+  const { status, progress } = body
+
+  if (status && !['opened', 'completed', 'archived'].includes(status)) {
     return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
   }
 
@@ -87,9 +98,35 @@ export async function PATCH(
   }
 
   const supabase = publicClient()
-  const patch: Record<string, unknown> = { status }
-  if (status === 'opened') patch.opened_at = new Date().toISOString()
-  if (status === 'completed') patch.completed_at = new Date().toISOString()
+  const patch: Record<string, unknown> = {}
+
+  if (status) {
+    patch.status = status
+    if (status === 'opened')    patch.opened_at    = new Date().toISOString()
+    if (status === 'completed') patch.completed_at = new Date().toISOString()
+  }
+
+  // Merge progress into metadata without clobbering other keys.
+  if (progress && typeof progress.step === 'number' && typeof progress.total === 'number') {
+    const { data: existing } = await supabase
+      .from('document_links')
+      .select('metadata')
+      .eq('token', token)
+      .maybeSingle()
+    const currentMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+    patch.metadata = {
+      ...currentMeta,
+      progress: {
+        step: progress.step,
+        total: progress.total,
+        updated_at: new Date().toISOString(),
+      },
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: 'No-op' }, { status: 400 })
+  }
 
   const { error } = await supabase.from('document_links').update(patch).eq('token', token)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

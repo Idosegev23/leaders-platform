@@ -146,6 +146,16 @@ function BriefContent() {
   const handleStepChange = (step: number) => {
     setCurrentStep(step)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+    // Publish progress so the Leaders hub can show "Client is on step N/M".
+    if (token) {
+      fetch(`/api/links/${token}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          progress: { step, total: activeFormSteps.length },
+        }),
+      }).catch(() => {})
+    }
   }
 
   const handleNextStep = async (step: number) => {
