@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@supabase/supabase-js'
 import { LeadsRealtimeSync } from '@/components/leads/LeadsRealtimeSync'
 import { LeadStatusControl } from '@/components/leads/LeadStatusControl'
@@ -155,7 +156,12 @@ function LeadRow({ lead }: { lead: Lead }) {
 
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-3 flex-wrap">
-          <h2 className="text-[17px] md:text-[18px] font-medium">{lead.name}</h2>
+          <Link
+            href={`/leads/${lead.id}`}
+            className="text-[17px] md:text-[18px] font-medium hover:text-brand-accent transition-colors"
+          >
+            {lead.name}
+          </Link>
           <span className="text-[10px] tracking-[0.24em] uppercase text-white/35 font-rubik">
             {relativeTime(lead.created_at)}
             {lead.source && <> · {lead.source}</>}

@@ -433,3 +433,21 @@
 .animate-drift-line   { animation: drift-line 6s ease-in-out infinite; transform-origin: center; }
 .animate-orbit        { animation: orbit 14s linear infinite; }
 .animate-horizon-sun  { animation: horizon-sun 5s ease-in-out infinite; transform-origin: center; }
+
+/* -------------------------------------------------------------- */
+/* Live Hub ticker (marquee) — src/components/layout/HubTicker.tsx */
+/* -------------------------------------------------------------- */
+
+@keyframes ticker-marquee {
+  /* RTL: content starts off-screen on the right and flows left.
+     We duplicate the list in the component, so 50% scroll = 1 full loop. */
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0%); }
+}
+
+.animate-ticker-marquee {
+  animation: ticker-marquee 90s linear infinite;
+  will-change: transform;
+}
+
+.pause-on-hover:hover { animation-play-state: paused; }

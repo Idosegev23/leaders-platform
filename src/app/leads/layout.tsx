@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardNav } from '@/components/layout/dashboard-nav'
+import { HubTicker } from '@/components/layout/HubTicker'
 import { isDevMode, DEV_USER } from '@/lib/auth/dev-mode'
 
 export default async function LeadsLayout({
@@ -12,6 +13,7 @@ export default async function LeadsLayout({
     return (
       <div className="min-h-screen bg-[#0a0a0f] text-white">
         <DashboardNav user={DEV_USER} />
+        <HubTicker />
         <main className="pt-16">{children}</main>
       </div>
     )
@@ -28,6 +30,7 @@ export default async function LeadsLayout({
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
       <DashboardNav user={profile} />
+      <HubTicker />
       <main className="pt-16">{children}</main>
     </div>
   )
