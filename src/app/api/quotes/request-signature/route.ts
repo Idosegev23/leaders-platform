@@ -98,7 +98,6 @@ export async function POST(request: Request) {
     .insert({
       title: body.title,
       lead_id: body.lead_id ?? null,
-      pdf_data: pdfBuffer,
       pdf_drive_file_id: uploaded.id,
       pdf_drive_folder_id: body.drive_folder_id,
       pdf_drive_view_link: uploaded.viewLink,

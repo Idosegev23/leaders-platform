@@ -205,7 +205,7 @@ export async function uploadBufferToDriveFolder(params: {
 }
 
 /**
- * Read the bytes of a file we previously uploaded.
+ * Read the bytes of a file we previously uploaded (via service account).
  */
 export async function downloadDriveFileBytes(fileId: string): Promise<Buffer> {
   const drive = await createDriveClient()
@@ -214,6 +214,27 @@ export async function downloadDriveFileBytes(fileId: string): Promise<Buffer> {
     { responseType: 'arraybuffer' },
   )
   return Buffer.from(res.data as ArrayBuffer)
+}
+
+/**
+ * Download a Drive file's bytes using a USER OAuth access_token. Used
+ * when the file was uploaded by the user (not the service account) so
+ * the service account doesn't have permission to read it back.
+ */
+export async function downloadDriveFileBytesAsUser(
+  accessToken: string,
+  fileId: string,
+): Promise<Buffer> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  )
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    throw new Error(`Drive download (user) ${res.status}: ${errText.slice(0, 300)}`)
+  }
+  const arrayBuffer = await res.arrayBuffer()
+  return Buffer.from(arrayBuffer)
 }
 
 /**

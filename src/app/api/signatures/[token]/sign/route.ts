@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@supabase/supabase-js'
 import { PDFDocument, rgb } from 'pdf-lib'
 import {
+  downloadDriveFileBytes,
+  downloadDriveFileBytesAsUser,
   uploadBufferToDriveAsUser,
   uploadBufferToDriveFolder,
 } from '@/lib/google-drive/client'
@@ -55,7 +57,7 @@ export async function POST(
   // Fetch the request
   const { data: req, error: fetchErr } = await supabase
     .from('signature_requests')
-    .select('id, token, title, pdf_data, pdf_drive_folder_id, status, recipient_email, recipient_name, created_by_email, created_by_name, cc_emails, lead_id, expires_at')
+    .select('id, token, title, pdf_drive_file_id, pdf_drive_folder_id, status, recipient_email, recipient_name, created_by_email, created_by_name, cc_emails, lead_id, expires_at')
     .eq('token', token)
     .maybeSingle()
 
@@ -68,10 +70,38 @@ export async function POST(
   if (req.status === 'cancelled' || new Date(req.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ error: 'בקשת החתימה פגה תוקף' }, { status: 410 })
   }
+  if (!req.pdf_drive_file_id) {
+    return NextResponse.json({ error: 'PDF המקור חסר ב-Drive' }, { status: 500 })
+  }
 
-  const originalPdfBytes = req.pdf_data ? Buffer.from(req.pdf_data) : null
-  if (!originalPdfBytes || originalPdfBytes.length === 0) {
-    return NextResponse.json({ error: 'PDF המקור חסר' }, { status: 500 })
+  // Resolve the sender's OAuth — needed to read the original PDF (uploaded
+  // as the user) and to write the signed PDF back to the same folder.
+  const senderRefresh = await getCreatorRefreshToken(supabase, req.created_by_email)
+  let senderAccess: string | null = null
+  if (senderRefresh) {
+    try { senderAccess = await refreshAccessToken(senderRefresh) }
+    catch (e) { console.warn('[sign] refresh failed:', e) }
+  }
+
+  // Download the original PDF from Drive — try user OAuth first
+  // (because we uploaded it as the user). Service account is a last-ditch
+  // fallback (only works if the folder happens to be shared with it).
+  let originalPdfBytes: Buffer
+  try {
+    if (senderAccess) {
+      originalPdfBytes = await downloadDriveFileBytesAsUser(senderAccess, req.pdf_drive_file_id)
+    } else {
+      originalPdfBytes = await downloadDriveFileBytes(req.pdf_drive_file_id)
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: `שליפת PDF המקור נכשלה: ${msg}` }, { status: 500 })
+  }
+
+  // Sanity check — the file must start with %PDF
+  const head = originalPdfBytes.subarray(0, 8).toString('latin1')
+  if (!head.includes('%PDF')) {
+    return NextResponse.json({ error: 'הקובץ ב-Drive אינו PDF תקין' }, { status: 500 })
   }
 
   // Stamp the PDF
@@ -89,18 +119,13 @@ export async function POST(
     return NextResponse.json({ error: `Stamp failed: ${msg}` }, { status: 500 })
   }
 
-  // Upload signed PDF to the same folder as the original.
-  // Strategy: prefer to upload AS THE SENDER (who already has Drive
-  // access to the folder) by refreshing their stored OAuth token.
-  // Fallback to the service account only if the sender has no token
-  // (early users) — that path requires the folder to be shared with
-  // the service account.
-  const senderRefresh = await getCreatorRefreshToken(supabase, req.created_by_email)
-
+  // Upload signed PDF to the same folder as the original. Prefer the
+  // sender's OAuth (we already refreshed it above for the download) so
+  // the file lands in their Drive. Fallback to the service account
+  // only if the sender has no refresh token at all.
   let signedUpload: { id: string; viewLink: string }
   try {
-    if (senderRefresh) {
-      const senderAccess = await refreshAccessToken(senderRefresh)
+    if (senderAccess) {
       const result = await uploadBufferToDriveAsUser({
         accessToken: senderAccess,
         folderId: req.pdf_drive_folder_id,
@@ -161,7 +186,7 @@ export async function POST(
   // Notification emails — sent FROM the creator's gmail account so they
   // arrive as part of the existing thread (and the signed pdf isn't
   // sent from a generic noreply). Reuse the same refresh_token we
-  // resolved above for the Drive upload.
+  // resolved above for the Drive download/upload.
   const creatorRefresh = senderRefresh
   const formattedSignedAt = formatHebrewDateTime(signedAt)
   const signerEmailFinal = body.signer_email ?? req.recipient_email ?? ''
