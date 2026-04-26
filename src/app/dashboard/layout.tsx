@@ -11,7 +11,7 @@ export default async function DashboardLayout({
 }) {
   if (isDevMode) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] text-white">
+      <div className="min-h-screen bg-brand-pearl text-brand-primary">
         <DashboardNav user={DEV_USER} />
         <HubTicker />
         <main className="pt-16">{children}</main>
@@ -31,7 +31,7 @@ export default async function DashboardLayout({
   const { data: profile } = await supabase.from('users').select('*').eq('id', user.id).single()
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white">
+    <div className="min-h-screen bg-brand-pearl text-brand-primary">
       <DashboardNav user={profile} />
       <HubTicker />
       <main className="pt-16">{children}</main>

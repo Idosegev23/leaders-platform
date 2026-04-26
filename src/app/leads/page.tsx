@@ -80,18 +80,18 @@ export default async function LeadsPage({
 
       {/* Header */}
       <header className="mb-12 md:mb-16">
-        <p className="text-[10px] tracking-[0.5em] uppercase text-white/40 font-rubik mb-5">
-          Leaders <span className="mx-1 text-white/60">x</span> OS
+        <p className="text-[10px] tracking-[0.5em] uppercase text-brand-primary/55 font-rubik mb-5 font-medium">
+          Leaders <span className="mx-1 text-brand-primary/75">x</span> OS
         </p>
         <div className="flex items-end justify-between flex-wrap gap-4">
-          <h1 className="text-[34px] md:text-[44px] leading-[1.05] font-light tracking-tight">
-            <span className="font-medium">לידים</span>
+          <h1 className="text-[34px] md:text-[44px] leading-[1.05] font-medium tracking-tight">
+            <span className="font-bold">לידים</span>
           </h1>
-          <span className="text-[12px] tracking-[0.24em] uppercase text-white/40 font-rubik">
+          <span className="text-[12px] tracking-[0.24em] uppercase text-brand-primary/55 font-rubik font-medium">
             {counts?.all ?? 0} סה״כ
           </span>
         </div>
-        <p className="mt-3 text-[13px] md:text-[14px] text-white/45 max-w-lg">
+        <p className="mt-3 text-[14px] md:text-[15px] text-brand-primary/65 max-w-lg leading-relaxed">
           כל הלידים שהתקבלו. סטטוס בלחיצה אחת. מעודכן בזמן אמת.
         </p>
       </header>
@@ -105,14 +105,14 @@ export default async function LeadsPage({
             <a
               key={g.key}
               href={g.key === 'all' ? '/leads' : `/leads?status=${g.key}`}
-              className={`px-4 py-2 rounded-full ring-1 transition-colors font-rubik tracking-[0.06em] ${
+              className={`px-4 py-2 rounded-full ring-1 transition-colors font-rubik tracking-[0.06em] font-medium ${
                 active
-                  ? 'bg-white text-[#0a0a0f] ring-white'
-                  : 'ring-white/15 text-white/60 hover:text-white hover:ring-white/35'
+                  ? 'bg-brand-primary text-brand-ivory ring-brand-primary'
+                  : 'bg-brand-ivory ring-brand-primary/15 text-brand-primary/65 hover:text-brand-primary hover:ring-brand-primary/35'
               }`}
             >
               {g.label}
-              <span className={`ms-2 ${active ? 'text-[#0a0a0f]/50' : 'text-white/30'}`}>
+              <span className={`ms-2 ${active ? 'text-brand-ivory/55' : 'text-brand-primary/40'}`}>
                 {count}
               </span>
             </a>
@@ -122,7 +122,7 @@ export default async function LeadsPage({
 
       {/* List */}
       {leads && leads.length > 0 ? (
-        <ul className="divide-y divide-white/5">
+        <ul className="divide-y divide-brand-primary/8">
           {(leads as Lead[]).map((lead) => (
             <li key={lead.id} className="py-5">
               <LeadRow lead={lead} />
@@ -131,10 +131,10 @@ export default async function LeadsPage({
         </ul>
       ) : (
         <div className="py-16 text-center">
-          <p className="text-[13px] text-white/45">
+          <p className="text-[14px] text-brand-primary/65">
             {activeFilter === 'all' ? 'עדיין לא הגיעו לידים.' : 'אין לידים בסטטוס הזה.'}
           </p>
-          <p className="mt-2 text-[11px] text-white/30 tracking-[0.18em] uppercase font-rubik">
+          <p className="mt-2 text-[11px] text-brand-primary/45 tracking-[0.18em] uppercase font-rubik font-medium">
             Make.com ייצור כאן רשומה ברגע שיגיע ליד חדש
           </p>
         </div>
@@ -158,21 +158,21 @@ function LeadRow({ lead }: { lead: Lead }) {
         <div className="flex items-baseline gap-3 flex-wrap">
           <Link
             href={`/leads/${lead.id}`}
-            className="text-[17px] md:text-[18px] font-medium hover:text-brand-accent transition-colors"
+            className="text-[17px] md:text-[18px] font-semibold hover:text-brand-accent transition-colors"
           >
             {lead.name}
           </Link>
-          <span className="text-[10px] tracking-[0.24em] uppercase text-white/35 font-rubik">
+          <span className="text-[10px] tracking-[0.24em] uppercase text-brand-primary/45 font-rubik font-medium">
             {relativeTime(lead.created_at)}
             {lead.source && <> · {lead.source}</>}
           </span>
         </div>
 
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-white/55">
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-brand-primary/70">
           {lead.phone && (
             <a
               href={`tel:${lead.phone}`}
-              className="hover:text-white transition-colors font-rubik tracking-[0.02em]"
+              className="hover:text-brand-accent transition-colors font-rubik tracking-[0.02em] font-medium"
             >
               {lead.phone}
             </a>
@@ -180,7 +180,7 @@ function LeadRow({ lead }: { lead: Lead }) {
           {lead.email && (
             <a
               href={`mailto:${lead.email}`}
-              className="hover:text-white transition-colors"
+              className="hover:text-brand-accent transition-colors"
             >
               {lead.email}
             </a>
@@ -190,7 +190,7 @@ function LeadRow({ lead }: { lead: Lead }) {
               href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-white transition-colors"
+              className="hover:text-brand-accent transition-colors"
             >
               {lead.website.replace(/^https?:\/\//, '')}
             </a>
@@ -198,13 +198,13 @@ function LeadRow({ lead }: { lead: Lead }) {
         </div>
 
         {lead.notes && (
-          <p className="mt-3 text-[12px] text-white/50 leading-relaxed max-w-2xl whitespace-pre-line">
+          <p className="mt-3 text-[13px] text-brand-primary/65 leading-relaxed max-w-2xl whitespace-pre-line">
             {lead.notes}
           </p>
         )}
 
         {lead.assigned_to_email && (
-          <p className="mt-2 text-[10px] tracking-[0.24em] uppercase text-white/35 font-rubik">
+          <p className="mt-2 text-[10px] tracking-[0.24em] uppercase text-brand-primary/45 font-rubik font-medium">
             מטפל: {lead.assigned_to_email.split('@')[0]}
           </p>
         )}
@@ -218,10 +218,10 @@ function LeadRow({ lead }: { lead: Lead }) {
 function dotForStatus(status: Lead['status']): { color: string } {
   switch (status) {
     case 'new':       return { color: 'bg-brand-gold' }
-    case 'contacted': return { color: 'bg-white' }
-    case 'qualified': return { color: 'bg-white' }
+    case 'contacted': return { color: 'bg-brand-primary' }
+    case 'qualified': return { color: 'bg-brand-primary/55' }
     case 'converted': return { color: 'bg-brand-accent' }
-    case 'rejected':  return { color: 'bg-white/20' }
+    case 'rejected':  return { color: 'bg-brand-primary/30' }
   }
 }
 

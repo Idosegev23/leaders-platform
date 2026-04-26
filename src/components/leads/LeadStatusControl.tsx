@@ -6,10 +6,10 @@ type LeadStatus = 'new' | 'contacted' | 'qualified' | 'converted' | 'rejected'
 
 const OPTIONS: Array<{ value: LeadStatus; label: string; color: string }> = [
   { value: 'new',       label: 'ליד חדש',  color: 'bg-brand-gold' },
-  { value: 'contacted', label: 'בטיפול',   color: 'bg-white' },
-  { value: 'qualified', label: 'מאומת',    color: 'bg-white' },
+  { value: 'contacted', label: 'בטיפול',   color: 'bg-brand-primary' },
+  { value: 'qualified', label: 'מאומת',    color: 'bg-brand-primary/55' },
   { value: 'converted', label: 'הומר',     color: 'bg-brand-accent' },
-  { value: 'rejected',  label: 'נדחה',     color: 'bg-white/30' },
+  { value: 'rejected',  label: 'נדחה',     color: 'bg-brand-primary/30' },
 ]
 
 export function LeadStatusControl({
@@ -59,22 +59,22 @@ export function LeadStatusControl({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full ring-1 ring-white/15 text-[11px] tracking-[0.12em] uppercase text-white/70 hover:text-white hover:ring-white/35 font-rubik transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full ring-1 ring-brand-primary/15 bg-brand-ivory text-[11px] tracking-[0.12em] uppercase text-brand-primary/75 hover:text-brand-primary hover:ring-brand-primary/35 font-rubik font-medium transition-colors"
       >
         <span className={`h-1.5 w-1.5 rounded-full ${display.color}`} />
         {display.label}
-        <span className="text-white/40 text-[10px]">▾</span>
+        <span className="text-brand-primary/45 text-[10px]">▾</span>
       </button>
 
       {open && (
-        <ul className="absolute end-0 top-full mt-2 w-40 rounded-sm bg-[#0a0a0f] ring-1 ring-white/10 shadow-xl z-30 py-1">
+        <ul className="absolute end-0 top-full mt-2 w-40 rounded-sm bg-brand-ivory ring-1 ring-brand-primary/15 shadow-xl z-30 py-1">
           {OPTIONS.map((o) => (
             <li key={o.value}>
               <button
                 type="button"
                 onClick={() => handleChange(o.value)}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-[12px] text-right hover:bg-white/5 transition-colors ${
-                  o.value === currentStatus ? 'text-white' : 'text-white/60'
+                className={`w-full flex items-center gap-2 px-3 py-2 text-[12px] text-right hover:bg-brand-primary/5 transition-colors ${
+                  o.value === currentStatus ? 'text-brand-primary font-semibold' : 'text-brand-primary/65'
                 }`}
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${o.color}`} />
