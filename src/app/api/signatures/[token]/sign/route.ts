@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@supabase/supabase-js'
 import { PDFDocument, rgb } from 'pdf-lib'
-import { uploadBufferToDriveFolder } from '@/lib/google-drive/client'
-import { sendGmailEmail } from '@/lib/gmail'
+import {
+  uploadBufferToDriveAsUser,
+  uploadBufferToDriveFolder,
+} from '@/lib/google-drive/client'
+import { sendGmailEmail, refreshAccessToken } from '@/lib/gmail'
 import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
 
 export const dynamic = 'force-dynamic'
@@ -86,15 +89,35 @@ export async function POST(
     return NextResponse.json({ error: `Stamp failed: ${msg}` }, { status: 500 })
   }
 
-  // Upload signed PDF to the same folder as the original
-  let signedUpload
+  // Upload signed PDF to the same folder as the original.
+  // Strategy: prefer to upload AS THE SENDER (who already has Drive
+  // access to the folder) by refreshing their stored OAuth token.
+  // Fallback to the service account only if the sender has no token
+  // (early users) — that path requires the folder to be shared with
+  // the service account.
+  const senderRefresh = await getCreatorRefreshToken(supabase, req.created_by_email)
+
+  let signedUpload: { id: string; viewLink: string }
   try {
-    signedUpload = await uploadBufferToDriveFolder({
-      folderId: req.pdf_drive_folder_id,
-      fileName: `${req.title} (חתום).pdf`,
-      mimeType: 'application/pdf',
-      buffer: Buffer.from(signedPdfBytes),
-    })
+    if (senderRefresh) {
+      const senderAccess = await refreshAccessToken(senderRefresh)
+      const result = await uploadBufferToDriveAsUser({
+        accessToken: senderAccess,
+        folderId: req.pdf_drive_folder_id,
+        fileName: `${req.title} (חתום).pdf`,
+        mimeType: 'application/pdf',
+        buffer: Buffer.from(signedPdfBytes),
+      })
+      signedUpload = { id: result.id, viewLink: result.viewLink }
+    } else {
+      const result = await uploadBufferToDriveFolder({
+        folderId: req.pdf_drive_folder_id,
+        fileName: `${req.title} (חתום).pdf`,
+        mimeType: 'application/pdf',
+        buffer: Buffer.from(signedPdfBytes),
+      })
+      signedUpload = { id: result.id, viewLink: result.viewLink }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: `Drive upload failed: ${msg}` }, { status: 502 })
@@ -137,8 +160,9 @@ export async function POST(
 
   // Notification emails — sent FROM the creator's gmail account so they
   // arrive as part of the existing thread (and the signed pdf isn't
-  // sent from a generic noreply).
-  const creatorRefresh = await getCreatorRefreshToken(supabase, req.created_by_email)
+  // sent from a generic noreply). Reuse the same refresh_token we
+  // resolved above for the Drive upload.
+  const creatorRefresh = senderRefresh
   const formattedSignedAt = formatHebrewDateTime(signedAt)
   const signerEmailFinal = body.signer_email ?? req.recipient_email ?? ''
   const recipients = collectRecipients({

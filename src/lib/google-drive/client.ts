@@ -217,6 +217,77 @@ export async function downloadDriveFileBytes(fileId: string): Promise<Buffer> {
 }
 
 /**
+ * Upload a buffer to Drive using a USER OAuth access_token (not the
+ * service account). Lets the user write to any folder they own without
+ * needing to share it with a service account first.
+ *
+ * Uses the multipart upload endpoint directly so we don't have to
+ * create a googleapis client per call.
+ */
+export async function uploadBufferToDriveAsUser(params: {
+  accessToken: string
+  folderId: string
+  fileName: string
+  mimeType: string
+  buffer: Buffer
+}): Promise<{ id: string; viewLink: string }> {
+  const boundary = `----leaders${Date.now()}`
+  const metadata = {
+    name: params.fileName,
+    parents: [params.folderId],
+    mimeType: params.mimeType,
+  }
+
+  // Build multipart/related body manually — pure Buffer (works in node).
+  const partHeader = Buffer.from(
+    `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      `${JSON.stringify(metadata)}\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Type: ${params.mimeType}\r\n\r\n`,
+    'utf-8',
+  )
+  const partFooter = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8')
+  const body = Buffer.concat([partHeader, params.buffer, partFooter])
+
+  const uploadRes = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${params.accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': String(body.length),
+      },
+      body,
+    },
+  )
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text().catch(() => '')
+    throw new Error(`Drive upload (user) ${uploadRes.status}: ${errText.slice(0, 300)}`)
+  }
+
+  const data = (await uploadRes.json()) as { id: string; webViewLink?: string }
+
+  // Make readable by anyone with the link so the recipient can preview
+  // the PDF inside the signature page without needing Google Workspace.
+  await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions?supportsAllDrives=true`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+  }).catch((e) => console.warn('[Drive permissions] add failed:', e))
+
+  return {
+    id: data.id,
+    viewLink: data.webViewLink ?? `https://drive.google.com/file/d/${data.id}/view`,
+  }
+}
+
+/**
  * List files in the shared folder
  */
 export async function listDriveFiles(folderId?: string): Promise<Array<{

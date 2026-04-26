@@ -1,20 +1,24 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import GoogleDriveFolderPicker from '@/components/google-drive-folder-picker'
 
 type Props = {
   open: boolean
   onClose: () => void
   defaultTitle: string
-  generatePdfBase64: () => Promise<string>     // produces base64 of the PDF
+  generatePdfBase64: () => Promise<string>
 }
 
 const FOLDER_STORAGE_KEY = 'leaders.lastDriveFolder'
 
+type StoredFolder = { id: string; name: string }
+
 export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePdfBase64 }: Props) {
   const [recipientName, setRecipientName] = useState('')
   const [recipientEmail, setRecipientEmail] = useState('')
-  const [driveFolder, setDriveFolder] = useState('')
+  const [folder, setFolder] = useState<StoredFolder | null>(null)
   const [title, setTitle] = useState(defaultTitle)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -22,10 +26,13 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
   const [success, setSuccess] = useState<{ sign_link: string; drive_link: string } | null>(null)
 
   useEffect(() => { setTitle(defaultTitle) }, [defaultTitle])
+
   useEffect(() => {
     if (open) {
-      const last = typeof window !== 'undefined' ? localStorage.getItem(FOLDER_STORAGE_KEY) : null
-      if (last) setDriveFolder(last)
+      try {
+        const raw = localStorage.getItem(FOLDER_STORAGE_KEY)
+        if (raw) setFolder(JSON.parse(raw) as StoredFolder)
+      } catch {}
     } else {
       setError(null)
       setSuccess(null)
@@ -37,20 +44,33 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
   const submit = async () => {
     setError(null)
     if (!recipientEmail.trim()) { setError('יש להזין מייל הנמען'); return }
-    if (!driveFolder.trim())     { setError('יש להזין תיקיה ב-Drive'); return }
+    if (!folder)                 { setError('יש לבחור תיקיה ב-Drive'); return }
     if (!title.trim())           { setError('יש להזין כותרת למסמך'); return }
 
     setSubmitting(true)
     try {
+      // Pull the live provider_token so the upload can run as the user.
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      const providerToken = session?.provider_token
+
+      if (!providerToken) {
+        throw new Error('לא נמצא Google access token. התנתק והתחבר מחדש כדי לאפשר גישה ל-Drive.')
+      }
+
       const pdfBase64 = await generatePdfBase64()
       const res = await fetch('/api/quotes/request-signature', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Google-Access-Token': providerToken,
+        },
         body: JSON.stringify({
           title: title.trim(),
           recipient_email: recipientEmail.trim(),
           recipient_name: recipientName.trim() || null,
-          drive_folder: driveFolder.trim(),
+          drive_folder_id: folder.id,
+          drive_folder_name: folder.name,
           pdf_base64: pdfBase64,
           message: message.trim() || null,
         }),
@@ -58,7 +78,7 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
       const j = await res.json()
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
       setSuccess({ sign_link: j.sign_link, drive_link: j.drive_link })
-      try { localStorage.setItem(FOLDER_STORAGE_KEY, driveFolder.trim()) } catch {}
+      try { localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(folder)) } catch {}
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -81,38 +101,29 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
             <p className="text-[10px] tracking-[0.4em] uppercase text-white/40 font-rubik">Leaders × OS</p>
             <h2 className="mt-1 text-[20px] font-medium">שליחה לחתימה</h2>
           </div>
-          <button
-            onClick={onClose}
-            className="text-white/45 hover:text-white text-xl leading-none"
-            aria-label="close"
-          >
-            ✕
-          </button>
+          <button onClick={onClose} className="text-white/45 hover:text-white text-xl leading-none" aria-label="close">✕</button>
         </header>
 
         {success ? (
           <div className="p-6 space-y-4">
             <div className="rounded-sm ring-1 ring-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-[14px] text-emerald-200">
-              נשלח! המייל יצא לנמען. עותק ה-PDF נשמר ב-Drive.
+              נשלח! המייל יצא לנמען. עותק ה-PDF נשמר בתיקיה שבחרת ב-Drive.
             </div>
-            <div className="space-y-2 text-[13px]">
+            <div className="space-y-3 text-[13px]">
               <div>
                 <span className="text-white/45 text-[10px] tracking-[0.32em] uppercase font-rubik block mb-1">קישור לחתימה</span>
-                <a href={success.sign_link} target="_blank" rel="noopener noreferrer" className="text-brand-accent break-all hover:underline">
+                <a href={success.sign_link} target="_blank" rel="noopener noreferrer" className="text-brand-accent break-all hover:underline ltr-input inline-block">
                   {success.sign_link}
                 </a>
               </div>
               <div>
                 <span className="text-white/45 text-[10px] tracking-[0.32em] uppercase font-rubik block mb-1">PDF ב-Drive</span>
-                <a href={success.drive_link} target="_blank" rel="noopener noreferrer" className="text-white/70 break-all hover:text-white">
+                <a href={success.drive_link} target="_blank" rel="noopener noreferrer" className="text-white/70 break-all hover:text-white ltr-input inline-block">
                   {success.drive_link}
                 </a>
               </div>
             </div>
-            <button
-              onClick={onClose}
-              className="w-full mt-4 rounded-full bg-white text-[#0a0a0f] py-3 font-medium hover:bg-brand-accent hover:text-white transition-colors"
-            >
+            <button onClick={onClose} className="w-full mt-4 rounded-full bg-white text-[#0a0a0f] py-3 font-medium hover:bg-brand-accent hover:text-white transition-colors">
               סגור
             </button>
           </div>
@@ -139,21 +150,33 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
                   type="email"
                   value={recipientEmail}
                   onChange={(e) => setRecipientEmail(e.target.value)}
-                  className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-3 py-2.5 text-[14px] outline-none"
+                  className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-3 py-2.5 text-[14px] outline-none ltr-input"
+                  dir="ltr"
                 />
               </Field>
             </div>
 
-            <Field label="תיקיית Drive לשמירה * (קישור או ID)">
-              <input
-                value={driveFolder}
-                onChange={(e) => setDriveFolder(e.target.value)}
-                placeholder="https://drive.google.com/drive/folders/..."
-                className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-3 py-2.5 text-[13px] outline-none placeholder:text-white/25 ltr-input"
-                dir="ltr"
-              />
-              <p className="mt-2 text-[10px] tracking-[0.18em] uppercase text-white/35 font-rubik leading-relaxed">
-                ⓘ ודא שהתיקיה משותפת עם <span className="ltr-input inline-block">ldrsagent@ldrsgroup-484815.iam.gserviceaccount.com</span> כעורך.
+            <Field label="תיקיית Drive לשמירה *">
+              <div className="flex items-center gap-3 flex-wrap">
+                <GoogleDriveFolderPicker
+                  buttonLabel={folder ? 'שנה תיקיה' : 'בחר תיקיה ב-Drive'}
+                  onPicked={(f) => setFolder(f)}
+                />
+                {folder && (
+                  <span className="inline-flex items-center gap-2 text-[12px] text-white/70">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    <span className="font-medium">{folder.name}</span>
+                    <button
+                      onClick={() => setFolder(null)}
+                      className="text-white/35 hover:text-white text-[10px] tracking-[0.18em] uppercase font-rubik"
+                    >
+                      נקה
+                    </button>
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-[10px] tracking-[0.18em] uppercase text-white/35 font-rubik">
+                ההעלאה תיעשה דרך חשבון Google שלך (לא צריך לשתף עם אף אחד).
               </p>
             </Field>
 
@@ -174,10 +197,7 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
             )}
 
             <div className="flex items-center gap-3 pt-2">
-              <button
-                onClick={onClose}
-                className="px-5 py-2.5 text-[13px] text-white/55 hover:text-white transition-colors"
-              >
+              <button onClick={onClose} className="px-5 py-2.5 text-[13px] text-white/55 hover:text-white transition-colors">
                 ביטול
               </button>
               <button
