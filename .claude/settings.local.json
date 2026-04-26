@@ -22,5 +22,9 @@
       "WebFetch(domain:docs.scrapecreators.com)",
       "WebFetch(domain:scrapecreators.com)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ],
+  "enableAllProjectMcpServers": true
 }

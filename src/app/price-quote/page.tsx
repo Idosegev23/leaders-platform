@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { PRICE_QUOTE_SERVICES } from '@/lib/constants/price-quote-services'
 import type { PriceQuoteData, BudgetItem, ContentMixItem } from '@/types/price-quote'
+import { SendForSignatureDialog } from '@/components/price-quote/SendForSignatureDialog'
 
 // ─── Default state ───
 const defaultBudgetItems: BudgetItem[] = [
@@ -34,6 +35,7 @@ export default function PriceQuotePage() {
   const [previewPage, setPreviewPage] = useState(1)
   const [isGenerating, setIsGenerating] = useState(false)
   const [previewKey, setPreviewKey] = useState(0)
+  const [signDialogOpen, setSignDialogOpen] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   // ─── Generic field updater ───
@@ -124,6 +126,28 @@ export default function PriceQuotePage() {
 
   const previewUrl = `/api/price-quote?page=${previewPage}&data=${encodeURIComponent(JSON.stringify(data))}`
 
+  // ─── PDF as base64 (used for the signature flow upload) ───
+  const generatePdfBase64 = useCallback(async (): Promise<string> => {
+    const res = await fetch('/api/price-quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error || `PDF generation failed: HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const buf = await blob.arrayBuffer()
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)))
+    }
+    return btoa(binary)
+  }, [data])
+
   // ─── Generate PDF ───
   const generatePdf = useCallback(async () => {
     setIsGenerating(true)
@@ -157,6 +181,12 @@ export default function PriceQuotePage() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-gray-50">
+      <SendForSignatureDialog
+        open={signDialogOpen}
+        onClose={() => setSignDialogOpen(false)}
+        defaultTitle={`הצעת מחיר · ${data.clientName || ''}${data.campaignName ? ' · ' + data.campaignName : ''}`.trim()}
+        generatePdfBase64={generatePdfBase64}
+      />
       {/* Top bar */}
       <div className="bg-white border-b px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-4">
@@ -179,6 +209,16 @@ export default function PriceQuotePage() {
             className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition text-sm font-bold disabled:opacity-50"
           >
             {isGenerating ? 'מייצר PDF...' : 'הורד PDF'}
+          </button>
+          <button
+            onClick={() => {
+              if (!data.clientName) { alert('יש למלא שם לקוח'); return }
+              setSignDialogOpen(true)
+            }}
+            disabled={!data.clientName}
+            className="px-5 py-2 bg-[#1a1a2e] text-white rounded-lg hover:bg-[#e94560] transition text-sm font-bold disabled:opacity-50"
+          >
+            ✍︎ שלח לחתימה
           </button>
           <button
             onClick={async () => {

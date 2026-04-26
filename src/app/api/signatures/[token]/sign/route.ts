@@ -1,0 +1,318 @@
+import { NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js'
+import { PDFDocument, rgb } from 'pdf-lib'
+import { uploadBufferToDriveFolder } from '@/lib/google-drive/client'
+import { sendGmailEmail } from '@/lib/gmail'
+import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
+
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+export const maxDuration = 60
+
+/**
+ * POST /api/signatures/{token}/sign
+ *
+ * Public endpoint. Accepts the signer's name + a signature image
+ * (data URL). We:
+ *   1. Stamp the signature image + signer name + date onto the last
+ *      page of the PDF.
+ *   2. Upload the signed PDF to the same Drive folder as the original.
+ *   3. Email the signed PDF link to (a) the signer, (b) the sender,
+ *      (c) anything in `cc_emails`.
+ *   4. Mark the request `signed` and stamp activity_log.
+ */
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ token: string }> },
+) {
+  const { token } = await params
+  const body = (await request.json().catch(() => null)) as {
+    signer_name?: string
+    signer_email?: string
+    signer_role?: string
+    signer_notes?: string
+    signature_image?: string  // data URL: "data:image/png;base64,..."
+    typed_name?: string
+  } | null
+
+  if (!body || !body.signer_name || (!body.signature_image && !body.typed_name)) {
+    return NextResponse.json(
+      { error: 'נדרשים שם החותם וחתימה (ציור או הקלדה)' },
+      { status: 400 },
+    )
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  )
+
+  // Fetch the request
+  const { data: req, error: fetchErr } = await supabase
+    .from('signature_requests')
+    .select('id, token, title, pdf_data, pdf_drive_folder_id, status, recipient_email, recipient_name, created_by_email, created_by_name, cc_emails, lead_id, expires_at')
+    .eq('token', token)
+    .maybeSingle()
+
+  if (fetchErr || !req) {
+    return NextResponse.json({ error: 'בקשת חתימה לא נמצאה' }, { status: 404 })
+  }
+  if (req.status === 'signed') {
+    return NextResponse.json({ error: 'המסמך כבר נחתם' }, { status: 409 })
+  }
+  if (req.status === 'cancelled' || new Date(req.expires_at).getTime() < Date.now()) {
+    return NextResponse.json({ error: 'בקשת החתימה פגה תוקף' }, { status: 410 })
+  }
+
+  const originalPdfBytes = req.pdf_data ? Buffer.from(req.pdf_data) : null
+  if (!originalPdfBytes || originalPdfBytes.length === 0) {
+    return NextResponse.json({ error: 'PDF המקור חסר' }, { status: 500 })
+  }
+
+  // Stamp the PDF
+  let signedPdfBytes: Uint8Array
+  try {
+    signedPdfBytes = await stampPdfWithSignature({
+      originalPdf: originalPdfBytes,
+      signerName: body.signer_name,
+      signatureImageDataUrl: body.signature_image ?? null,
+      typedName: body.typed_name ?? null,
+      signedAtIso: new Date().toISOString(),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: `Stamp failed: ${msg}` }, { status: 500 })
+  }
+
+  // Upload signed PDF to the same folder as the original
+  let signedUpload
+  try {
+    signedUpload = await uploadBufferToDriveFolder({
+      folderId: req.pdf_drive_folder_id,
+      fileName: `${req.title} (חתום).pdf`,
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(signedPdfBytes),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: `Drive upload failed: ${msg}` }, { status: 502 })
+  }
+
+  // Persist
+  const signedAt = new Date().toISOString()
+  await supabase
+    .from('signature_requests')
+    .update({
+      status: 'signed',
+      signed_at: signedAt,
+      signature_image: body.signature_image ?? null,
+      signature_typed_name: body.typed_name ?? null,
+      signer_name: body.signer_name,
+      signer_email: body.signer_email ?? req.recipient_email,
+      signer_role: body.signer_role ?? null,
+      signer_notes: body.signer_notes ?? null,
+      signed_pdf_drive_file_id: signedUpload.id,
+      signed_pdf_drive_view_link: signedUpload.viewLink,
+    })
+    .eq('token', token)
+
+  // Activity log
+  if (req.lead_id) {
+    await supabase.from('activity_log').insert({
+      source: 'leaders_ui',
+      action_type: 'signature_signed',
+      summary: `${body.signer_name} חתם על "${req.title}"`,
+      entity_type: 'lead',
+      entity_id: req.lead_id,
+      actor_email: body.signer_email ?? req.recipient_email,
+      actor_name: body.signer_name,
+      payload: {
+        token,
+        drive_link: signedUpload.viewLink,
+      },
+    })
+  }
+
+  // Notification emails — sent FROM the creator's gmail account so they
+  // arrive as part of the existing thread (and the signed pdf isn't
+  // sent from a generic noreply).
+  const creatorRefresh = await getCreatorRefreshToken(supabase, req.created_by_email)
+  const formattedSignedAt = formatHebrewDateTime(signedAt)
+  const signerEmailFinal = body.signer_email ?? req.recipient_email ?? ''
+  const recipients = collectRecipients({
+    signerEmail: signerEmailFinal,
+    senderEmail: req.created_by_email,
+    cc: ((req.cc_emails as string[] | null) ?? []),
+  })
+
+  if (creatorRefresh) {
+    await Promise.all(
+      recipients.map((to) =>
+        sendGmailEmail({
+          refreshToken: creatorRefresh,
+          from: req.created_by_email,
+          fromName: req.created_by_name ?? req.created_by_email,
+          to,
+          subject: `נחתם: ${req.title} — Leaders`,
+          html: buildSignedConfirmationEmail({
+            signerName: body.signer_name!,
+            title: req.title,
+            driveLink: signedUpload.viewLink,
+            signedAt: formattedSignedAt,
+            isInternal: to !== signerEmailFinal,
+          }),
+        }).catch((e) =>
+          console.error(`[sign] gmail send failed for ${to}:`, e),
+        ),
+      ),
+    )
+  } else {
+    console.warn(`[sign] no refresh_token for ${req.created_by_email} — emails not sent`)
+  }
+
+  return NextResponse.json({
+    ok: true,
+    signed_at: signedAt,
+    drive_link: signedUpload.viewLink,
+  })
+}
+
+/* ---------------------------------------------------------------- */
+/* PDF stamping                                                     */
+/* ---------------------------------------------------------------- */
+
+async function stampPdfWithSignature(params: {
+  originalPdf: Buffer
+  signerName: string
+  signatureImageDataUrl: string | null
+  typedName: string | null
+  signedAtIso: string
+}): Promise<Uint8Array> {
+  const pdf = await PDFDocument.load(params.originalPdf)
+  const page = pdf.getPages().at(-1)
+  if (!page) throw new Error('PDF has no pages')
+
+  const { width } = page.getSize()
+  const margin = 36
+  const boxWidth = width - margin * 2
+  const boxHeight = 110
+  const baseY = margin
+
+  // Light separator line above the signature box
+  page.drawRectangle({
+    x: margin,
+    y: baseY + boxHeight + 6,
+    width: boxWidth,
+    height: 0.6,
+    color: rgb(0.85, 0.85, 0.88),
+  })
+
+  // Box (subtle bg)
+  page.drawRectangle({
+    x: margin,
+    y: baseY,
+    width: boxWidth,
+    height: boxHeight,
+    color: rgb(0.98, 0.98, 0.99),
+    borderColor: rgb(0.9, 0.9, 0.93),
+    borderWidth: 0.6,
+  })
+
+  // Embed signature image if provided
+  if (params.signatureImageDataUrl) {
+    try {
+      const base64 = params.signatureImageDataUrl.replace(/^data:image\/png;base64,/, '')
+      const sigBytes = Buffer.from(base64, 'base64')
+      const sigImage = await pdf.embedPng(sigBytes)
+      const sigDims = sigImage.scale(0.45)
+      const targetH = Math.min(60, boxHeight - 40)
+      const scale = targetH / sigDims.height
+      const renderW = sigDims.width * scale
+      const renderH = sigDims.height * scale
+      page.drawImage(sigImage, {
+        x: margin + boxWidth - renderW - 18,
+        y: baseY + (boxHeight - renderH) / 2 + 8,
+        width: renderW,
+        height: renderH,
+      })
+    } catch (e) {
+      console.warn('[stamp] failed to embed signature image:', e)
+    }
+  }
+
+  // Labels (left side, RTL via right-aligned via x positioning)
+  // We don't have a Hebrew-supporting font in pdf-lib by default.
+  // So we keep this minimal — the signed name + ISO date in Latin chars.
+  const helvetica = await pdf.embedFont('Helvetica')
+  const helveticaBold = await pdf.embedFont('Helvetica-Bold')
+
+  const labelSize = 8
+  const valueSize = 11
+  const xLabel = margin + 18
+
+  page.drawText('SIGNED BY', { x: xLabel, y: baseY + boxHeight - 22, size: labelSize, font: helvetica, color: rgb(0.45, 0.45, 0.5) })
+  page.drawText(params.signerName, { x: xLabel, y: baseY + boxHeight - 38, size: valueSize, font: helveticaBold, color: rgb(0.1, 0.1, 0.18) })
+
+  const dateLabel = formatStampDate(params.signedAtIso)
+  page.drawText('SIGNED AT', { x: xLabel, y: baseY + 38, size: labelSize, font: helvetica, color: rgb(0.45, 0.45, 0.5) })
+  page.drawText(dateLabel, { x: xLabel, y: baseY + 22, size: valueSize, font: helveticaBold, color: rgb(0.1, 0.1, 0.18) })
+
+  if (params.typedName && !params.signatureImageDataUrl) {
+    // Render typed name in a script-like font using italic Helvetica
+    const italic = await pdf.embedFont('Helvetica-Oblique')
+    page.drawText(params.typedName, {
+      x: margin + boxWidth - 220,
+      y: baseY + boxHeight / 2 - 6,
+      size: 22,
+      font: italic,
+      color: rgb(0.05, 0.05, 0.18),
+    })
+  }
+
+  return pdf.save()
+}
+
+function formatStampDate(iso: string): string {
+  const d = new Date(iso)
+  const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return `${dateStr}, ${timeStr}`
+}
+
+function formatHebrewDateTime(iso: string): string {
+  const d = new Date(iso)
+  return `${d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })} בשעה ${d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`
+}
+
+function collectRecipients(params: {
+  signerEmail: string
+  senderEmail: string
+  cc: string[]
+}): string[] {
+  const set = new Set<string>()
+  set.add(params.signerEmail)
+  set.add(params.senderEmail)
+  for (const c of params.cc) set.add(c)
+  return Array.from(set).filter(Boolean)
+}
+
+async function getCreatorRefreshToken(
+  supabase: SupabaseClient,
+  creatorEmail: string,
+): Promise<string | null> {
+  const { data: u } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', creatorEmail)
+    .maybeSingle()
+  const userId = (u as { id?: string } | null)?.id
+  if (!userId) return null
+  const { data: t } = await supabase
+    .from('user_google_tokens')
+    .select('refresh_token')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return (t as { refresh_token?: string } | null)?.refresh_token ?? null
+}

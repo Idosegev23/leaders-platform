@@ -106,6 +106,117 @@ export async function deleteFromGoogleDrive(fileId: string): Promise<void> {
 }
 
 /**
+ * Extract a Drive folder id from any of the inputs the user might paste
+ * — a folder URL, "open=...&id=..." link, or the bare id itself.
+ */
+export function parseDriveFolderId(input: string): string | null {
+  if (!input) return null
+  const trimmed = input.trim()
+  // /folders/{id}
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]{10,})/)
+  if (folderMatch) return folderMatch[1]
+  // ?id={id}
+  const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]{10,})/)
+  if (idMatch) return idMatch[1]
+  // bare id
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed
+  return null
+}
+
+/**
+ * Verify the service account can write to the folder.
+ */
+export async function verifyDriveFolderWritable(
+  folderId: string,
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  try {
+    const drive = await createDriveClient()
+    const res = await drive.files.get({
+      fileId: folderId,
+      fields: 'id, name, mimeType, capabilities',
+      supportsAllDrives: true,
+    })
+    if (res.data.mimeType !== 'application/vnd.google-apps.folder') {
+      return { ok: false, error: 'הקישור לא מצביע על תיקיה' }
+    }
+    if (res.data.capabilities?.canAddChildren === false) {
+      return {
+        ok: false,
+        error:
+          'אין הרשאת כתיבה. ודא שהתיקיה משותפת עם ldrsagent@ldrsgroup-484815.iam.gserviceaccount.com (כעורך).',
+      }
+    }
+    return { ok: true, name: res.data.name ?? 'תיקיה' }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('404') || msg.includes('not found')) {
+      return {
+        ok: false,
+        error:
+          'התיקיה לא נמצאה או שאין לה גישה. שתף את התיקיה עם ldrsagent@ldrsgroup-484815.iam.gserviceaccount.com (כעורך).',
+      }
+    }
+    return { ok: false, error: msg }
+  }
+}
+
+/**
+ * Upload a buffer to a specific folder. Returns id + viewable link.
+ */
+export async function uploadBufferToDriveFolder(params: {
+  folderId: string
+  fileName: string
+  mimeType: string
+  buffer: Buffer
+  shareWithDomain?: boolean
+}): Promise<{ id: string; viewLink: string; downloadLink: string }> {
+  const drive = await createDriveClient()
+  const { Readable } = await import('stream')
+  const stream = new Readable()
+  stream.push(params.buffer)
+  stream.push(null)
+
+  const response = await drive.files.create({
+    requestBody: {
+      name: params.fileName,
+      parents: [params.folderId],
+    },
+    media: {
+      mimeType: params.mimeType,
+      body: stream,
+    },
+    fields: 'id, webViewLink, webContentLink',
+    supportsAllDrives: true,
+  })
+
+  // Make readable by anyone with the link (so emailed PDFs open without
+  // requiring the recipient to have a Workspace account).
+  await drive.permissions.create({
+    fileId: response.data.id!,
+    requestBody: { role: 'reader', type: 'anyone' },
+    supportsAllDrives: true,
+  })
+
+  return {
+    id: response.data.id!,
+    viewLink: response.data.webViewLink ?? '',
+    downloadLink: response.data.webContentLink ?? '',
+  }
+}
+
+/**
+ * Read the bytes of a file we previously uploaded.
+ */
+export async function downloadDriveFileBytes(fileId: string): Promise<Buffer> {
+  const drive = await createDriveClient()
+  const res = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' },
+  )
+  return Buffer.from(res.data as ArrayBuffer)
+}
+
+/**
  * List files in the shared folder
  */
 export async function listDriveFiles(folderId?: string): Promise<Array<{
