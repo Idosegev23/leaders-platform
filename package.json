@@ -26,6 +26,7 @@
     "dom-to-pptx": "^1.1.6",
     "framer-motion": "^11.18.2",
     "googleapis": "^144.0.0",
+    "jsonrepair": "^3.14.0",
     "konva": "^10.2.3",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.11.0",

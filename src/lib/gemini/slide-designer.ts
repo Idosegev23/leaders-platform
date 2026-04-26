@@ -1795,9 +1795,11 @@ Each item is a COMPLETE, self-contained HTML document for one slide. Make them B
 
       const reports = await inspectAllSlides(finalSlides, slideTypes, imageFlags)
       const defective = reports.filter(r => r.hasDefects && r.score < 70)
+      const inspectedOk = reports.filter(r => r.inspectionStatus === 'ok').length
+      const inspectionFailed = reports.length - inspectedOk
 
       if (defective.length > 0) {
-        console.log(`[SlideDesigner][${requestId}] 🔄 Reflection: ${defective.length} slides need revision`)
+        console.log(`[SlideDesigner][${requestId}] 🔄 Reflection: ${defective.length} slides need revision (${inspectedOk}/${reports.length} fully inspected, ${inspectionFailed} fell back to text-only)`)
 
         for (const report of defective) {
           if (!report.revisionHint) continue
@@ -1831,7 +1833,11 @@ Each item is a COMPLETE, self-contained HTML document for one slide. Make them B
           }
         }
       } else {
-        console.log(`[SlideDesigner][${requestId}] ✅ Reflection: all slides passed inspection`)
+        if (inspectionFailed === 0) {
+          console.log(`[SlideDesigner][${requestId}] ✅ Reflection: all ${reports.length} slides passed full visual inspection`)
+        } else {
+          console.log(`[SlideDesigner][${requestId}] ⚠️ Reflection: ${inspectedOk}/${reports.length} slides fully inspected, ${inspectionFailed} fell back to text-only (no critical defects either way)`)
+        }
       }
     } catch (inspectErr) {
       console.warn(`[SlideDesigner][${requestId}] ⚠️ Vision inspection skipped: ${inspectErr instanceof Error ? inspectErr.message : String(inspectErr)}`)
