@@ -4,6 +4,19 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import GoogleDriveFolderPicker from '@/components/google-drive-folder-picker'
 
+const PICKER_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_GOOGLE_API_KEY)
+
+function parseDriveFolderInput(input: string): { id: string; name: string } | null {
+  if (!input) return null
+  const trimmed = input.trim()
+  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]{10,})/)
+  if (folderMatch) return { id: folderMatch[1], name: 'תיקיה ב-Drive' }
+  const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]{10,})/)
+  if (idMatch) return { id: idMatch[1], name: 'תיקיה ב-Drive' }
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return { id: trimmed, name: 'תיקיה ב-Drive' }
+  return null
+}
+
 type Props = {
   open: boolean
   onClose: () => void
@@ -19,6 +32,7 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
   const [recipientName, setRecipientName] = useState('')
   const [recipientEmail, setRecipientEmail] = useState('')
   const [folder, setFolder] = useState<StoredFolder | null>(null)
+  const [folderUrl, setFolderUrl] = useState('')
   const [title, setTitle] = useState(defaultTitle)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -44,8 +58,14 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
   const submit = async () => {
     setError(null)
     if (!recipientEmail.trim()) { setError('יש להזין מייל הנמען'); return }
-    if (!folder)                 { setError('יש לבחור תיקיה ב-Drive'); return }
     if (!title.trim())           { setError('יש להזין כותרת למסמך'); return }
+
+    // Resolve folder either from picker selection or from pasted URL.
+    const effectiveFolder = folder ?? parseDriveFolderInput(folderUrl)
+    if (!effectiveFolder) {
+      setError(PICKER_CONFIGURED ? 'יש לבחור תיקיה ב-Drive' : 'יש להדביק קישור לתיקיה ב-Drive')
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -69,8 +89,8 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
           title: title.trim(),
           recipient_email: recipientEmail.trim(),
           recipient_name: recipientName.trim() || null,
-          drive_folder_id: folder.id,
-          drive_folder_name: folder.name,
+          drive_folder_id: effectiveFolder.id,
+          drive_folder_name: effectiveFolder.name,
           pdf_base64: pdfBase64,
           message: message.trim() || null,
         }),
@@ -78,7 +98,7 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
       const j = await res.json()
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
       setSuccess({ sign_link: j.sign_link, drive_link: j.drive_link })
-      try { localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(folder)) } catch {}
+      try { localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(effectiveFolder)) } catch {}
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -157,26 +177,38 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
             </div>
 
             <Field label="תיקיית Drive לשמירה *">
-              <div className="flex items-center gap-3 flex-wrap">
-                <GoogleDriveFolderPicker
-                  buttonLabel={folder ? 'שנה תיקיה' : 'בחר תיקיה ב-Drive'}
-                  onPicked={(f) => setFolder(f)}
+              {PICKER_CONFIGURED ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <GoogleDriveFolderPicker
+                    buttonLabel={folder ? 'שנה תיקיה' : 'בחר תיקיה ב-Drive'}
+                    onPicked={(f) => setFolder(f)}
+                  />
+                  {folder && (
+                    <span className="inline-flex items-center gap-2 text-[12px] text-white/70">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      <span className="font-medium">{folder.name}</span>
+                      <button
+                        onClick={() => setFolder(null)}
+                        className="text-white/35 hover:text-white text-[10px] tracking-[0.18em] uppercase font-rubik"
+                      >
+                        נקה
+                      </button>
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <input
+                  value={folderUrl}
+                  onChange={(e) => setFolderUrl(e.target.value)}
+                  placeholder="https://drive.google.com/drive/folders/..."
+                  className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-3 py-2.5 text-[13px] outline-none placeholder:text-white/25 ltr-input"
+                  dir="ltr"
                 />
-                {folder && (
-                  <span className="inline-flex items-center gap-2 text-[12px] text-white/70">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                    <span className="font-medium">{folder.name}</span>
-                    <button
-                      onClick={() => setFolder(null)}
-                      className="text-white/35 hover:text-white text-[10px] tracking-[0.18em] uppercase font-rubik"
-                    >
-                      נקה
-                    </button>
-                  </span>
-                )}
-              </div>
-              <p className="mt-2 text-[10px] tracking-[0.18em] uppercase text-white/35 font-rubik">
-                ההעלאה תיעשה דרך חשבון Google שלך (לא צריך לשתף עם אף אחד).
+              )}
+              <p className="mt-2 text-[10px] tracking-[0.18em] uppercase text-white/35 font-rubik leading-relaxed">
+                {PICKER_CONFIGURED
+                  ? 'ההעלאה תיעשה דרך חשבון Google שלך (לא צריך לשתף עם אף אחד).'
+                  : 'הדבק קישור לתיקיה ב-Drive שיש לך גישה אליה. ההעלאה תעבור דרך חשבון Google שלך.'}
               </p>
             </Field>
 
