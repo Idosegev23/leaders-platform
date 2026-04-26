@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
+import path from 'path'
+import { promises as fs } from 'fs'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@supabase/supabase-js'
-import { PDFDocument, rgb } from 'pdf-lib'
+import { PDFDocument, rgb, type PDFFont } from 'pdf-lib'
+import fontkit from '@pdf-lib/fontkit'
 import {
   downloadDriveFileBytes,
   downloadDriveFileBytesAsUser,
@@ -240,6 +243,8 @@ async function stampPdfWithSignature(params: {
   signedAtIso: string
 }): Promise<Uint8Array> {
   const pdf = await PDFDocument.load(params.originalPdf)
+  pdf.registerFontkit(fontkit)
+
   const page = pdf.getPages().at(-1)
   if (!page) throw new Error('PDF has no pages')
 
@@ -291,36 +296,63 @@ async function stampPdfWithSignature(params: {
     }
   }
 
-  // Labels (left side, RTL via right-aligned via x positioning)
-  // We don't have a Hebrew-supporting font in pdf-lib by default.
-  // So we keep this minimal — the signed name + ISO date in Latin chars.
-  const helvetica = await pdf.embedFont('Helvetica')
-  const helveticaBold = await pdf.embedFont('Helvetica-Bold')
+  // Embed Hebrew-capable fonts (Heebo) so RTL names render correctly.
+  const heeboRegular = await loadEmbeddedFont(pdf, 'Heebo-Regular.ttf')
+  const heeboBold    = await loadEmbeddedFont(pdf, 'Heebo-Bold.ttf')
 
   const labelSize = 8
   const valueSize = 11
   const xLabel = margin + 18
 
-  page.drawText('SIGNED BY', { x: xLabel, y: baseY + boxHeight - 22, size: labelSize, font: helvetica, color: rgb(0.45, 0.45, 0.5) })
-  page.drawText(params.signerName, { x: xLabel, y: baseY + boxHeight - 38, size: valueSize, font: helveticaBold, color: rgb(0.1, 0.1, 0.18) })
+  drawText(page, 'SIGNED BY', xLabel, baseY + boxHeight - 22, labelSize, heeboRegular, rgb(0.45, 0.45, 0.5))
+  drawText(page, prepBidi(params.signerName), xLabel, baseY + boxHeight - 38, valueSize, heeboBold, rgb(0.1, 0.1, 0.18))
 
-  const dateLabel = formatStampDate(params.signedAtIso)
-  page.drawText('SIGNED AT', { x: xLabel, y: baseY + 38, size: labelSize, font: helvetica, color: rgb(0.45, 0.45, 0.5) })
-  page.drawText(dateLabel, { x: xLabel, y: baseY + 22, size: valueSize, font: helveticaBold, color: rgb(0.1, 0.1, 0.18) })
+  drawText(page, 'SIGNED AT', xLabel, baseY + 38, labelSize, heeboRegular, rgb(0.45, 0.45, 0.5))
+  drawText(page, formatStampDate(params.signedAtIso), xLabel, baseY + 22, valueSize, heeboBold, rgb(0.1, 0.1, 0.18))
 
   if (params.typedName && !params.signatureImageDataUrl) {
-    // Render typed name in a script-like font using italic Helvetica
-    const italic = await pdf.embedFont('Helvetica-Oblique')
-    page.drawText(params.typedName, {
-      x: margin + boxWidth - 220,
-      y: baseY + boxHeight / 2 - 6,
-      size: 22,
-      font: italic,
-      color: rgb(0.05, 0.05, 0.18),
-    })
+    drawText(page, prepBidi(params.typedName), margin + boxWidth - 220, baseY + boxHeight / 2 - 6, 22, heeboRegular, rgb(0.05, 0.05, 0.18))
   }
 
   return pdf.save()
+}
+
+let cachedFontBytes: Record<string, Buffer> = {}
+async function loadEmbeddedFont(pdf: PDFDocument, fileName: string): Promise<PDFFont> {
+  if (!cachedFontBytes[fileName]) {
+    const fontPath = path.join(process.cwd(), 'public', 'fonts', fileName)
+    cachedFontBytes[fileName] = await fs.readFile(fontPath)
+  }
+  return pdf.embedFont(cachedFontBytes[fileName], { subset: true })
+}
+
+function drawText(
+  page: ReturnType<PDFDocument['getPages']>[number],
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  font: PDFFont,
+  color: ReturnType<typeof rgb>,
+) {
+  page.drawText(text, { x, y, size, font, color })
+}
+
+/**
+ * pdf-lib draws glyphs left-to-right with no bidi reordering. For pure
+ * Hebrew runs we reverse the codepoints so the visual order ends up
+ * correct. For mixed strings we leave them — typical signer names are
+ * single-language so this is good enough.
+ */
+function prepBidi(text: string): string {
+  if (!text) return text
+  const isHebrew = /[֐-׿]/.test(text)
+  if (!isHebrew) return text
+  // If the string is overwhelmingly Hebrew (no Latin letters), reverse it.
+  if (!/[A-Za-z]/.test(text)) {
+    return Array.from(text).reverse().join('')
+  }
+  return text
 }
 
 function formatStampDate(iso: string): string {
