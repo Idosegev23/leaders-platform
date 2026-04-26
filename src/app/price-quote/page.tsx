@@ -186,6 +186,7 @@ export default function PriceQuotePage() {
         onClose={() => setSignDialogOpen(false)}
         defaultTitle={`הצעת מחיר · ${data.clientName || ''}${data.campaignName ? ' · ' + data.campaignName : ''}`.trim()}
         generatePdfBase64={generatePdfBase64}
+        quoteData={data}
       />
       {/* Top bar */}
       <div className="bg-white border-b px-6 py-4 flex items-center justify-between sticky top-0 z-50">

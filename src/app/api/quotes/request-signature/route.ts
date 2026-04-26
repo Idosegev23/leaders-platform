@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     pdf_base64?: string
     message?: string | null
     lead_id?: string | null
+    quote_data?: Record<string, unknown> | null
   } | null
 
   if (!body?.title || !body.recipient_email || !body.drive_folder_id || !body.pdf_base64) {
@@ -93,6 +94,14 @@ export async function POST(request: Request) {
     { auth: { persistSession: false } },
   )
 
+  // We snapshot quote_data into signature_requests.payload so the sign
+  // endpoint can regenerate the PDF *with* the signature filled into
+  // the template's dedicated fields, instead of stamping at the margin.
+  // Stored in payload (JSONB) — we already have an alterable column.
+  const requestPayload = body.quote_data
+    ? { source: 'price-quote', quote_data: body.quote_data }
+    : null
+
   const { data: req, error: insertErr } = await service
     .from('signature_requests')
     .insert({
@@ -107,6 +116,7 @@ export async function POST(request: Request) {
       created_by_name: senderName,
       cc_emails: defaultCcs(),
       status: 'pending',
+      ...(requestPayload ? { payload: requestPayload } : {}),
     })
     .select('id, token')
     .single()

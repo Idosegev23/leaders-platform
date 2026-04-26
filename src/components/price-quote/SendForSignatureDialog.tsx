@@ -22,13 +22,16 @@ type Props = {
   onClose: () => void
   defaultTitle: string
   generatePdfBase64: () => Promise<string>
+  // Untyped on purpose — caller passes whatever should be snapshotted
+  // for later regeneration. Server only treats it as JSONB.
+  quoteData?: unknown
 }
 
 const FOLDER_STORAGE_KEY = 'leaders.lastDriveFolder'
 
 type StoredFolder = { id: string; name: string }
 
-export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePdfBase64 }: Props) {
+export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePdfBase64, quoteData }: Props) {
   const [recipientName, setRecipientName] = useState('')
   const [recipientEmail, setRecipientEmail] = useState('')
   const [folder, setFolder] = useState<StoredFolder | null>(null)
@@ -93,6 +96,7 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
           drive_folder_name: effectiveFolder.name,
           pdf_base64: pdfBase64,
           message: message.trim() || null,
+          quote_data: quoteData ?? null,
         }),
       })
       const j = await res.json()

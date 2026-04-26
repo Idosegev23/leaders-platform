@@ -20,6 +20,9 @@ export default function SignClient(props: Props) {
   const [signerEmail, setSignerEmail] = useState(props.recipientEmail ?? '')
   const [signerRole, setSignerRole] = useState('')
   const [signerNotes, setSignerNotes] = useState('')
+  const [signerIdNumber, setSignerIdNumber] = useState('')
+  const [signerCompany, setSignerCompany] = useState('')
+  const [signerCompanyHp, setSignerCompanyHp] = useState('')
   const [agreed, setAgreed] = useState(false)
   const [mode, setMode] = useState<'draw' | 'type'>('draw')
   const [typedName, setTypedName] = useState('')
@@ -77,6 +80,9 @@ export default function SignClient(props: Props) {
           signer_email: signerEmail.trim() || null,
           signer_role: signerRole.trim() || null,
           signer_notes: signerNotes.trim() || null,
+          signer_id_number: signerIdNumber.trim() || null,
+          signer_company: signerCompany.trim() || null,
+          signer_company_hp: signerCompanyHp.trim() || null,
           signature_image: signatureImage,
           typed_name: typed,
         }),
@@ -171,6 +177,34 @@ export default function SignClient(props: Props) {
                 onChange={(e) => setSignerRole(e.target.value)}
                 placeholder="לדוגמה: מנכ״ל / מנהלת שיווק"
                 className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-4 py-3 text-[15px] outline-none placeholder:text-white/25 transition-colors"
+              />
+            </Field>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-5">
+            <Field label="ת.ז.">
+              <input
+                value={signerIdNumber}
+                onChange={(e) => setSignerIdNumber(e.target.value)}
+                inputMode="numeric"
+                className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-4 py-3 text-[15px] outline-none transition-colors ltr-input"
+                dir="ltr"
+              />
+            </Field>
+            <Field label="שם החברה">
+              <input
+                value={signerCompany}
+                onChange={(e) => setSignerCompany(e.target.value)}
+                className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-4 py-3 text-[15px] outline-none transition-colors"
+              />
+            </Field>
+            <Field label="ח.פ.">
+              <input
+                value={signerCompanyHp}
+                onChange={(e) => setSignerCompanyHp(e.target.value)}
+                inputMode="numeric"
+                className="w-full bg-white/[0.04] ring-1 ring-white/15 focus:ring-white/35 rounded-sm px-4 py-3 text-[15px] outline-none transition-colors ltr-input"
+                dir="ltr"
               />
             </Field>
           </div>

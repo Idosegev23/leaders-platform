@@ -19,6 +19,17 @@ export interface KPI {
   estimatedImpressions: string
 }
 
+export interface PriceQuoteSignature {
+  date: string                    // dd/mm/yyyy
+  signer_name: string
+  id_number?: string | null
+  signer_role?: string | null
+  company_name?: string | null
+  company_hp?: string | null
+  image_data_url?: string | null  // PNG of the drawn signature
+  typed_name?: string | null      // fallback when no canvas signature
+}
+
 export interface PriceQuoteData {
   // Header fields (variable per quote)
   clientName: string
@@ -43,4 +54,7 @@ export interface PriceQuoteData {
   platform: string // e.g. "אינסטגרם / טיקטוק"
   contractPeriod: string // e.g. "מרץ 26"
   additionalNotes: string[] // extra deliverable-specific notes
+
+  // Signature (filled when regenerating the PDF after the client signed)
+  signature?: PriceQuoteSignature | null
 }

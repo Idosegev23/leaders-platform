@@ -245,6 +245,35 @@ function baseStyles(): string {
       border-bottom: 1px solid #999;
       width: 140px;
       margin: 0 6px;
+      vertical-align: bottom;
+    }
+
+    .signature-line.filled {
+      border-bottom: 1px solid #1a1a2e;
+      color: #111;
+      font-weight: 500;
+      padding: 0 6px 1px;
+      min-height: 18px;
+    }
+
+    .signature-image {
+      display: inline-block;
+      max-height: 56px;
+      max-width: 240px;
+      border-bottom: 1px solid #1a1a2e;
+      padding-bottom: 2px;
+      vertical-align: bottom;
+    }
+
+    .signature-typed {
+      display: inline-block;
+      min-width: 180px;
+      border-bottom: 1px solid #1a1a2e;
+      font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+      font-style: italic;
+      font-size: 26px;
+      color: #111;
+      padding: 0 8px 2px;
     }
   `
 }
@@ -457,21 +486,49 @@ export function generatePage4(data: PriceQuoteData, logoUrl: string): string {
         ${CLIENT_DECLARATION}
       </p>
 
-      <div class="signature-fields">
-        תאריך: <span class="signature-line"></span>
-        שם מלא: <span class="signature-line"></span>
-        ת.ז: <span class="signature-line"></span>
-        תפקיד: <span class="signature-line"></span>
-        <br>
-        חתימה: <span class="signature-line"></span>
-        <br>
-        שם החברה: <span class="signature-line" style="width: 180px;"></span>
-        ח.פ: <span class="signature-line"></span>
-        חותמת: <span class="signature-line" style="width: 180px;"></span>
-      </div>
+      ${signatureBlockHtml(data)}
     </div>
     ${footerHtml()}
   `)
+}
+
+/** Signature block — uses the signed values from data.signature when present */
+function signatureBlockHtml(data: PriceQuoteData): string {
+  const sig = data.signature
+  const filled = (v?: string | null, width?: string) =>
+    v
+      ? `<span class="signature-line filled"${width ? ` style="width: ${width};"` : ''}>${escape(v)}</span>`
+      : `<span class="signature-line"${width ? ` style="width: ${width};"` : ''}></span>`
+
+  const sigImageHtml = sig?.image_data_url
+    ? `<img class="signature-image" src="${sig.image_data_url}" alt="signature" />`
+    : sig?.typed_name
+      ? `<span class="signature-typed">${escape(sig.typed_name)}</span>`
+      : `<span class="signature-line" style="width: 180px;"></span>`
+
+  return `
+    <div class="signature-fields">
+      תאריך: ${filled(sig?.date)}
+      שם מלא: ${filled(sig?.signer_name)}
+      ת.ז: ${filled(sig?.id_number)}
+      תפקיד: ${filled(sig?.signer_role)}
+      <br>
+      חתימה: ${sigImageHtml}
+      <br>
+      שם החברה: ${filled(sig?.company_name, '180px')}
+      ח.פ: ${filled(sig?.company_hp)}
+      חותמת: ${filled(null, '180px')}
+    </div>
+  `
+}
+
+function escape(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
 
 /** Generate all 4 pages as HTML strings */

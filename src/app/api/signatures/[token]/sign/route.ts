@@ -13,6 +13,9 @@ import {
 } from '@/lib/google-drive/client'
 import { sendGmailEmail, refreshAccessToken } from '@/lib/gmail'
 import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
+import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
+import { generateMultiPagePdf } from '@/lib/playwright/pdf'
+import type { PriceQuoteData, PriceQuoteSignature } from '@/types/price-quote'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -44,6 +47,13 @@ export async function POST(
     typed_name?: string
   } | null
 
+  // Cast to a richer body shape that includes the new optional fields
+  const richBody = body as (typeof body) & {
+    signer_id_number?: string | null
+    signer_company?: string | null
+    signer_company_hp?: string | null
+  }
+
   if (!body || !body.signer_name || (!body.signature_image && !body.typed_name)) {
     return NextResponse.json(
       { error: 'נדרשים שם החותם וחתימה (ציור או הקלדה)' },
@@ -60,7 +70,7 @@ export async function POST(
   // Fetch the request
   const { data: req, error: fetchErr } = await supabase
     .from('signature_requests')
-    .select('id, token, title, pdf_drive_file_id, pdf_drive_folder_id, status, recipient_email, recipient_name, created_by_email, created_by_name, cc_emails, lead_id, expires_at')
+    .select('id, token, title, pdf_drive_file_id, pdf_drive_folder_id, payload, status, recipient_email, recipient_name, created_by_email, created_by_name, cc_emails, lead_id, expires_at')
     .eq('token', token)
     .maybeSingle()
 
@@ -86,40 +96,80 @@ export async function POST(
     catch (e) { console.warn('[sign] refresh failed:', e) }
   }
 
-  // Download the original PDF from Drive — try user OAuth first
-  // (because we uploaded it as the user). Service account is a last-ditch
-  // fallback (only works if the folder happens to be shared with it).
-  let originalPdfBytes: Buffer
-  try {
-    if (senderAccess) {
-      originalPdfBytes = await downloadDriveFileBytesAsUser(senderAccess, req.pdf_drive_file_id)
-    } else {
-      originalPdfBytes = await downloadDriveFileBytes(req.pdf_drive_file_id)
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: `שליפת PDF המקור נכשלה: ${msg}` }, { status: 500 })
-  }
+  // Two paths to produce the signed PDF:
+  //  (a) PREFERRED — if we have the source PriceQuoteData snapshot,
+  //      regenerate the whole PDF from the template with the signature
+  //      injected into the dedicated fields. Cleanest result.
+  //  (b) FALLBACK — download original from Drive and stamp the signature
+  //      at the bottom margin. Used when no snapshot is stored (legacy
+  //      requests from before this refactor).
+  const quoteData = (req.payload as { source?: string; quote_data?: PriceQuoteData } | null)?.quote_data
+  const signedAtIsoEarly = new Date().toISOString()
+  const dateStr = new Date(signedAtIsoEarly).toLocaleDateString('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
 
-  // Sanity check — the file must start with %PDF
-  const head = originalPdfBytes.subarray(0, 8).toString('latin1')
-  if (!head.includes('%PDF')) {
-    return NextResponse.json({ error: 'הקובץ ב-Drive אינו PDF תקין' }, { status: 500 })
-  }
-
-  // Stamp the PDF
   let signedPdfBytes: Uint8Array
-  try {
-    signedPdfBytes = await stampPdfWithSignature({
-      originalPdf: originalPdfBytes,
-      signerName: body.signer_name,
-      signatureImageDataUrl: body.signature_image ?? null,
-      typedName: body.typed_name ?? null,
-      signedAtIso: new Date().toISOString(),
-    })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: `Stamp failed: ${msg}` }, { status: 500 })
+  if (quoteData) {
+    try {
+      const signatureBlock: PriceQuoteSignature = {
+        date: dateStr,
+        signer_name: body.signer_name,
+        id_number: richBody.signer_id_number ?? null,
+        signer_role: body.signer_role ?? null,
+        company_name: richBody.signer_company ?? null,
+        company_hp: richBody.signer_company_hp ?? null,
+        image_data_url: body.signature_image ?? null,
+        typed_name: body.signature_image ? null : (body.typed_name ?? null),
+      }
+
+      const pages = generatePriceQuotePages(
+        { ...quoteData, signature: signatureBlock },
+        // base URL for the embedded logo. We're server-side in Vercel.
+        process.env.NEXT_PUBLIC_APP_URL ||
+          (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app'),
+      )
+      const buffer = await generateMultiPagePdf(pages, {
+        format: 'A4',
+        title: `${req.title} (חתום)`,
+        brandName: req.title,
+      })
+      signedPdfBytes = new Uint8Array(buffer)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return NextResponse.json({ error: `יצירת PDF חתום נכשלה: ${msg}` }, { status: 500 })
+    }
+  } else {
+    // Fallback: stamp the original at the bottom margin
+    let originalPdfBytes: Buffer
+    try {
+      if (senderAccess) {
+        originalPdfBytes = await downloadDriveFileBytesAsUser(senderAccess, req.pdf_drive_file_id)
+      } else {
+        originalPdfBytes = await downloadDriveFileBytes(req.pdf_drive_file_id)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return NextResponse.json({ error: `שליפת PDF המקור נכשלה: ${msg}` }, { status: 500 })
+    }
+    const head = originalPdfBytes.subarray(0, 8).toString('latin1')
+    if (!head.includes('%PDF')) {
+      return NextResponse.json({ error: 'הקובץ ב-Drive אינו PDF תקין' }, { status: 500 })
+    }
+    try {
+      signedPdfBytes = await stampPdfWithSignature({
+        originalPdf: originalPdfBytes,
+        signerName: body.signer_name,
+        signatureImageDataUrl: body.signature_image ?? null,
+        typedName: body.typed_name ?? null,
+        signedAtIso: signedAtIsoEarly,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return NextResponse.json({ error: `Stamp failed: ${msg}` }, { status: 500 })
+    }
   }
 
   // Upload signed PDF to the same folder as the original. Prefer the
@@ -164,6 +214,9 @@ export async function POST(
       signer_email: body.signer_email ?? req.recipient_email,
       signer_role: body.signer_role ?? null,
       signer_notes: body.signer_notes ?? null,
+      signer_id_number: richBody.signer_id_number ?? null,
+      signer_company: richBody.signer_company ?? null,
+      signer_company_hp: richBody.signer_company_hp ?? null,
       signed_pdf_drive_file_id: signedUpload.id,
       signed_pdf_drive_view_link: signedUpload.viewLink,
     })
