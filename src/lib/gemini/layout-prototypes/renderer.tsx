@@ -297,6 +297,34 @@ function renderNumberedStats(slots: NumberedStatsSlots, ds: DesignSystem): strin
 
 function renderInfluencerGrid(slots: InfluencerGridSlots, ds: DesignSystem): string {
   const { colors: c } = ds
+  const list = (slots.influencers || []).filter(inf => inf?.name?.trim())
+  // No real influencers — render a calm placeholder instead of an empty
+  // grid (or worse, hallucinated names without photos).
+  if (list.length === 0) {
+    return `<div class="slide">
+      <div class="atm-1"></div>
+      ${slots.eyebrowLabel ? `<div class="eyebrow" data-editable="text" data-role="eyebrow">${esc(slots.eyebrowLabel)}</div>` : ''}
+      <div style="position:absolute; top:80px; right:80px; left:80px; z-index:10;">
+        <h1 data-editable="text" data-role="title" class="title-shadow"
+            style="font-size:64px; font-weight:900; line-height:1.0; color:${c.text}; letter-spacing:-2px; margin-bottom:12px;">
+          ${esc(slots.title)}
+        </h1>
+        ${slots.subtitle ? `<p data-editable="text" data-role="subtitle" style="font-size:20px; font-weight:300; color:${c.muted};">${esc(slots.subtitle)}</p>` : ''}
+      </div>
+      <div style="position:absolute; top:50%; right:80px; left:80px; transform:translateY(-30%); z-index:10;
+                  background:${c.cardBg}; backdrop-filter:blur(14px); border:1px dashed ${c.text}30; border-radius:24px;
+                  padding:64px 48px; text-align:center;">
+        <div style="font-size:80px; font-weight:900; color:${c.primary}40; line-height:1; margin-bottom:24px; letter-spacing:-3px;">+12</div>
+        <p data-editable="text" data-role="body" style="font-size:22px; font-weight:500; color:${c.text}; margin-bottom:12px;">
+          רשימת המשפיענים בהתאמה אישית למותג
+        </p>
+        <p data-editable="text" data-role="caption" style="font-size:15px; font-weight:300; color:${c.muted}; line-height:1.6;">
+          ננפיק רשימה מאומתת של 8-12 משפיעניות עם נתוני קהל ישראלי, ER ופרופילים מלאים — לאחר אישור ההצעה ובחירת תקציב המשפיענים.
+        </p>
+      </div>
+      <div class="stripe-bottom"></div>
+    </div>`
+  }
   return `<div class="slide">
     <div class="atm-1"></div>
     ${slots.eyebrowLabel ? `<div class="eyebrow" data-editable="text" data-role="eyebrow">${esc(slots.eyebrowLabel)}</div>` : ''}
@@ -308,7 +336,7 @@ function renderInfluencerGrid(slots: InfluencerGridSlots, ds: DesignSystem): str
       ${slots.subtitle ? `<p data-editable="text" data-role="subtitle" style="font-size:20px; font-weight:300; color:${c.muted};">${esc(slots.subtitle)}</p>` : ''}
     </div>
     <div style="position:absolute; top:280px; right:80px; left:80px; bottom:80px; display:grid; grid-template-columns: repeat(3, 1fr); gap:24px; z-index:10;">
-      ${(slots.influencers || []).slice(0, 6).map(inf => `
+      ${list.slice(0, 6).map(inf => `
         <div data-editable="influencer" style="background:${c.cardBg}; backdrop-filter:blur(12px); border:1px solid ${c.text}15; border-radius:16px; padding:24px; display:flex; flex-direction:column; align-items:center; text-align:center;">
           ${inf.profilePicUrl
             ? `<img src="${esc(inf.profilePicUrl)}" style="width:96px; height:96px; border-radius:50%; border:3px solid ${c.primary}; object-fit:cover; margin-bottom:16px;" alt="${esc(inf.name)}" />`

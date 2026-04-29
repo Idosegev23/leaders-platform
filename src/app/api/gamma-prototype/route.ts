@@ -54,17 +54,47 @@ export async function POST(request: NextRequest) {
         .join('\n\n')
     })()
 
-    const infStrategy = data._influencerStrategy as
-      | { influencers?: Array<Record<string, unknown>> }
-      | undefined
-    const influencers = (infStrategy?.influencers || []).slice(0, 8).map((inf) => ({
-      name: String(inf.fullname || inf.name || inf.username || ''),
-      handle: String(inf.username || inf.handle || ''),
-      followers: formatFollowers(inf.followers),
-      engagement: formatEngagement(inf.engagement_rate),
-      profilePicUrl: typeof inf.picture === 'string' ? inf.picture : undefined,
-      isVerified: Boolean(inf.is_verified),
-    })).filter((i) => i.name)
+    // Influencers — prefer the wizard's edited list (enhancedInfluencers,
+    // already enriched with IMAI photos / engagement / Israeli audience %)
+    // over the raw research output. Falls back to _influencerStrategy.influencers
+    // for older documents that pre-date the wizard's per-row enrichment.
+    type EnhancedInf = {
+      name?: string
+      username?: string
+      profilePicUrl?: string
+      followers?: number
+      engagementRate?: number
+      isVerified?: boolean
+    }
+    type RawResearchInf = {
+      fullname?: string
+      name?: string
+      username?: string
+      handle?: string
+      picture?: string
+      followers?: number
+      engagement_rate?: number
+      is_verified?: boolean
+    }
+    const enhancedRaw = (data.enhancedInfluencers as EnhancedInf[] | undefined) || []
+    const researchRaw = (((data._influencerStrategy as { influencers?: RawResearchInf[] } | undefined)?.influencers) || [])
+    const sourceList: Array<EnhancedInf | RawResearchInf> = enhancedRaw.length > 0 ? enhancedRaw : researchRaw
+    const influencers = sourceList.slice(0, 8).map((inf): {
+      name: string; handle: string; followers: string; engagement: string;
+      profilePicUrl?: string; isVerified?: boolean
+    } => {
+      const enh = inf as EnhancedInf
+      const raw = inf as RawResearchInf
+      return {
+        name: String(raw.fullname || enh.name || raw.name || enh.username || raw.username || ''),
+        handle: String(enh.username || raw.username || raw.handle || ''),
+        followers: formatFollowers(enh.followers ?? raw.followers),
+        engagement: formatEngagement(enh.engagementRate ?? raw.engagement_rate),
+        profilePicUrl: enh.profilePicUrl || raw.picture || undefined,
+        isVerified: enh.isVerified ?? raw.is_verified ?? false,
+      }
+    }).filter((i) => i.name)
+    console.log(`[gamma-proto] influencers: ${influencers.length} (${enhancedRaw.length} enhanced, ${researchRaw.length} research)`)
 
     const imgs = (data._generatedImages as Record<string, string>) || {}
     const images = {
