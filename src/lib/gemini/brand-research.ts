@@ -140,6 +140,56 @@ export interface BrandResearch {
     languageStyle: string
     avoid: string
   }
+
+  // Visual Brand DNA — drives image generation, renderer atmosphere, deck consistency.
+  // The whole point: two different brands shouldn't yield two visually identical decks.
+  visualDNA?: {
+    /** Photographic style for AI-generated imagery and reference scraping. */
+    photoStyle:
+      | 'clinical'           // medical/pharma — white bg, clean, sterile
+      | 'lifestyle'          // people in real contexts, warm, candid
+      | 'editorial'          // fashion-magazine — high contrast, posed
+      | 'documentary'        // raw, unposed, photo-journalism
+      | 'illustrated'        // graphic illustration over photography
+      | 'minimal-product'    // hero shot, neutral bg, premium
+    /** How the brand typically photographs its products. */
+    productStyle:
+      | 'white-bg-hero'      // catalog/e-comm style
+      | 'lifestyle-context'  // product in use
+      | 'hand-held'          // human scale, intimate
+      | 'flat-lay'           // top-down arrangement
+      | 'extreme-close'      // texture/detail focus
+    /** Decorative aesthetic for the entire deck (atmospheres, dividers, accents). */
+    decorativeStyle:
+      | 'minimal'
+      | 'maximalist'
+      | 'organic-soft'
+      | 'geometric-strict'
+      | 'retro'
+      | 'brutalist'
+    /** Lighting mood for AI image generation. */
+    lightingStyle:
+      | 'bright-clean'
+      | 'golden-hour'
+      | 'studio-flash'
+      | 'moody-low-key'
+      | 'natural-soft'
+    /** Typography mood — guides font choice + scale. */
+    typographyMood:
+      | 'serif-editorial'
+      | 'sans-tight'
+      | 'sans-airy'
+      | 'display-bold'
+      | 'monospace-tech'
+    /** Recurring visual element from the brand's site/packaging — woven into renderer. */
+    recurringPattern?: {
+      type: 'wave' | 'dots' | 'lines' | 'gradient' | 'grid' | 'none'
+      description: string
+    }
+    /** Free-text description of the brand's visual mood — used as inspiration in image prompts. */
+    moodDescription: string
+  }
+
   marketPosition_implication?: string
   audience_implication?: string
   competitors_implication?: string
@@ -361,6 +411,15 @@ ${websiteContext}
 - "opportunities": [2-3 הזדמנויות שעלו מהמחקר]
 - "risks": [2-3 סיכונים שצריך לדעת עליהם]
 - "brandVoiceGuide": { "personality": "3-5 תכונות מרכזיות", "toneSpectrum": "פורמלי — קז'ואל, היכן המותג?", "languageStyle": "לועזית? עברית נקייה? סלנג?", "avoid": "מה לא מתאים לטון הזה" }
+- "visualDNA": { ה-DNA הוויזואלי של המותג. **קריטי לעיצוב מצגת שמרגישה כמו המותג**:
+    "photoStyle": אחד מ: clinical / lifestyle / editorial / documentary / illustrated / minimal-product
+    "productStyle": אחד מ: white-bg-hero / lifestyle-context / hand-held / flat-lay / extreme-close (איך המותג בדרך כלל מצלם מוצרים)
+    "decorativeStyle": אחד מ: minimal / maximalist / organic-soft / geometric-strict / retro / brutalist
+    "lightingStyle": אחד מ: bright-clean / golden-hour / studio-flash / moody-low-key / natural-soft
+    "typographyMood": אחד מ: serif-editorial / sans-tight / sans-airy / display-bold / monospace-tech
+    "recurringPattern": { "type": "wave/dots/lines/gradient/grid/none", "description": "תיאור הדפוס" } — אם זוהה דפוס חוזר באתר/אריזה
+    "moodDescription": "תיאור 2-3 משפטים של ה-mood הוויזואלי. דוגמאות: 'sterile, premium, baby-safe — bright clean lighting on muted pastels with soft organic curves' או 'rugged, outdoor, israeli-grit — golden-hour lighting on natural textures with bold geometric typography'."
+  }
 
 החזר JSON מפורט בלבד, לפי המבנה המדויק הבא:
 \`\`\`json
@@ -433,6 +492,15 @@ ${websiteContext}
   "tensions": ["מתח 1 שזוהה בין המותג/הקהל/השוק", "מתח 2", "מתח 3"],
   "opportunities": ["הזדמנות 1 שעלתה מהמחקר", "הזדמנות 2"],
   "risks": ["סיכון 1 שצריך לדעת עליו", "סיכון 2"],
+  "visualDNA": {
+    "photoStyle": "lifestyle",
+    "productStyle": "hand-held",
+    "decorativeStyle": "organic-soft",
+    "lightingStyle": "natural-soft",
+    "typographyMood": "sans-airy",
+    "recurringPattern": { "type": "wave", "description": "soft horizontal waves echoing the packaging curves" },
+    "moodDescription": "תיאור 2-3 משפטים של mood ויזואלי ספציפי למותג"
+  },
   "brandVoiceGuide": {
     "personality": "3-5 תכונות מרכזיות של אישיות המותג",
     "toneSpectrum": "פורמלי — קז'ואל, היכן המותג?",

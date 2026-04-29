@@ -35,6 +35,20 @@ export interface DesignSystem {
     visualMetaphor?: string
     oneRule?: string
   }
+  /** Brand-specific visual DNA — drives renderer atmosphere/decorations so two
+   *  different brands don't end up with identical-looking decks. */
+  visualDNA?: {
+    decorativeStyle?:
+      | 'minimal' | 'maximalist' | 'organic-soft'
+      | 'geometric-strict' | 'retro' | 'brutalist'
+    typographyMood?:
+      | 'serif-editorial' | 'sans-tight' | 'sans-airy'
+      | 'display-bold' | 'monospace-tech'
+    recurringPattern?: {
+      type: 'wave' | 'dots' | 'lines' | 'gradient' | 'grid' | 'none'
+      description?: string
+    }
+  }
 }
 
 // ─── Slot schemas per layout ───────────────────────────

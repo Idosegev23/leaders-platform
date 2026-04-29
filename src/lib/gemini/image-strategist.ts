@@ -55,6 +55,20 @@ export async function analyzeAndPlanImages(
 - צבע ראשי: ${brandColors.primary}
 - צבע משני: ${brandColors.secondary || brandColors.accent}
 
+${(() => {
+  const dna = brandResearch.visualDNA
+  if (!dna) return ''
+  return `## DNA ויזואלי של המותג (חובה לשקף בכל תמונה!)
+- photoStyle: **${dna.photoStyle}** (clinical/lifestyle/editorial/documentary/illustrated/minimal-product)
+- productStyle: **${dna.productStyle}** (איך מצלמים מוצרים: ${dna.productStyle})
+- lightingStyle: **${dna.lightingStyle}** (התאורה שתעקוב לכל התמונות)
+- decorativeStyle: **${dna.decorativeStyle}** (mood דקורטיבי כללי)
+${dna.recurringPattern && dna.recurringPattern.type !== 'none' ? `- recurringPattern: ${dna.recurringPattern.type} — ${dna.recurringPattern.description}` : ''}
+- moodDescription: ${dna.moodDescription}
+
+**קריטי**: כל התמונות חייבות להיראות כמו אחיות באותה הפקה — אותו photoStyle, אותו lightingStyle, אותו mood. לא סדרה של תמונות נפרדות. שקף שונה אחד מהשני בנושא, אבל זהה ב-DNA. התעלם מ"רקעים כהים+glassmorphism" אם ה-DNA מציע משהו אחר.`
+})()}
+
 ## מטרות הקמפיין
 ${proposalContent?.goals?.map(g => `- ${g.title}: ${g.description}`).join('\n') || 'הגברת מודעות ומעורבות'}
 ${slideDesignHints ? `

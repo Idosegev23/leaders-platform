@@ -68,6 +68,20 @@ export async function generateSmartPrompts(
 - משני: ${brandColors.secondary || brandColors.accent}
 - נוסף: ${brandColors.accent}
 
+${(() => {
+  const dna = brandResearch.visualDNA
+  if (!dna) return ''
+  return `## ה-DNA הוויזואלי של המותג (חובה לשקף בכל פרומפט!)
+- photoStyle: **${dna.photoStyle}** — כל פרומפט חייב לבטא סגנון צילום זה (לדוגמה: clinical = white bg + sterile crisp light, lifestyle = candid people in real spaces, editorial = high-fashion magazine, documentary = unposed photo-journalism, illustrated = graphic illustration, minimal-product = neutral hero on muted bg).
+- productStyle: **${dna.productStyle}** — איך המותג מצלם את המוצר שלו (white-bg-hero / lifestyle-context / hand-held / flat-lay / extreme-close).
+- lightingStyle: **${dna.lightingStyle}** — תאורה שתעקוב לכל התמונות (bright-clean / golden-hour / studio-flash / moody-low-key / natural-soft).
+- decorativeStyle: **${dna.decorativeStyle}** — מצב רוח דקורטיבי כללי.
+${dna.recurringPattern && dna.recurringPattern.type !== 'none' ? `- recurringPattern: ${dna.recurringPattern.type} — ${dna.recurringPattern.description}` : ''}
+- moodDescription: ${dna.moodDescription}
+
+**אסור** לכתוב פרומפט גנרי. כל פרומפט חייב לחזור על ה-photoStyle ועל ה-lightingStyle של המותג. שקף שונה אחד מהשני בנושא, אבל זהה ב-DNA.`
+})()}
+
 ## הכיוון הויזואלי
 ${strategy.conceptSummary}
 ${strategy.visualDirection}

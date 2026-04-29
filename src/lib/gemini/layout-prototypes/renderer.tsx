@@ -25,22 +25,116 @@ import type {
 
 function buildCommonCss(ds: DesignSystem): string {
   const { colors: c } = ds
+  // ─── Brand-DNA-driven atmosphere variants ───
+  // Default style is "minimal" (the original glow-only look); other
+  // decorativeStyles change atm-1 + stripes + add a recurring pattern overlay
+  // so two different brands don't render to identical-looking decks.
+  const decoStyle = ds.visualDNA?.decorativeStyle || 'minimal'
+  const pattern = ds.visualDNA?.recurringPattern?.type || 'none'
+
+  const atmCss = (() => {
+    switch (decoStyle) {
+      case 'organic-soft':
+        return `.atm-1 {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          background:
+            radial-gradient(ellipse 80% 90% at 20% 70%, ${c.primary}33, transparent 65%),
+            radial-gradient(ellipse 70% 80% at 80% 25%, ${c.accent}22, transparent 60%);
+          filter: blur(40px);
+        }`
+      case 'maximalist':
+        return `.atm-1 {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          background:
+            radial-gradient(circle at 10% 20%, ${c.primary}55, transparent 35%),
+            radial-gradient(circle at 90% 30%, ${c.accent}44, transparent 35%),
+            radial-gradient(circle at 30% 90%, ${c.primary}33, transparent 40%),
+            conic-gradient(from 45deg at 70% 60%, ${c.accent}22, transparent 30%);
+        }`
+      case 'geometric-strict':
+        return `.atm-1 {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          background:
+            linear-gradient(180deg, ${c.background} 0%, ${c.background} 60%, ${c.primary}15 100%);
+        }
+        .stripe-top, .stripe-bottom { background: ${c.primary} !important; height: 4px !important; }`
+      case 'retro':
+        return `.atm-1 {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          background:
+            repeating-linear-gradient(0deg, ${c.text}05 0 1px, transparent 1px 6px),
+            radial-gradient(ellipse 100% 60% at 50% 50%, ${c.primary}22, transparent 70%);
+        }`
+      case 'brutalist':
+        return `.atm-1 {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          background: ${c.background};
+        }
+        .stripe-top, .stripe-bottom { background: ${c.text} !important; height: 6px !important; }`
+      case 'minimal':
+      default:
+        return `.atm-1 {
+          position: absolute; inset: 0; z-index: 1; pointer-events: none;
+          background:
+            radial-gradient(ellipse 120% 80% at 15% 50%, ${c.primary}22, transparent 60%),
+            radial-gradient(ellipse 80% 120% at 85% 30%, ${c.accent}18, transparent 55%);
+        }`
+    }
+  })()
+
+  // Recurring pattern overlay — shows on top of atm-1 if specified.
+  const patternCss = (() => {
+    switch (pattern) {
+      case 'wave':
+        return `.atm-pattern {
+          position: absolute; left: 0; right: 0; bottom: 0; height: 220px; z-index: 2; pointer-events: none; opacity: 0.6;
+          background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 220' preserveAspectRatio='none'><path d='M0 110 C 480 30, 960 190, 1920 90 L 1920 220 L 0 220 Z' fill='${encodeURIComponent(c.primary)}' fill-opacity='0.18'/><path d='M0 140 C 480 60, 960 220, 1920 120 L 1920 220 L 0 220 Z' fill='${encodeURIComponent(c.accent)}' fill-opacity='0.12'/></svg>") center/100% 100% no-repeat;
+        }`
+      case 'dots':
+        return `.atm-pattern {
+          position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.18;
+          background-image: radial-gradient(circle, ${c.primary} 1px, transparent 1.5px);
+          background-size: 28px 28px;
+        }`
+      case 'lines':
+        return `.atm-pattern {
+          position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.12;
+          background-image: repeating-linear-gradient(135deg, ${c.primary} 0 1px, transparent 1px 22px);
+        }`
+      case 'gradient':
+        return `.atm-pattern {
+          position: absolute; inset: 0; z-index: 2; pointer-events: none;
+          background: linear-gradient(115deg, ${c.primary}1a 0%, transparent 40%, ${c.accent}1a 100%);
+        }`
+      case 'grid':
+        return `.atm-pattern {
+          position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.10;
+          background-image:
+            linear-gradient(${c.text} 1px, transparent 1px),
+            linear-gradient(90deg, ${c.text} 1px, transparent 1px);
+          background-size: 80px 80px;
+        }`
+      case 'none':
+      default:
+        return `.atm-pattern { display: none; }`
+    }
+  })()
+
+  const headingFont = ds.fonts?.heading || 'Heebo'
+  const bodyFont = ds.fonts?.body || 'Heebo'
+
   return `
     * { margin: 0; padding: 0; box-sizing: border-box; }
     .slide {
       width: 1920px; height: 1080px;
       position: relative; overflow: hidden;
-      font-family: 'Heebo', sans-serif; direction: rtl;
+      font-family: '${bodyFont}', 'Heebo', sans-serif; direction: rtl;
       background: ${c.background};
       color: ${c.text};
     }
-    /* 5-layer atmospheric glows — always present */
-    .atm-1 {
-      position: absolute; inset: 0; z-index: 1; pointer-events: none;
-      background:
-        radial-gradient(ellipse 120% 80% at 15% 50%, ${c.primary}22, transparent 60%),
-        radial-gradient(ellipse 80% 120% at 85% 30%, ${c.accent}18, transparent 55%);
-    }
+    h1, h2, h3, h4 { font-family: '${headingFont}', '${bodyFont}', 'Heebo', sans-serif; }
+    ${atmCss}
+    ${patternCss}
     /* Accent stripes (Layer 2) */
     .stripe-top { position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 5;
       background: linear-gradient(90deg, ${c.primary}, ${c.accent}, transparent); }
@@ -84,9 +178,25 @@ function buildCommonCss(ds: DesignSystem): string {
   `
 }
 
-function htmlDoc(innerBody: string, css: string, extraHead = ''): string {
+function htmlDoc(innerBody: string, css: string, extraHead = '', ds?: DesignSystem): string {
+  // Always include Heebo (the existing default + safety net for Hebrew).
+  // Add brand-mood-driven secondary fonts when the DesignSystem requests them.
+  const fonts = new Set<string>(['Heebo:wght@100;300;400;500;700;800;900'])
+  const head = ds?.fonts?.heading
+  const body = ds?.fonts?.body
+  const FONT_QUERY: Record<string, string> = {
+    'Frank Ruhl Libre': 'Frank+Ruhl+Libre:wght@300;400;500;700;900',
+    'Anton': 'Anton',
+    'Rubik': 'Rubik:wght@300;400;500;700;900',
+    'Assistant': 'Assistant:wght@200;300;400;500;700;800',
+    'IBM Plex Mono': 'IBM+Plex+Mono:wght@300;400;500;700',
+  }
+  for (const name of [head, body]) {
+    if (name && FONT_QUERY[name]) fonts.add(FONT_QUERY[name])
+  }
+  const familyParam = Array.from(fonts).map(f => `family=${f}`).join('&')
   return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@100;300;400;500;700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?${familyParam}&display=swap" rel="stylesheet">
 <style>${css}</style>
 ${extraHead}
 </head><body>${innerBody}</body></html>`
@@ -459,7 +569,7 @@ export function renderStructuredSlide(
   body = body.replace(/<\/div>\s*$/, `${gridOverlay}</div>`)
   const snapConfig = `<script>window.__gammaSnap=${opts.snap ? 40 : 0};</script>`
   const extra = snapConfig + REPARENT_SCRIPT + (opts.editor ? EDITOR_SCRIPT : '')
-  return htmlDoc(body, buildCommonCss(ds), extra)
+  return htmlDoc(body, buildCommonCss(ds), extra, ds)
 }
 
 // ─── Element style overrides (hybrid free-move) ──────────
@@ -506,10 +616,17 @@ const REPARENT_SCRIPT = `
 
 // ─── Decorations: make them selectable ────────────────────
 
-const DECOR_CLASSES = ['atm-1', 'stripe-top', 'stripe-bottom', 'corner-tl', 'corner-br', 'slide-num', 'img-bleed', 'img-overlay']
+const DECOR_CLASSES = ['atm-1', 'atm-pattern', 'stripe-top', 'stripe-bottom', 'corner-tl', 'corner-br', 'slide-num', 'img-bleed', 'img-overlay']
 
 function decorateDecorations(body: string): string {
   let out = body
+  // Insert the brand-pattern overlay right after the atmosphere layer on every
+  // slide that has one. The CSS class is always defined (it falls back to
+  // display:none for "none" pattern), so this is safe to add unconditionally.
+  out = out.replace(
+    /<div class="atm-1"[^>]*><\/div>/,
+    (m) => `${m}<div class="atm-pattern"></div>`,
+  )
   for (const cls of DECOR_CLASSES) {
     const re = new RegExp(`(<(?:div|img)\\s+[^>]*?class="${cls}"(?![^>]*data-role))`, 'g')
     out = out.replace(re, `$1 data-role="decor-${cls}" data-editable="decor"`)

@@ -305,6 +305,20 @@ export interface GenerateStructuredInput {
     productImages?: string[]
     lifestyleImages?: string[]
   }
+  /** Visual brand DNA extracted from research — drives renderer atmosphere. */
+  visualDNA?: {
+    decorativeStyle?:
+      | 'minimal' | 'maximalist' | 'organic-soft'
+      | 'geometric-strict' | 'retro' | 'brutalist'
+    typographyMood?:
+      | 'serif-editorial' | 'sans-tight' | 'sans-airy'
+      | 'display-bold' | 'monospace-tech'
+    recurringPattern?: {
+      type: 'wave' | 'dots' | 'lines' | 'gradient' | 'grid' | 'none'
+      description?: string
+    }
+    moodDescription?: string
+  }
 }
 
 export async function generateStructuredPresentation(
@@ -491,6 +505,32 @@ async function buildUserPrompt(input: GenerateStructuredInput): Promise<string> 
 
 // ─── Normalization / safety ───────────────────────────────
 
+/**
+ * Pick a Hebrew-capable Google Font for a given typography mood. All fall back
+ * to Heebo (the existing default) so existing decks render identically.
+ */
+function pickFontForMood(
+  mood: GenerateStructuredInput['visualDNA'] extends infer T
+    ? T extends { typographyMood?: infer M } ? M : undefined : undefined,
+  slot: 'heading' | 'body',
+): string {
+  switch (mood) {
+    case 'serif-editorial':
+      return slot === 'heading' ? 'Frank Ruhl Libre' : 'Heebo'
+    case 'display-bold':
+      return slot === 'heading' ? 'Anton' : 'Heebo'
+    case 'sans-tight':
+      return 'Rubik'
+    case 'sans-airy':
+      return 'Assistant'
+    case 'monospace-tech':
+      return slot === 'heading' ? 'IBM Plex Mono' : 'Heebo'
+    case 'sans-airy' as never:
+    default:
+      return 'Heebo'
+  }
+}
+
 const ALLOWED_LAYOUTS: LayoutId[] = [
   'hero-cover',
   'full-bleed-image-text',
@@ -517,10 +557,17 @@ function normalizePresentation(
       cardBg: pres.designSystem?.colors?.cardBg || 'rgba(255,255,255,0.04)',
     },
     fonts: {
-      heading: pres.designSystem?.fonts?.heading || 'Heebo',
-      body: pres.designSystem?.fonts?.body || 'Heebo',
+      heading: pres.designSystem?.fonts?.heading || pickFontForMood(input.visualDNA?.typographyMood, 'heading'),
+      body: pres.designSystem?.fonts?.body || pickFontForMood(input.visualDNA?.typographyMood, 'body'),
     },
     creativeDirection: pres.designSystem?.creativeDirection,
+    visualDNA: input.visualDNA
+      ? {
+          decorativeStyle: input.visualDNA.decorativeStyle,
+          typographyMood: input.visualDNA.typographyMood,
+          recurringPattern: input.visualDNA.recurringPattern,
+        }
+      : pres.designSystem?.visualDNA,
   }
 
   const slides: StructuredSlide[] = (pres.slides || [])

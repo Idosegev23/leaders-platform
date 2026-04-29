@@ -135,6 +135,21 @@ export async function POST(request: NextRequest) {
     const brandVoice = brandResearchObj.brandVoiceGuide as
       | { personality?: string; toneSpectrum?: string; languageStyle?: string; avoid?: string }
       | undefined
+    const visualDNA = brandResearchObj.visualDNA as
+      | {
+          photoStyle?: string
+          productStyle?: string
+          decorativeStyle?:
+            | 'minimal' | 'maximalist' | 'organic-soft'
+            | 'geometric-strict' | 'retro' | 'brutalist'
+          lightingStyle?: string
+          typographyMood?:
+            | 'serif-editorial' | 'sans-tight' | 'sans-airy'
+            | 'display-bold' | 'monospace-tech'
+          recurringPattern?: { type: 'wave' | 'dots' | 'lines' | 'gradient' | 'grid' | 'none'; description?: string }
+          moodDescription?: string
+        }
+      | undefined
     const competitors = brandResearchObj.competitors
     const hasCompetitors =
       Array.isArray(competitors) ? competitors.length > 0 :
@@ -158,6 +173,14 @@ export async function POST(request: NextRequest) {
       brandName, brief, research, influencers, brandColors, images,
       industry, brandVoice, hasCompetitors, hasPlatformMix, hasTimeline,
       scrapedAssets,
+      visualDNA: visualDNA
+        ? {
+            decorativeStyle: visualDNA.decorativeStyle,
+            typographyMood: visualDNA.typographyMood,
+            recurringPattern: visualDNA.recurringPattern,
+            moodDescription: visualDNA.moodDescription,
+          }
+        : undefined,
     })
 
     return NextResponse.json({
