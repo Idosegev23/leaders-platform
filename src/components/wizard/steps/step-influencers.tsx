@@ -89,6 +89,8 @@ export default function StepInfluencers({
           engagement_rate: number
           tier: string
           rationale: string
+          picture?: string
+          is_verified?: boolean
         }>
         strategy: string
       }
@@ -98,11 +100,12 @@ export default function StepInfluencers({
         name: i.fullname || i.username,
         username: i.username,
         profileUrl: `https://instagram.com/${i.username}`,
-        profilePicUrl: '',
+        profilePicUrl: i.picture || '',
         categories: [i.tier],
         followers: i.followers,
         engagementRate: i.engagement_rate,
         bio: i.rationale,
+        isVerified: !!i.is_verified,
       }))
 
       onChange({

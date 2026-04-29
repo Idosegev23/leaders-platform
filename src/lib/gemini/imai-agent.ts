@@ -157,6 +157,8 @@ export interface InfluencerAgentResult {
     engagement_rate: number
     rationale: string  // Why model picked them
     tier: string       // micro/mid/macro/mega
+    picture?: string   // Profile photo URL — hydrated from tool results if missing from model output
+    is_verified?: boolean
   }>
   strategy: string
   toolCalls: number
@@ -272,14 +274,41 @@ Return JSON in this exact shape:
     parsed = { strategy: 'שגיאה בניתוח התוצאות', influencers: [] }
   }
 
-  console.log(`[InfluencerAgent][${requestId}] ✅ Returning ${parsed.influencers?.length || 0} influencers, strategy: "${(parsed.strategy || '').slice(0, 80)}..."`)
-  parsed.influencers?.forEach((inf, i) => {
-    console.log(`[InfluencerAgent][${requestId}]   ${i + 1}. @${inf.username} (${inf.followers?.toLocaleString()} followers, ER ${inf.engagement_rate}%, tier=${inf.tier})`)
+  // Hydrate `picture` and `is_verified` from the raw tool results. The
+  // model's JSON answer typically drops them, but they were in the tool
+  // payload (we returned `picture: i.picture` from the IMAI search
+  // handler). Build a lookup keyed by username so we can re-attach.
+  const pictureByUsername = new Map<string, { picture?: string; is_verified?: boolean }>()
+  for (const tc of result.toolCalls) {
+    if (!Array.isArray(tc.result)) continue
+    for (const row of tc.result as Array<{ username?: string; picture?: string; is_verified?: boolean }>) {
+      if (row?.username && !pictureByUsername.has(row.username)) {
+        pictureByUsername.set(row.username, {
+          picture: row.picture,
+          is_verified: row.is_verified,
+        })
+      }
+    }
+  }
+
+  const influencersHydrated = (parsed.influencers || []).map((inf) => {
+    const lookup = inf.username ? pictureByUsername.get(inf.username) : undefined
+    return {
+      ...inf,
+      picture: inf.picture || lookup?.picture,
+      is_verified: inf.is_verified ?? lookup?.is_verified,
+    }
+  })
+
+  const withPic = influencersHydrated.filter((i) => i.picture).length
+  console.log(`[InfluencerAgent][${requestId}] ✅ Returning ${influencersHydrated.length} influencers (${withPic} with profile pic), strategy: "${(parsed.strategy || '').slice(0, 80)}..."`)
+  influencersHydrated.forEach((inf, i) => {
+    console.log(`[InfluencerAgent][${requestId}]   ${i + 1}. @${inf.username} (${inf.followers?.toLocaleString()} followers, ER ${inf.engagement_rate}%, tier=${inf.tier}, pic=${inf.picture ? '✓' : '✗'})`)
   })
   console.log(`[InfluencerAgent][${requestId}] ═══════════════════════════════════════`)
 
   return {
-    influencers: parsed.influencers || [],
+    influencers: influencersHydrated,
     strategy: parsed.strategy || '',
     toolCalls: result.toolCalls.length,
     rawText: result.text,

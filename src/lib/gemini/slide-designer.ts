@@ -86,26 +86,135 @@ ${bullets ? `<ul style="list-style:none;margin-top:32px;">${bullets}</ul>` : ''}
 </div></body></html>`
 }
 
-/** Fixed layout directive per slide type — mandatory, not a suggestion */
-const LAYOUT_MAP: Record<string, string> = {
-  cover:              'Typographic Brutalism — oversized brand name 300px+ with textStroke, Aurora BG, dramatic negative space',
-  brief:              'Editorial Bleed — image bleeds 60% of canvas with borderRadius capsule, minimal text on opposite side',
-  goals:              'Bento Box — asymmetric grid of mixed-size rounded cells with key numbers inside each cell',
-  audience:           'Magazine Spread — large pull-quote with dominant image, editorial feel',
-  insight:            'Typographic Brutalism — the insight quote at 48px centered, keyword 250px+ hollow in background',
-  whyNow:             'Data Art — oversized numbers as visual centerpiece with minimal supporting text',
-  strategy:           'Split Screen Asymmetry — right side (700px) dark with title, left side floating cards crossing the divider',
-  competitive:        'Bento Box — competitor cards in asymmetric grid with data highlights',
-  bigIdea:            'Typographic Brutalism — idea name at 80px, giant hollow keyword 300px+ rotated in background',
-  approach:           'Overlapping Z-index cards — layered cards with fake-3D shadows (+12px offset) creating depth',
-  deliverables:       'Swiss Grid — structured grid with clear hierarchy, each deliverable in its own cell',
-  metrics:            'Data Art — each metric as oversized number (80-140px) with small label below, dramatic spacing',
-  influencerStrategy: 'Diagonal Grid — angled composition with criteria as floating tags',
-  contentStrategy:    'Overlapping Z-index cards — content themes as layered cards with depth shadows',
-  influencers:        'Bento Box — influencer cards in tight grid with circular profile images',
-  timeline:           'Cinematic Widescreen — horizontal flow with timeline phases as connected elements',
-  closing:            'Typographic Brutalism — BRAND name 350px+ hollow, centered CTA at 80px, Aurora BG',
+/**
+ * Per-slide-type layout pool. Each entry is a list of recipes — the HTML
+ * batch prompt picks one based on a stable hash of (brandName + slideType)
+ * so that two different brands don't get the same exact layout for "cover",
+ * but the same brand stays consistent across regenerations.
+ */
+const LAYOUT_POOL: Record<string, string[]> = {
+  cover: [
+    'Typographic Brutalism — oversized brand name 300px+ with textStroke, Aurora BG, dramatic negative space',
+    'Cinematic Hero — full-bleed image dimmed 60%, brand name centered in display weight, sub-title in serif italic',
+    'Editorial Masthead — split 50/50 with brand wordmark left + key visual right, hairline dividers',
+    'Pure Type Statement — brand name at 240-300px on solid color, no image, ample whitespace',
+  ],
+  brief: [
+    'Editorial Bleed — image bleeds 60% of canvas with borderRadius capsule, minimal text on opposite side',
+    'Two-Column Editorial — challenge framed as a quote on the left, supporting image right at 40%',
+    'Annotated Diagram — central icon/illustration with brief points fanning out from it',
+  ],
+  goals: [
+    'Bento Box — asymmetric grid of mixed-size rounded cells with key numbers inside each cell',
+    'Numbered Stack — vertical list of goals with oversized 01/02/03 markers and chunky descriptions',
+    'Pillar Trio — three equal columns each with a verb-led goal and a single supporting metric',
+  ],
+  audience: [
+    'Magazine Spread — large pull-quote with dominant image, editorial feel',
+    'Persona Cards — 2-3 audience cards each with avatar, age range, key behavior',
+    'Demographic Data Wall — stat-driven (age %, gender %, geo) with one hero image as anchor',
+  ],
+  insight: [
+    'Typographic Brutalism — the insight quote at 48px centered, keyword 250px+ hollow in background',
+    'Big Stat Hero — single oversized statistic + the human implication beneath it',
+    'Two-Truth Contrast — old assumption struck-through above, new insight below in accent color',
+  ],
+  whyNow: [
+    'Data Art — oversized numbers as visual centerpiece with minimal supporting text',
+    'Trend Curve — abstract chart with the inflection point highlighted',
+  ],
+  strategy: [
+    'Split Screen Asymmetry — right side (700px) dark with title, left side floating cards crossing the divider',
+    'Three-Pillar Architecture — three vertical pillars labeled with strategic moves, foundation line beneath',
+    'Spine Diagram — horizontal headline strategy line, three pillars stem upward from it',
+  ],
+  competitive: [
+    'Bento Box — competitor cards in asymmetric grid with data highlights',
+    'Versus Matrix — table-style 2x3 with our edge highlighted in accent',
+  ],
+  competitiveAnalysis: [
+    'Versus Matrix — table-style with us vs 3 competitors, key differentiators in accent column',
+    'Quadrant Map — positioning chart with logos placed by axes (e.g. premium↔value, mass↔niche)',
+  ],
+  bigIdea: [
+    'Typographic Brutalism — idea name at 80px, giant hollow keyword 300px+ rotated in background',
+    'Concept Reveal — campaign name in display, one-line manifesto beneath, supporting image as backdrop',
+    'Cinematic Title Card — the idea framed like a movie title with serif accent and frame border',
+  ],
+  approach: [
+    'Overlapping Z-index cards — layered cards with fake-3D shadows (+12px offset) creating depth',
+  ],
+  deliverables: [
+    'Swiss Grid — structured grid with clear hierarchy, each deliverable in its own cell',
+    'Inventory Table — dense list with quantity / format / channel columns, monospaced numerals',
+    'Stacked Pills — deliverables as colored pills grouped by channel, with totals at the bottom',
+  ],
+  metrics: [
+    'Data Art — each metric as oversized number (80-140px) with small label below, dramatic spacing',
+    'KPI Trio — three big-number cards: reach, CPE, conversions',
+    'Budget Breakdown — donut/bar chart with the total budget oversized in the center',
+  ],
+  mediaMix: [
+    'Channel Pie — donut showing % per platform (Instagram, TikTok, YouTube, Meta) with brand colors',
+    'Stacked Bar — horizontal bar split by channel, each segment labeled with %',
+  ],
+  contentPillars: [
+    'Pillar Cards — 3-5 content pillars as vertical cards each with theme + content type + frequency',
+    'Content Calendar Tease — four pillars represented as a week strip',
+  ],
+  moodBoard: [
+    'Mood Grid — 6-9 small images in an asymmetric grid evoking the brand mood, no text labels',
+    'Single-Image Mood — one full-bleed atmospheric image with a 4-word vibe statement overlaid',
+  ],
+  influencerStrategy: [
+    'Diagonal Grid — angled composition with criteria as floating tags',
+  ],
+  contentStrategy: [
+    'Overlapping Z-index cards — content themes as layered cards with depth shadows',
+  ],
+  influencers: [
+    'Bento Box — influencer cards in tight grid with circular profile images',
+    'Roster List — vertical list with avatar + handle + followers + ER, leaderboard style',
+  ],
+  timeline: [
+    'Cinematic Widescreen — horizontal flow with timeline phases as connected elements',
+    'Vertical Phases — top-to-bottom timeline with phase blocks and milestones',
+  ],
+  caseStudies: [
+    'Case Study Spread — 2-3 mini case panels each with thumbnail + headline + one outcome metric',
+    'Single Hero Case — one big case study with image, brief, result, and our role',
+  ],
+  testimonials: [
+    'Quote Wall — 2-3 client quotes in serif italic, each with name + brand + small avatar',
+    'Single Pull Quote — one large quote at 36px+ with attribution beneath',
+  ],
+  closing: [
+    'Typographic Brutalism — BRAND name 350px+ hollow, centered CTA at 80px, Aurora BG',
+    'Editorial Sign-Off — small brand wordmark, big tagline, contact strip beneath',
+  ],
 }
+
+/**
+ * Pick one recipe deterministically from the pool based on brand name.
+ * Same brand → same look across regenerations; different brand → different.
+ */
+function pickLayoutRecipe(slideType: string, brandName: string): string {
+  const pool = LAYOUT_POOL[slideType]
+  if (!pool || pool.length === 0) {
+    return 'Editorial Layout — composed grid with clear hierarchy and brand-aligned typography'
+  }
+  if (pool.length === 1) return pool[0]
+  let hash = 0
+  for (let i = 0; i < (brandName + slideType).length; i++) {
+    hash = (hash * 31 + (brandName + slideType).charCodeAt(i)) | 0
+  }
+  return pool[Math.abs(hash) % pool.length]
+}
+
+/** Back-compat shim — old code that read LAYOUT_MAP[type] gets the first recipe of the pool. */
+const LAYOUT_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(LAYOUT_POOL).map(([k, v]) => [k, v[0]]),
+)
 
 const IMAGE_SIZE_HINTS: Record<string, string> = {
   cover: 'Full-bleed (1920×1080) or right-half (960×1080). Image is the hero.',
@@ -376,8 +485,19 @@ Emotional Arc: ${cd.emotionalArc}` : 'No creative direction available'}
 
 כתוב את הקופי העברי המדויק לכל שקף. אתה הקופירייטר והקריאייטיב דיירקטור — תהיה ספציפי, חד, ויצירתי.
 
-סוגי שקפים — בדיוק 11, בסדר הזה. אל תוסיף ואל תדלג:
-cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing
+סוגי שקפים — מינימום 11, מקסימום 18. **כמה שקפים שמתאים למותג ולעושר הדאטה.**
+שקפי הליבה (חובה, בסדר הזה): cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing
+
+שקפים אופציונליים שאפשר להוסיף לעומק (במיקום הגיוני בתוך הקיים):
+- moodBoard: לוח השראה ויזואלי — סגנון, צבעים, אווירה. הכי מתאים אחרי bigIdea.
+- contentPillars: 3-5 עמודי תוכן (אם יש בריף עשיר עם הרבה כיוונים). אחרי strategy.
+- timeline: ציר זמן של הפעלת הקמפיין — שלבים + תאריכים. אחרי deliverables.
+- competitiveAnalysis: 2-4 מתחרים + מה לקוח ייחודי לעומתם. אחרי brief.
+- caseStudies: 2-3 קמפיינים דומים שעשינו (אם יש בדאטה _caseStudies). אחרי deliverables.
+- testimonials: עדויות לקוח (אם יש בדאטה _testimonials). אחרי closing.
+- mediaMix: פילוח ערוצים (אינסטגרם %, טיקטוק %, יוטיוב %). אחרי strategy או metrics.
+
+**החלטה כמה שקפים:** הוסף שקף אופציונלי רק אם יש בריף/מחקר מספיק עשיר כדי למלא אותו טוב. אל תמתח שקף ריק כדי "להגיע ל-18".
 
 הסבר:
 - cover: שקף פתיחה ויזואלי
@@ -565,12 +685,15 @@ cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influen
 
       if (parsed?.slides?.length >= 5) {
         // Post-process: ensure slideType is always defined, sanitize content
-        const expectedTypes = ['cover', 'brief', 'goals', 'audience', 'insight', 'strategy', 'bigIdea', 'deliverables', 'influencers', 'metrics', 'closing']
+        const expectedCoreTypes = ['cover', 'brief', 'goals', 'audience', 'insight', 'strategy', 'bigIdea', 'deliverables', 'influencers', 'metrics', 'closing']
+        const allowedTypes = new Set([...expectedCoreTypes, 'moodBoard', 'contentPillars', 'timeline', 'competitiveAnalysis', 'caseStudies', 'testimonials', 'mediaMix'])
         for (let si = 0; si < parsed.slides.length; si++) {
           const slide = parsed.slides[si]
           if (!slide.slideType || typeof slide.slideType !== 'string' || slide.slideType.trim() === '') {
-            slide.slideType = expectedTypes[si] || 'brief'
+            slide.slideType = expectedCoreTypes[si] || 'brief'
             console.log(`[SlideDesigner][${requestId}]   ⚠️ Fixed empty slideType at index ${si} → "${slide.slideType}"`)
+          } else if (!allowedTypes.has(slide.slideType)) {
+            console.log(`[SlideDesigner][${requestId}]   ⚠️ Unknown slideType "${slide.slideType}" → keeping as-is, recipe will fall back`)
           }
         }
         for (const slide of parsed.slides) {
@@ -667,7 +790,7 @@ async function _legacyGenerateSlidesBatchAST(
   const slidesDescription = plans.map((plan, i) => {
     const globalIndex = batchContext.slideIndex + i
     const pacing = pacingMap[plan.slideType] || pacingMap.brief
-    const archetype = LAYOUT_MAP[plan.slideType] || LAYOUT_MAP.brief
+    const archetype = pickLayoutRecipe(plan.slideType, brandName)
     const hasTension = TENSION_SLIDES.has(plan.slideType)
     const imageSizeHint = IMAGE_SIZE_HINTS[plan.slideType] || 'At least 40% of slide area'
 
@@ -800,7 +923,7 @@ ${contentParts.join('\n')}
           const archetype = (slide as unknown as Record<string, unknown>).archetype as string | undefined
           const resolvedArchetype = archetype && archetype !== 'N/A' && archetype.trim().length > 2
             ? archetype
-            : LAYOUT_MAP[resolvedType] || LAYOUT_MAP.brief
+            : pickLayoutRecipe(resolvedType, brandName)
           const rawDramaticChoice = (slide as unknown as Record<string, unknown>).dramaticChoice as string | undefined
           return {
             id: slide.id || `slide-${batchContext.slideIndex + i}`,
@@ -828,7 +951,7 @@ ${contentParts.join('\n')}
               imageUrl,
             }
             const fb = buildFallbackSlide(fallbackInput, mi, batchContext, colors)
-            generatedSlides.push({ ...fb, archetype: LAYOUT_MAP[fb.slideType] || LAYOUT_MAP.brief, dramaticChoice: 'fallback layout' })
+            generatedSlides.push({ ...fb, archetype: pickLayoutRecipe(fb.slideType, brandName), dramaticChoice: 'fallback layout' })
           }
         }
 
@@ -1492,11 +1615,25 @@ export async function pipelineBatchHtml(
     bio?: string
   }>
 
+  // Resolve the client logo URL — comes either from the foundation
+  // (passed in by /generate-slides-stage) or from scraped brand data.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const clientLogoFromFoundation = (foundation as unknown as { clientLogo?: string }).clientLogo
+  const clientLogo = clientLogoFromFoundation
+    || (typeof wizardData?._scraped?.logoUrl === 'string' ? wizardData._scraped.logoUrl : '')
+    || (typeof wizardData?.brandLogoUrl === 'string' ? wizardData.brandLogoUrl : '')
+    || (typeof wizardData?.logoUrl === 'string' ? wizardData.logoUrl : '')
+    || ''
+
   // Build slide descriptions for the prompt
   const slidesBlock = batchPlans.map((plan, i) => {
     const globalIndex = slideOffset + i + 1
     const imageUrl = plan.existingImageKey ? foundation.images[plan.existingImageKey] : undefined
-    const contentParts: string[] = [`Title: ${plan.title}`]
+    const recipe = pickLayoutRecipe(plan.slideType, foundation.brandName || '')
+    const contentParts: string[] = [
+      `Title: ${plan.title}`,
+      `Layout Recipe (follow this — different brands get different recipes for the same slide type): ${recipe}`,
+    ]
     if (plan.subtitle) contentParts.push(`Subtitle: ${plan.subtitle}`)
     if (plan.bodyText) contentParts.push(`Body: ${plan.bodyText}`)
     if (plan.bulletPoints?.length) contentParts.push(`Bullets:\n${plan.bulletPoints.map(b => `  • ${b}`).join('\n')}`)
@@ -1504,6 +1641,12 @@ export async function pipelineBatchHtml(
     if (plan.keyNumber) contentParts.push(`KEY STAT: ${plan.keyNumber} (${plan.keyNumberLabel || ''})`)
     if (plan.tagline) contentParts.push(`Tagline: ${plan.tagline}`)
     if (imageUrl) contentParts.push(`IMAGE URL: ${imageUrl}`)
+
+    // For the cover slide — force the client logo if we have one
+    if (plan.slideType === 'cover' && clientLogo) {
+      contentParts.push(`CLIENT LOGO URL: ${clientLogo}`)
+      contentParts.push(`MANDATORY: render the client logo as <img src="${clientLogo}" alt="${foundation.brandName || ''}"> placed at the top — top:48px end:64px, height:64-96px, object-fit:contain, opacity:0.95. The logo identifies whose deck this is.`)
+    }
 
     // For the influencers slide — inject the full profile list with PICTURE URLs
     if (plan.slideType === 'influencers' && influencerProfiles.length > 0) {
@@ -1520,6 +1663,12 @@ export async function pipelineBatchHtml(
 ${contentParts.join('\n')}
 </slide>`
   }).join('\n\n')
+
+  if (clientLogo) {
+    console.log(`[SlideDesigner][${requestId}] 🏷️ Cover logo will use: ${clientLogo}`)
+  } else {
+    console.log(`[SlideDesigner][${requestId}] 🏷️ No client logo found — cover will skip the logo overlay`)
+  }
 
   const prompt = `You are the MOST AWARDED presentation designer alive. Cannes Lions, D&AD Black Pencil, TDC.
 You don't make slides — you make VISUAL EXPERIENCES that people screenshot and share.
@@ -1775,14 +1924,29 @@ Each item is a COMPLETE, self-contained HTML document for one slide. Make them B
 .slide [data-role="card-body"]{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;}
 .slide [data-role="subtitle"]{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;text-wrap:balance;}
 </style>`
-    const safeSlides = htmlSlides.slice(0, actualCount).map(html => {
+    const safeSlides = htmlSlides.slice(0, actualCount).map((html, idx) => {
       // Only inject if GPT didn't already include line-clamp rules
-      if (html.includes('-webkit-line-clamp') || html.includes('line-clamp')) return html
-      // Inject before </head> or before </style> or before </body>
-      if (html.includes('</head>')) return html.replace('</head>', SAFETY_CSS + '</head>')
-      if (html.includes('</style>')) return html.replace('</style>', '</style>' + SAFETY_CSS)
-      if (html.includes('</body>')) return html.replace('</body>', SAFETY_CSS + '</body>')
-      return html + SAFETY_CSS
+      let out = html
+      if (!out.includes('-webkit-line-clamp') && !out.includes('line-clamp')) {
+        if (out.includes('</head>'))      out = out.replace('</head>', SAFETY_CSS + '</head>')
+        else if (out.includes('</style>')) out = out.replace('</style>', '</style>' + SAFETY_CSS)
+        else if (out.includes('</body>')) out = out.replace('</body>', SAFETY_CSS + '</body>')
+        else out = out + SAFETY_CSS
+      }
+
+      // Belt-and-suspenders: if Gemini forgot the client logo on the cover
+      // slide, patch it in directly. Without this we frequently saw covers
+      // with no logo at all.
+      const plan = batchPlans[idx]
+      if (plan?.slideType === 'cover' && clientLogo && !out.includes(clientLogo)) {
+        const logoTag = `<img src="${clientLogo}" alt="${foundation.brandName || ''}" style="position:absolute;top:48px;left:64px;height:72px;width:auto;object-fit:contain;opacity:0.95;z-index:25;" />`
+        if (out.includes('<div class="slide">')) {
+          out = out.replace('<div class="slide">', `<div class="slide">${logoTag}`)
+          console.log(`[SlideDesigner][${requestId}]   🏷️ Auto-patched cover logo on slide ${idx + 1}`)
+        }
+      }
+
+      return out
     })
 
     // ── Reflection Loop (DeepPresenter pattern) ──
