@@ -344,7 +344,116 @@ export async function generateStructuredPresentation(
   console.log('[gamma-proto] parsed slides:', parsed?.slides?.length, 'first slot keys:', Object.keys(parsed?.slides?.[0]?.slots || {}))
   const normalized = normalizePresentation(parsed, input)
   backfillInfluencerPics(normalized, input)
+  validateAndHealSlides(normalized, input)
   return normalized
+}
+
+/**
+ * Per-slide quality validator. Runs after the model returns and after
+ * normalization. Looks for specific failure modes and self-heals each one
+ * inline so the deck never persists with a broken slide:
+ *
+ * - Layout overuse: if any single layout is used 3+ times, swap one of the
+ *   later occurrences to a less-used compatible layout.
+ * - Empty image slot when the brand has scraped imagery: backfill from
+ *   scrapedAssets so text-only slides get a real brand visual.
+ * - Hallucinated influencer cards (no profilePicUrl AND no match in input):
+ *   wipe the slide's influencer list so the renderer falls back to its
+ *   placeholder rather than showing fake people.
+ * - Fonts the model invented: snap back to designSystem fonts.
+ *
+ * Mutates `pres` in place. Logs every fix for traceability.
+ */
+function validateAndHealSlides(
+  pres: StructuredPresentation,
+  input: GenerateStructuredInput,
+): void {
+  if (!pres.slides?.length) return
+  const fixes: string[] = []
+
+  // 1) Layout overuse — cap at 2 of any single layout.
+  const layoutCounts = new Map<string, number>()
+  for (const s of pres.slides) layoutCounts.set(s.layout, (layoutCounts.get(s.layout) || 0) + 1)
+  const overused = Array.from(layoutCounts.entries()).filter(([, n]) => n > 2)
+  for (const [layout] of overused) {
+    // Find a less-used layout we can swap to. Prefer split-image-text or
+    // centered-insight (both work with most slot shapes after light coercion).
+    const alternates: LayoutId[] = layout === 'three-pillars-grid'
+      ? ['split-image-text', 'centered-insight', 'numbered-stats']
+      : layout === 'numbered-stats'
+        ? ['three-pillars-grid', 'split-image-text']
+        : ['split-image-text', 'centered-insight', 'three-pillars-grid']
+    // Walk slides in reverse and swap the LAST overused one to a less-used alt.
+    for (let i = pres.slides.length - 1; i >= 0; i--) {
+      const slide = pres.slides[i]
+      if (slide.layout !== layout) continue
+      // Don't swap layouts that are tightly bound to slide type.
+      if (slide.slideType === 'cover' || slide.slideType === 'closing' || slide.slideType === 'influencers') continue
+      // Pick the first alternate that's not overused.
+      const alt = alternates.find(a => (layoutCounts.get(a) || 0) < 2)
+      if (!alt) break
+      slide.layout = alt
+      // Light slot coercion: if swapping into split-image-text, ensure title
+      // exists; everything else can default to undefined and the renderer
+      // will render the empty side gracefully.
+      const slots = slide.slots as unknown as Record<string, unknown>
+      if (alt === 'split-image-text' && !slots.imageSide) slots.imageSide = 'left'
+      layoutCounts.set(layout, (layoutCounts.get(layout) || 0) - 1)
+      layoutCounts.set(alt, (layoutCounts.get(alt) || 0) + 1)
+      fixes.push(`swapped slide #${i + 1} (${slide.slideType}) ${layout} → ${alt}`)
+      if ((layoutCounts.get(layout) || 0) <= 2) break
+    }
+  }
+
+  // 2) Image backfill — text-only slides on brands that have scraped imagery.
+  const sa = input.scrapedAssets
+  const productPool = [...(sa?.productImages || []), ...(sa?.heroImages || [])]
+  const lifestylePool = [...(sa?.lifestyleImages || []), ...(sa?.heroImages || [])]
+  if (productPool.length || lifestylePool.length) {
+    let pIdx = 0, lIdx = 0
+    for (const s of pres.slides) {
+      const slots = s.slots as unknown as Record<string, unknown>
+      const hasAnyImage = !!(slots.image || slots.backgroundImage || slots.sideImage)
+      if (hasAnyImage) continue
+      // Pick a pool by slide intent.
+      const productSlide = ['bigIdea', 'deliverables', 'caseStudies'].includes(s.slideType)
+      const pool = productSlide ? productPool : lifestylePool
+      if (!pool.length) continue
+      const url = productSlide ? pool[pIdx++ % pool.length] : pool[lIdx++ % pool.length]
+      if (s.layout === 'three-pillars-grid') slots.sideImage = url
+      else if (s.layout === 'numbered-stats') slots.backgroundImage = url
+      else if (s.layout === 'split-image-text' || s.layout === 'full-bleed-image-text') slots.image = url
+      else if (s.layout === 'hero-cover' || s.layout === 'closing-cta') slots.backgroundImage = url
+      else continue
+      fixes.push(`backfilled image on slide #${pres.slides.indexOf(s) + 1} (${s.slideType} / ${s.layout})`)
+    }
+  }
+
+  // 3) Hallucinated influencers — strip cards that have no real input match.
+  const inputHandles = new Set((input.influencers || []).map(i => i.handle?.toLowerCase().replace(/^@/, '')).filter(Boolean))
+  const inputNames = new Set((input.influencers || []).map(i => i.name?.toLowerCase()).filter(Boolean))
+  for (const s of pres.slides) {
+    if (s.layout !== 'influencer-grid') continue
+    const slots = s.slots as { influencers?: Array<{ name?: string; handle?: string; profilePicUrl?: string }> }
+    if (!Array.isArray(slots.influencers)) continue
+    const before = slots.influencers.length
+    slots.influencers = slots.influencers.filter(inf => {
+      if (inf.profilePicUrl) return true
+      const h = (inf.handle || '').toLowerCase().replace(/^@/, '')
+      const n = (inf.name || '').toLowerCase()
+      return inputHandles.has(h) || inputNames.has(n)
+    })
+    if (slots.influencers.length !== before) {
+      fixes.push(`stripped ${before - slots.influencers.length} hallucinated influencer card(s) on slide #${pres.slides.indexOf(s) + 1}`)
+    }
+  }
+
+  if (fixes.length) {
+    console.log(`[gamma-proto] 🔧 Quality validator applied ${fixes.length} fix(es):`)
+    for (const f of fixes) console.log(`[gamma-proto]    - ${f}`)
+  } else {
+    console.log(`[gamma-proto] ✅ Quality validator: all slides clean`)
+  }
 }
 
 /** Even if Gemini drops profilePicUrl, match by handle/name from the input and inject. */

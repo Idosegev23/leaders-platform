@@ -173,6 +173,34 @@ export async function POST(request: NextRequest) {
       lifestyleImages: cleanList(scrapedRaw.lifestyleImages),
     }
 
+    // ─── Self-healing scrape fallback ────────────────────────────
+    // If the original scrape returned no usable imagery (heavy SPA, page
+    // bot-blocked, etc), retry now using the brand's current website URL.
+    // The scraper has og:image / twitter:image fallbacks added recently
+    // that catch SPA brand sites the original scrape missed.
+    const totalScraped = scrapedAssets.heroImages.length + scrapedAssets.productImages.length + scrapedAssets.lifestyleImages.length
+    if (totalScraped === 0) {
+      const websiteFromResearch = brandResearchObj.website as string | undefined
+      const websiteFromData = data.website as string | undefined
+      const siteUrl = websiteFromResearch || websiteFromData
+      if (siteUrl) {
+        try {
+          console.log(`[gamma-proto] 🔁 Self-healing: re-scraping ${siteUrl} (original scrape was empty)`)
+          const { fetchScrape } = await import('@/lib/apify/fetch-scraper')
+          const { validateExternalUrl } = await import('@/lib/utils/url-validator')
+          const url = validateExternalUrl(siteUrl.startsWith('http') ? siteUrl : `https://${siteUrl}`)
+          const reScraped = await fetchScrape(url)
+          scrapedAssets.heroImages = cleanList(reScraped.heroImages)
+          scrapedAssets.productImages = cleanList(reScraped.productImages)
+          scrapedAssets.lifestyleImages = cleanList(reScraped.lifestyleImages)
+          if (!scrapedAssets.brandLogoUrl) scrapedAssets.brandLogoUrl = reScraped.logoUrl || undefined
+          console.log(`[gamma-proto] 🔁 Re-scrape returned hero=${scrapedAssets.heroImages.length}, product=${scrapedAssets.productImages.length}, lifestyle=${scrapedAssets.lifestyleImages.length}`)
+        } catch (scrErr) {
+          console.warn(`[gamma-proto] Re-scrape failed (non-fatal):`, scrErr instanceof Error ? scrErr.message : scrErr)
+        }
+      }
+    }
+
     const brandColors = data._brandColors as
       | { primary?: string; secondary?: string; accent?: string } | undefined
 
@@ -198,12 +226,30 @@ export async function POST(request: NextRequest) {
           moodDescription?: string
         }
       | undefined
+    // Structural signals — derive from BOTH the research object and the
+    // brief extraction, so the planner sees an accurate picture even when
+    // research is sparse but the brief itself was rich (or vice versa).
     const competitors = brandResearchObj.competitors
+    const competitorsFromBrief = data.competitorMentions
     const hasCompetitors =
-      Array.isArray(competitors) ? competitors.length > 0 :
-      typeof competitors === 'string' ? competitors.trim().length > 0 : false
-    const hasPlatformMix = !!brandResearchObj.platformMix || !!brandResearchObj.platforms
-    const hasTimeline = !!brandResearchObj.timeline || !!data.campaignTimeline
+      (Array.isArray(competitors) && competitors.length > 0) ||
+      (typeof competitors === 'string' && competitors.trim().length > 0) ||
+      (Array.isArray(competitorsFromBrief) && competitorsFromBrief.length > 0)
+    const hasPlatformMix =
+      !!brandResearchObj.platformMix ||
+      !!brandResearchObj.platforms ||
+      // Brief sometimes mentions specific platforms in keyMessages or
+      // additionalNotes — count any explicit platform name as a signal.
+      /(instagram|tiktok|facebook|youtube|linkedin|twitter|x\.com)/i.test(
+        JSON.stringify(data.keyMessages || '') +
+        JSON.stringify(data.additionalNotes || '') +
+        JSON.stringify(data.contentPillars || ''),
+      )
+    const hasTimeline =
+      !!brandResearchObj.timeline ||
+      !!data.campaignTimeline ||
+      !!(data.timeline as { startDate?: string; endDate?: string; duration?: string } | undefined)?.startDate ||
+      !!(data.timeline as { milestones?: unknown[] } | undefined)?.milestones?.length
 
     console.log('[gamma-proto] generating for', brandName, {
       hasBrief: !!brief,

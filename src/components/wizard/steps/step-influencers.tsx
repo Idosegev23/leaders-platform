@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -57,6 +57,8 @@ export default function StepInfluencers({
   const [agentError, setAgentError] = useState<string | null>(null)
   const [enrichingIndex, setEnrichingIndex] = useState<number | null>(null)
   const [enrichError, setEnrichError] = useState<{ index: number; message: string } | null>(null)
+  /** Auto-suggest fired once per mount when the list is empty + brandContext is ready. */
+  const autoSuggestedRef = useRef(false)
 
   // ── IMAI Agent: real influencer search via Gemini function calling ──
   const runImaiAgent = useCallback(async () => {
@@ -121,6 +123,23 @@ export default function StepInfluencers({
       setAgentLoading(false)
     }
   }, [brandContext, data, onChange])
+
+  // ── Auto-suggest on first mount when list is empty ──
+  // Smart pipeline: when the user reaches the influencers step with an empty
+  // list AND we have enough brand context to search, kick off the IMAI agent
+  // automatically. The user gets a draft they can curate, instead of staring
+  // at an empty step. Fires only once per mount; user can manually re-run via
+  // the "חפש משפיענים מחדש" button.
+  useEffect(() => {
+    if (autoSuggestedRef.current) return
+    if (influencers.length > 0) return
+    if (!brandContext?.brandName) return
+    if (agentLoading) return
+    autoSuggestedRef.current = true
+    console.log('[StepInfluencers] Auto-suggest: empty list + brand context — running IMAI agent')
+    void runImaiAgent()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandContext?.brandName])
 
   // Add influencer
   const addInfluencer = useCallback(() => {
