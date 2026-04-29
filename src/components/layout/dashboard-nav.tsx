@@ -15,7 +15,8 @@ interface DashboardNavProps {
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'דף הבית' },
   { href: '/leads', label: 'לידים' },
-  { href: '/create', label: 'יצירת מסמך' },
+  { href: '/create-proposal', label: 'מצגת חדשה' },
+  { href: '/price-quote', label: 'הצעת מחיר' },
   { href: '/documents', label: 'המסמכים שלי' },
 ]
 

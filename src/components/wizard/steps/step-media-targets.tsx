@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { lookupIndustryBenchmark } from '@/lib/benchmarks/industry'
 import type { MediaTargetsStepData } from '@/types/wizard'
 
 interface StepMediaTargetsProps {
@@ -15,6 +16,10 @@ interface StepMediaTargetsProps {
   errors: Record<string, string> | null
   briefContext?: string
   successMetrics?: string[]
+  /** Brand context — used to surface industry benchmarks next to the CPE input */
+  brandContext?: {
+    industry?: string
+  }
   /** Influencer count + content mix from earlier wizard steps — used for KPI auto-calc */
   kpiContext?: {
     influencerCount?: number
@@ -35,8 +40,13 @@ export default function StepMediaTargets({
   onChange,
   errors,
   successMetrics,
+  brandContext,
   kpiContext,
 }: StepMediaTargetsProps) {
+  const benchmark = useMemo(
+    () => lookupIndustryBenchmark(brandContext?.industry),
+    [brandContext?.industry],
+  )
   const [kpiLoading, setKpiLoading] = useState(false)
   const [kpiError, setKpiError] = useState<string | null>(null)
 
@@ -250,6 +260,43 @@ export default function StepMediaTargets({
           <p className="text-xs text-muted-foreground">
             CPE מחושב אוטומטית מתקציב חלקי מעורבות. ניתן לערוך ידנית.
           </p>
+
+          {/* Industry CPE benchmark — so the user knows if their CPE is good/typical/aggressive */}
+          <div className="mt-3 rounded-lg border border-wizard-border bg-background/60 p-3 text-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-heebo font-semibold text-wizard-text-primary">
+                בנצ&apos;מארק תעשייה — {benchmark.he}
+              </span>
+              {(() => {
+                if (!displayedCpe) return null
+                if (displayedCpe <= benchmark.cpe.low) {
+                  return <span className="text-emerald-700 font-bold">אגרסיבי 🚀</span>
+                }
+                if (displayedCpe <= benchmark.cpe.mid) {
+                  return <span className="text-emerald-700 font-bold">טוב מהממוצע ✓</span>
+                }
+                if (displayedCpe <= benchmark.cpe.high) {
+                  return <span className="text-amber-700 font-bold">בטווח הסביר</span>
+                }
+                return <span className="text-red-700 font-bold">גבוה מהמקובל ⚠</span>
+              })()}
+            </div>
+            <div className="grid grid-cols-3 gap-2 font-mono">
+              <div className="rounded bg-emerald-50 p-2 text-center">
+                <div className="text-[10px] text-muted-foreground">אגרסיבי</div>
+                <div className="font-bold text-emerald-800">≤ {currency}{benchmark.cpe.low.toFixed(2)}</div>
+              </div>
+              <div className="rounded bg-blue-50 p-2 text-center">
+                <div className="text-[10px] text-muted-foreground">טיפוסי</div>
+                <div className="font-bold text-blue-800">{currency}{benchmark.cpe.mid.toFixed(2)}</div>
+              </div>
+              <div className="rounded bg-amber-50 p-2 text-center">
+                <div className="text-[10px] text-muted-foreground">גבוה</div>
+                <div className="font-bold text-amber-800">{currency}{benchmark.cpe.high.toFixed(2)}+</div>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">{benchmark.notes}</p>
+          </div>
         </CardContent>
       </Card>
 

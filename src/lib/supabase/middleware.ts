@@ -64,8 +64,8 @@ export async function updateSession(request: NextRequest) {
 
   // Protected routes
   const protectedPaths = [
-    '/dashboard', '/admin', '/create', '/documents', '/preview',
-    '/create-proposal', '/price-quote', '/wizard', '/research',
+    '/dashboard', '/admin', '/documents', '/preview',
+    '/create', '/create-proposal', '/price-quote', '/wizard', '/research',
     '/generate', '/edit',
     // New hub rubrics (Phases 2–5)
     '/inner-meeting', '/summary', '/send',
