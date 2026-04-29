@@ -328,10 +328,10 @@ export default function CreateProposalPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'quote',
+          type: 'deck',
           title: extracted.brand?.name
-            ? `הצעה - ${extracted.brand.name}`
-            : 'הצעת מחיר חדשה',
+            ? `מצגת - ${extracted.brand.name}`
+            : 'מצגת קריאייטיבית חדשה',
           data: {
             brandName: extracted.brand?.name || '',
             _extractedData: extracted,

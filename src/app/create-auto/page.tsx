@@ -353,8 +353,8 @@ export default function CreateAutoPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'quote',
-          title: `הצעת מחיר - ${data.userInputs.brandName}`,
+          type: 'deck',
+          title: `מצגת - ${data.userInputs.brandName}`,
           data: documentData,
         }),
       })
