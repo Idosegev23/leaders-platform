@@ -12,14 +12,15 @@ const nextConfig = {
   // Image optimization
   images: {
     remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: '*.supabase.co',
-      },
-      {
-        protocol: 'https',
-        hostname: 'lh3.googleusercontent.com',
-      },
+      { protocol: 'https', hostname: '*.supabase.co' },
+      { protocol: 'https', hostname: 'lh3.googleusercontent.com' },
+      // IMAI returns Instagram / Meta CDN URLs for influencer profile
+      // pics. These are signed and short-lived but Next still needs
+      // the host whitelisted or it 400s the optimizer endpoint.
+      { protocol: 'https', hostname: '*.cdninstagram.com' },
+      { protocol: 'https', hostname: '*.fbcdn.net' },
+      { protocol: 'https', hostname: 'instagram.com' },
+      { protocol: 'https', hostname: 'www.instagram.com' },
     ],
   },
 

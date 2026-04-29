@@ -48,6 +48,40 @@ async function safeJson(res: Response): Promise<{ ok: boolean; data: Record<stri
   }
 }
 
+/**
+ * Fetch wrapper that retries transient client-side network failures only —
+ * ERR_NETWORK_CHANGED, "Failed to fetch", offline blips. The deck pipeline
+ * is long enough (3-5 min) that a single Wi-Fi sleep/wake or VPN toggle
+ * will kill an in-flight request; without retry, all 3 parallel batches
+ * fail simultaneously and the user has to start over.
+ *
+ * Server errors (4xx/5xx with a real response) are NOT retried — those
+ * are returned to the caller so it can surface them properly.
+ */
+async function fetchWithNetworkRetry(
+  url: string,
+  init: RequestInit,
+  label: string,
+  maxAttempts = 3,
+): Promise<Response> {
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetch(url, init)
+    } catch (err) {
+      lastErr = err
+      const isNetworkBlip =
+        err instanceof TypeError ||
+        (err instanceof Error && /network|fetch|offline/i.test(err.message))
+      if (!isNetworkBlip || attempt === maxAttempts) throw err
+      const backoffMs = 1000 * Math.pow(2, attempt - 1) // 1s, 2s, 4s
+      console.warn(`[Generate] ${label} network blip (attempt ${attempt}/${maxAttempts}), retrying in ${backoffMs}ms:`, err)
+      await new Promise((r) => setTimeout(r, backoffMs))
+    }
+  }
+  throw lastErr
+}
+
 export default function GeneratePage() {
   const params = useParams()
   const router = useRouter()
@@ -353,11 +387,11 @@ export default function GeneratePage() {
       animateProgressTo(getPhaseStart('foundation') + PHASE_WEIGHTS.foundation * 0.5)
       console.log('[Generate] Running foundation...')
 
-      const foundationRes = await fetch('/api/generate-slides-stage', {
+      const foundationRes = await fetchWithNetworkRetry('/api/generate-slides-stage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentId, stage: 'foundation', templateId: selectedTemplate }),
-      })
+      }, 'foundation')
 
       const { ok: foundationOk, data: foundationData } = await safeJson(foundationRes)
       if (!foundationOk) {
@@ -383,11 +417,11 @@ export default function GeneratePage() {
       console.log(`[Generate] Launching ${bc} batches in PARALLEL...`)
 
       const batchPromises = Array.from({ length: bc }, (_, b) =>
-        fetch('/api/generate-slides-stage', {
+        fetchWithNetworkRetry('/api/generate-slides-stage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ documentId, stage: 'batch', batchIndex: b }),
-        })
+        }, `batch ${b + 1}`)
           .then(async res => {
             const { ok, data } = await safeJson(res)
             if (!ok) throw new Error((data.details || data.error || `Batch ${b + 1} failed`) as string)
@@ -422,11 +456,11 @@ export default function GeneratePage() {
       animateProgressTo(getPhaseStart('finalize') + PHASE_WEIGHTS.finalize * 0.3)
       console.log('[Generate] Finalizing presentation...')
 
-      const finalizeRes = await fetch('/api/generate-slides-stage', {
+      const finalizeRes = await fetchWithNetworkRetry('/api/generate-slides-stage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentId, stage: 'finalize' }),
-      })
+      }, 'finalize')
 
       const { ok: finalizeOk, data: finalData } = await safeJson(finalizeRes)
       if (!finalizeOk) {
