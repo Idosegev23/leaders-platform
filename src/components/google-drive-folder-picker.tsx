@@ -25,7 +25,9 @@ export default function GoogleDriveFolderPicker({ onPicked, disabled, buttonLabe
     try {
       const accessToken = await getAccessToken()
       if (!accessToken) {
-        alert('נדרשת התחברות מחדש עם Google כדי לגשת ל-Drive. אנא התנתק והתחבר שוב.')
+        console.warn('[Drive Folder Picker] No provider token — firing AuthGuard reauth event')
+        const { dispatchReauthRequired } = await import('@/components/auth/AuthGuard')
+        dispatchReauthRequired('drive-folder-picker')
         setLoading(false)
         return
       }

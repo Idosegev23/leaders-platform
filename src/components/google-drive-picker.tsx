@@ -37,8 +37,11 @@ export default function GoogleDrivePicker({ onFilePicked, disabled, label }: Goo
       const accessToken = await getAccessToken()
 
       if (!accessToken) {
-        console.error('[Google Drive Picker] No provider token - user needs to re-login')
-        alert('נדרשת התחברות מחדש עם Google כדי לגשת ל-Drive. אנא התנתק והתחבר שוב.')
+        console.warn('[Google Drive Picker] No provider token — firing AuthGuard reauth event')
+        // Trigger the in-place re-auth modal instead of a browser alert().
+        // AuthGuard listens for this event globally.
+        const { dispatchReauthRequired } = await import('@/components/auth/AuthGuard')
+        dispatchReauthRequired('drive-picker')
         setLoading(false)
         return
       }

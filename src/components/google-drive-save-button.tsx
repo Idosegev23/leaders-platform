@@ -37,8 +37,9 @@ export default function GoogleDriveSaveButton({
       const accessToken = await getAccessToken()
 
       if (!accessToken) {
-        console.error('[Drive Save] No provider token - user needs to re-login')
-        alert('נדרשת התחברות מחדש עם Google כדי לגשת ל-Drive. אנא התנתק והתחבר שוב.')
+        console.warn('[Drive Save] No provider token — firing AuthGuard reauth event')
+        const { dispatchReauthRequired } = await import('@/components/auth/AuthGuard')
+        dispatchReauthRequired('drive-save')
         setPhase('idle')
         return
       }

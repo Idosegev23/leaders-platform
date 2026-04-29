@@ -4,23 +4,31 @@ import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 /**
- * Catches *mid-work* auth loss and re-authenticates in place. Only fires
- * when the user actually tries to do something authenticated and gets a
- * 401 back. Intentional sign-out via "התנתק" goes straight to /login
- * with no modal — the dedicated login page is the right place for that.
+ * Catches *mid-work* auth loss and re-authenticates in place. Two unambiguous
+ * triggers:
  *
- * First-visit auth (no cookie at all) is handled by the middleware
- * redirect to /login. Idle expiry is handled lazily — we don't pop a
- * modal on a user who's just looking at the page; we only intervene
- * when they click something and get rejected.
+ *   1. 401 from our own /api/* routes — user tried to do real work and was
+ *      rejected. We intercept window.fetch.
+ *   2. The custom "auth:reauth-required" DOM event — fired by code that
+ *      *itself* knows it needs re-auth (e.g. the Google Drive Picker
+ *      detects no provider_token; Gmail send routes that need a fresh
+ *      OAuth scope). Anyone can dispatch it without coupling to AuthGuard.
  *
- * Earlier this also fired on Supabase's onAuthStateChange SIGNED_OUT
- * event, but that event is ambiguous — it fires both on token expiry
- * AND on user-initiated signOut(). Using it caused the popup to flash
- * every time the user logged out. The 401-from-our-API signal is
- * unambiguous: if you got a 401, you tried to do real work and were
- * rejected. That's the only case worth interrupting for.
+ * Intentional sign-out via "התנתק" goes straight to /login — no modal.
+ * First-visit auth (no cookie) handled by middleware. Idle expiry waits
+ * until the user actually tries something.
+ *
+ * To trigger from anywhere:
+ *   window.dispatchEvent(new CustomEvent('auth:reauth-required',
+ *     { detail: { reason: 'drive-picker' } }))
  */
+export const REAUTH_EVENT = 'auth:reauth-required'
+
+export function dispatchReauthRequired(reason?: string) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(REAUTH_EVENT, { detail: { reason } }))
+}
+
 export function AuthGuard() {
   const [showModal, setShowModal] = useState(false)
   const [signingIn, setSigningIn] = useState(false)
@@ -33,15 +41,13 @@ export function AuthGuard() {
       hadSessionAtMount.current = !!data.session
     })
 
-    // Single trigger: 401 from our own API. We don't react to
-    // onAuthStateChange at all — see component docstring.
+    // Trigger 1: 401 from our own /api/*.
     const origFetch = window.fetch
     window.fetch = async (...args) => {
       const res = await origFetch(...args)
       if (
         res.status === 401 &&
         hadSessionAtMount.current &&
-        // Only handle our own routes; third-party 401s aren't ours to fix.
         looksLikeOwnApi(args[0])
       ) {
         const { data } = await supabase.auth.getSession()
@@ -50,8 +56,20 @@ export function AuthGuard() {
       return res
     }
 
+    // Trigger 2: explicit re-auth events from feature code (Drive Picker,
+    // Gmail send, etc.). We don't probe Supabase here — the caller has
+    // already determined that the current credentials don't cover their
+    // need (e.g. picker has Supabase session but no Google provider_token).
+    function onReauth(ev: Event) {
+      const detail = (ev as CustomEvent).detail as { reason?: string } | undefined
+      console.log(`[AuthGuard] reauth-required event (reason=${detail?.reason || 'unspecified'})`)
+      setShowModal(true)
+    }
+    window.addEventListener(REAUTH_EVENT, onReauth)
+
     return () => {
       window.fetch = origFetch
+      window.removeEventListener(REAUTH_EVENT, onReauth)
     }
   }, [])
 
