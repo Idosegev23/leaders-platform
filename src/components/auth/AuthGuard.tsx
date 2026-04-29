@@ -4,58 +4,46 @@ import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 /**
- * Catches mid-session auth loss and re-authenticates in place instead of
- * bouncing through /login. The user stays on whatever page they were on,
- * sees a modal, clicks "התחבר עם Google", round-trips through Google's
- * OAuth, and lands back on the *same* URL — no manual sign-out / sign-in
- * gymnastics.
+ * Catches *mid-work* auth loss and re-authenticates in place. Only fires
+ * when the user actually tries to do something authenticated and gets a
+ * 401 back. Intentional sign-out via "התנתק" goes straight to /login
+ * with no modal — the dedicated login page is the right place for that.
  *
- * First-visit auth (no cookie at all) is still handled by the middleware
- * redirect to /login. This guards only the "I was working and got
- * kicked out" case.
+ * First-visit auth (no cookie at all) is handled by the middleware
+ * redirect to /login. Idle expiry is handled lazily — we don't pop a
+ * modal on a user who's just looking at the page; we only intervene
+ * when they click something and get rejected.
+ *
+ * Earlier this also fired on Supabase's onAuthStateChange SIGNED_OUT
+ * event, but that event is ambiguous — it fires both on token expiry
+ * AND on user-initiated signOut(). Using it caused the popup to flash
+ * every time the user logged out. The 401-from-our-API signal is
+ * unambiguous: if you got a 401, you tried to do real work and were
+ * rejected. That's the only case worth interrupting for.
  */
 export function AuthGuard() {
   const [showModal, setShowModal] = useState(false)
   const [signingIn, setSigningIn] = useState(false)
-  const wasSignedIn = useRef(false)
-  const ignoreFirstNull = useRef(true)
+  const hadSessionAtMount = useRef(false)
 
   useEffect(() => {
     const supabase = createClient()
 
-    // Seed the "was signed in" flag from the current session so we
-    // don't fire the modal on initial page load when the cookie has
-    // already expired (middleware would have redirected).
     supabase.auth.getSession().then(({ data }) => {
-      wasSignedIn.current = !!data.session
-      ignoreFirstNull.current = false
+      hadSessionAtMount.current = !!data.session
     })
 
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        wasSignedIn.current = true
-        if (showModal) setShowModal(false)
-        return
-      }
-
-      if (ignoreFirstNull.current) return
-      // Only fire the modal if we were *previously* signed in this
-      // session — otherwise this is the first paint without a cookie
-      // and the middleware already redirected to /login.
-      if (wasSignedIn.current && (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
-        setShowModal(true)
-      }
-    })
-
-    // Belt + suspenders: also listen for 401s from our own API routes
-    // and pop the modal. window.fetch is intercepted so we don't have
-    // to retrofit every caller.
+    // Single trigger: 401 from our own API. We don't react to
+    // onAuthStateChange at all — see component docstring.
     const origFetch = window.fetch
     window.fetch = async (...args) => {
       const res = await origFetch(...args)
-      if (res.status === 401 && wasSignedIn.current) {
-        // Probe whether Supabase still considers us signed in; if not,
-        // the auth listener will have already fired. Just be safe.
+      if (
+        res.status === 401 &&
+        hadSessionAtMount.current &&
+        // Only handle our own routes; third-party 401s aren't ours to fix.
+        looksLikeOwnApi(args[0])
+      ) {
         const { data } = await supabase.auth.getSession()
         if (!data.session) setShowModal(true)
       }
@@ -63,15 +51,29 @@ export function AuthGuard() {
     }
 
     return () => {
-      sub.subscription.unsubscribe()
       window.fetch = origFetch
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!showModal) return null
 
   return <ReauthModal onSignInStart={() => setSigningIn(true)} signingIn={signingIn} />
+}
+
+function looksLikeOwnApi(input: RequestInfo | URL): boolean {
+  try {
+    const url = typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : (input as Request).url
+    if (!url) return false
+    if (url.startsWith('/')) return url.startsWith('/api/')
+    const u = new URL(url)
+    return u.origin === window.location.origin && u.pathname.startsWith('/api/')
+  } catch {
+    return false
+  }
 }
 
 function ReauthModal({ onSignInStart, signingIn }: { onSignInStart: () => void; signingIn: boolean }) {
