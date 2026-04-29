@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Heebo, Assistant, Rubik, Cormorant_Garamond } from 'next/font/google'
 import { Toaster } from 'sonner'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 import './globals.css'
 
 const heebo = Heebo({
@@ -46,6 +47,7 @@ export default function RootLayout({
       className={`${heebo.variable} ${assistant.variable} ${rubik.variable} ${cormorant.variable}`}
     >
       <body className="font-heebo antialiased bg-background text-foreground min-h-screen">
+        <AuthGuard />
         {children}
         <Toaster dir="rtl" position="top-center" richColors closeButton />
       </body>
