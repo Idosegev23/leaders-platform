@@ -55,6 +55,8 @@ export default function StepInfluencers({
   const [showAddForm, setShowAddForm] = useState(false)
   const [agentLoading, setAgentLoading] = useState(false)
   const [agentError, setAgentError] = useState<string | null>(null)
+  const [enrichingIndex, setEnrichingIndex] = useState<number | null>(null)
+  const [enrichError, setEnrichError] = useState<{ index: number; message: string } | null>(null)
 
   // ── IMAI Agent: real influencer search via Gemini function calling ──
   const runImaiAgent = useCallback(async () => {
@@ -148,6 +150,62 @@ export default function StepInfluencers({
       onChange({ ...data, influencers: updated })
     },
     [data, onChange, influencers]
+  )
+
+  /** Enrich a row with full IMAI data — fills name, followers, ER, profile pic, audience, etc. */
+  const enrichWithImai = useCallback(
+    async (index: number) => {
+      const inf = influencers[index]
+      const handle = (inf.username || inf.profileUrl || '').trim()
+      if (!handle) {
+        setEnrichError({ index, message: 'יש להזין שם משתמש (או URL לפרופיל) קודם' })
+        return
+      }
+      setEnrichError(null)
+      setEnrichingIndex(index)
+      try {
+        const res = await fetch('/api/imai/enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: handle }),
+        })
+        const json = await res.json()
+        if (!res.ok || !json?.profile) {
+          throw new Error(json?.error || `HTTP ${res.status}`)
+        }
+        const p = json.profile as Partial<InfluencerProfile> & {
+          isVerified?: boolean
+          _audienceCredibility?: number
+        }
+        // Merge — existing values win only when IMAI returned empty/zero,
+        // so the enrich actually overwrites stale manual fills.
+        const current = influencers[index]
+        const merged: InfluencerProfile = {
+          ...current,
+          name: p.name || current.name,
+          username: p.username || current.username,
+          profileUrl: p.profileUrl || current.profileUrl,
+          profilePicUrl: p.profilePicUrl || current.profilePicUrl,
+          followers: typeof p.followers === 'number' && p.followers > 0 ? p.followers : current.followers,
+          engagementRate: typeof p.engagementRate === 'number' && p.engagementRate > 0 ? p.engagementRate : current.engagementRate,
+          israeliAudiencePercent: p.israeliAudiencePercent ?? current.israeliAudiencePercent,
+          genderSplit: p.genderSplit ?? current.genderSplit,
+          ageSplit: p.ageSplit ?? current.ageSplit,
+          bio: p.bio || current.bio,
+          isVerified: typeof p.isVerified === 'boolean' ? p.isVerified : current.isVerified,
+          avgReelViews: p.avgReelViews ?? current.avgReelViews,
+        }
+        const updated = [...influencers]
+        updated[index] = merged
+        onChange({ ...data, influencers: updated })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setEnrichError({ index, message })
+      } finally {
+        setEnrichingIndex(null)
+      }
+    },
+    [influencers, data, onChange],
   )
 
   // Categories management
@@ -357,6 +415,28 @@ export default function StepInfluencers({
               {/* Expanded form */}
               {isExpanded && (
                 <CardContent className="border-t border-wizard-border pt-4 space-y-4">
+                  {/* Enrich-from-IMAI bar */}
+                  <div className="rounded-xl bg-brand-blush/40 ring-1 ring-brand-accent/20 p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-bold text-wizard-text-primary">העשרה אוטומטית מ-IMAI</p>
+                      <p className="text-[11px] text-wizard-text-tertiary leading-relaxed">
+                        ימלא שם מלא, עוקבים, ER, תמונת פרופיל, פילוח קהל וגילאים — לפי שם המשתמש שלמעלה.
+                      </p>
+                    </div>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => enrichWithImai(index)}
+                      disabled={enrichingIndex === index || !(inf.username || inf.profileUrl)}
+                      className="shrink-0"
+                    >
+                      {enrichingIndex === index ? '⏳ מושך…' : '✨ העשר'}
+                    </Button>
+                  </div>
+                  {enrichError?.index === index && (
+                    <p className="text-[11px] text-destructive">⚠️ {enrichError.message}</p>
+                  )}
+
                   {/* Basic info */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Input
