@@ -89,6 +89,23 @@ export async function fetchScrape(url: string): Promise<EnhancedScrapeResult> {
   const images = extractImages(html, url)
   const categorized = categorizeImages(images, html)
 
+  // Fallback for JS-rendered sites (e.g. Bayer/Bepanthen, modern SPAs):
+  // when heuristic categorization returns empty, mine the social-share
+  // meta tags. og:image / twitter:image / link rel=image_src are
+  // server-rendered even on heavy SPAs and almost always point at a
+  // hero or product photo curated for sharing.
+  const total = categorized.hero.length + categorized.product.length + categorized.lifestyle.length
+  if (total === 0) {
+    const social = extractSocialMetaImages(html, url)
+    if (social.length) {
+      console.log(`[Fetch Scraper] Heuristic empty — falling back to ${social.length} social meta images`)
+      // Treat the first as hero, the rest as lifestyle so the deck
+      // gets at least one image for both categories.
+      categorized.hero = social.slice(0, 1)
+      categorized.lifestyle = social.slice(1, 8)
+    }
+  }
+
   // Colors from CSS
   const colors = extractColorsFromHTML(html)
 
@@ -302,6 +319,48 @@ function extractImages(html: string, baseUrl: string): string[] {
   }
 
   return Array.from(images).slice(0, 50)
+}
+
+/**
+ * Mine social-share meta tags for product/hero imagery. Sites built as
+ * heavy SPAs (e.g. Bayer/Bepanthen) render almost no <img> tags in the
+ * initial HTML, so categorizeImages comes back empty — but they almost
+ * always set og:image / twitter:image / link rel=image_src in the head
+ * for social link previews, and those URLs almost always point at a
+ * curated hero or product photo. Extracts every variant + dedupes.
+ */
+function extractSocialMetaImages(html: string, baseUrl: string): string[] {
+  const found = new Set<string>()
+  const patterns = [
+    /<meta[^>]+(?:property|name)=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:image(?::secure_url)?["']/gi,
+    /<meta[^>]+(?:property|name)=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']twitter:image(?::src)?["']/gi,
+    /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/gi,
+  ]
+  for (const re of patterns) {
+    let m: RegExpExecArray | null
+    while ((m = re.exec(html))) {
+      const raw = m[1]
+      if (!raw) continue
+      const abs = resolveAbsoluteUrl(raw, baseUrl)
+      if (abs) found.add(abs)
+    }
+  }
+  return Array.from(found).filter(
+    (u) => /\.(jpg|jpeg|png|webp|avif)(\?|$)/i.test(u) && !/favicon|sprite|placeholder/i.test(u),
+  )
+}
+
+function resolveAbsoluteUrl(raw: string, baseUrl: string): string | null {
+  if (!raw) return null
+  if (raw.startsWith('//')) return 'https:' + raw
+  if (raw.startsWith('http')) return raw
+  try {
+    return new URL(raw, baseUrl).toString()
+  } catch {
+    return null
+  }
 }
 
 function categorizeImages(images: string[], html: string): {

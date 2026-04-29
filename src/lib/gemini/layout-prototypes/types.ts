@@ -81,6 +81,8 @@ export interface ThreePillarsGridSlots {
     title: string
     description: string
   }>
+  /** Optional brand image — rendered as a 35% right-side band so the slide isn't pure typography. */
+  sideImage?: string
 }
 
 export interface NumberedStatsSlots {
@@ -91,6 +93,8 @@ export interface NumberedStatsSlots {
     label: string
     accent?: boolean
   }>
+  /** Optional brand image — rendered as a faded full-bleed background so the stats stay legible. */
+  backgroundImage?: string
 }
 
 export interface InfluencerGridSlots {

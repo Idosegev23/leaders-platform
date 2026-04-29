@@ -217,26 +217,40 @@ function renderCenteredInsight(slots: CenteredInsightSlots, ds: DesignSystem): s
 
 function renderThreePillarsGrid(slots: ThreePillarsGridSlots, ds: DesignSystem): string {
   const { colors: c } = ds
+  const hasImage = !!slots.sideImage
+  // When a side image is present, pillars compress to 60% width on the right
+  // and the image takes 35% on the left as a vertical band. Otherwise pillars
+  // span the full width as before.
+  const pillarsLeftRight = hasImage
+    ? `top:50%; right:80px; left:38%; transform:translateY(-40%);`
+    : `top:50%; right:80px; left:80px; transform:translateY(-40%);`
   return `<div class="slide">
     <div class="atm-1"></div>
     ${slots.eyebrowLabel ? `<div class="eyebrow" data-editable="text" data-role="eyebrow">${esc(slots.eyebrowLabel)}</div>` : ''}
-    <div style="position:absolute; top:80px; right:80px; left:80px; z-index:10;">
+    ${hasImage ? `
+      <div data-editable="image" data-role="side-image"
+           style="position:absolute; top:120px; bottom:80px; left:80px; width:30%; z-index:8; border-radius:24px; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,0.4);">
+        <img src="${esc(slots.sideImage!)}" alt=""
+             style="width:100%; height:100%; object-fit:cover; display:block;" />
+        <div style="position:absolute; inset:0; background:linear-gradient(135deg, ${c.primary}22, transparent 60%); pointer-events:none;"></div>
+      </div>` : ''}
+    <div style="position:absolute; top:80px; ${hasImage ? 'left:38%;' : 'left:80px;'} right:80px; z-index:10;">
       <h1 data-editable="text" data-role="title" class="title-shadow"
-          style="font-size:72px; font-weight:900; line-height:1.0; color:${c.text}; letter-spacing:-3px;">
+          style="font-size:${hasImage ? '60px' : '72px'}; font-weight:900; line-height:1.0; color:${c.text}; letter-spacing:-3px;">
         ${esc(slots.title)}
       </h1>
     </div>
-    <div style="position:absolute; top:50%; right:80px; left:80px; transform:translateY(-40%); display:flex; gap:40px; z-index:10;">
+    <div style="position:absolute; ${pillarsLeftRight} display:flex; gap:${hasImage ? '24px' : '40px'}; z-index:10;">
       ${(slots.pillars || []).slice(0, 3).map((p, i) => `
         <div data-editable="pillar" data-role="pillar-${i}"
-             style="flex:1; background:${c.cardBg}; backdrop-filter:blur(12px); border:1px solid ${c.text}15; border-radius:20px; padding:48px 32px; position:relative;">
-          <div style="font-size:96px; font-weight:900; color:${i === 1 ? c.primary : c.text}22; line-height:1; margin-bottom:24px; ${i !== 1 ? `-webkit-text-stroke:2px ${c.text}30; color:transparent;` : `text-shadow:0 0 60px ${c.primary}66;`}">
+             style="flex:1; background:${c.cardBg}; backdrop-filter:blur(12px); border:1px solid ${c.text}15; border-radius:20px; padding:${hasImage ? '32px 24px' : '48px 32px'}; position:relative;">
+          <div style="font-size:${hasImage ? '72px' : '96px'}; font-weight:900; color:${i === 1 ? c.primary : c.text}22; line-height:1; margin-bottom:${hasImage ? '16px' : '24px'}; ${i !== 1 ? `-webkit-text-stroke:2px ${c.text}30; color:transparent;` : `text-shadow:0 0 60px ${c.primary}66;`}">
             ${esc(p.number)}
           </div>
-          <h3 data-editable="text" style="font-size:28px; font-weight:700; color:${c.text}; margin-bottom:16px; letter-spacing:-0.5px;">
+          <h3 data-editable="text" style="font-size:${hasImage ? '22px' : '28px'}; font-weight:700; color:${c.text}; margin-bottom:${hasImage ? '12px' : '16px'}; letter-spacing:-0.5px;">
             ${esc(p.title)}
           </h3>
-          <p data-editable="text" style="font-size:16px; font-weight:300; color:${c.muted}; line-height:1.6;">
+          <p data-editable="text" style="font-size:${hasImage ? '13px' : '16px'}; font-weight:300; color:${c.muted}; line-height:1.6;">
             ${esc(p.description)}
           </p>
         </div>
@@ -248,8 +262,16 @@ function renderThreePillarsGrid(slots: ThreePillarsGridSlots, ds: DesignSystem):
 
 function renderNumberedStats(slots: NumberedStatsSlots, ds: DesignSystem): string {
   const { colors: c } = ds
+  const hasBg = !!slots.backgroundImage
   return `<div class="slide">
     <div class="atm-1"></div>
+    ${hasBg ? `
+      <div data-editable="image" data-role="bg-image"
+           style="position:absolute; inset:0; z-index:1;">
+        <img src="${esc(slots.backgroundImage!)}" alt=""
+             style="width:100%; height:100%; object-fit:cover; opacity:0.28; filter:saturate(0.8); display:block;" />
+        <div style="position:absolute; inset:0; background:linear-gradient(180deg, ${c.background}cc 0%, ${c.background}99 50%, ${c.background}ee 100%); pointer-events:none;"></div>
+      </div>` : ''}
     ${slots.eyebrowLabel ? `<div class="eyebrow" data-editable="text" data-role="eyebrow">${esc(slots.eyebrowLabel)}</div>` : ''}
     <div style="position:absolute; top:80px; right:80px; left:80px; z-index:10;">
       <h1 data-editable="text" data-role="title" class="title-shadow"
