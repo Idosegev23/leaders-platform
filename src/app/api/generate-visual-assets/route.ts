@@ -7,6 +7,8 @@ import { generateSmartImages } from '@/lib/gemini/israeli-image-generator'
 import type { BrandResearch } from '@/lib/gemini/brand-research'
 import { createClient } from '@/lib/supabase/server'
 import { compositeLogo } from '@/lib/utils/image-compositor'
+import { fetchScrape } from '@/lib/apify/fetch-scraper'
+import { validateExternalUrl } from '@/lib/utils/url-validator'
 
 /**
  * POST /api/generate-visual-assets
@@ -90,24 +92,31 @@ export async function POST(request: NextRequest) {
         console.log(`[Visual Assets][${requestId}] [Gemini PRIMARY] Done: primary=${colors.primary}, accent=${colors.accent}`)
         return colors
       })(),
-      // SECONDARY: Website scrape for images/logo
+      // SECONDARY: Website scrape for images/logo. Calls the lib directly
+      // instead of round-tripping through /api/scrape so server-to-server
+      // calls don't hit the 401 from /api/scrape's auth wrapper (the inner
+      // fetch carries no cookies in production).
       (async () => {
         if (!siteUrl) {
           console.log(`[Visual Assets][${requestId}] [Scrape] No website URL - skipping`)
           return null
         }
-        console.log(`[Visual Assets][${requestId}] [Scrape] Fetching: ${siteUrl}`)
-        const scrapeRes = await fetch(new URL('/api/scrape', request.url), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: siteUrl, enhanced: true }),
-        })
-        const scrapeJson = await scrapeRes.json()
-        if (scrapeJson.success && scrapeJson.data) {
-          console.log(`[Visual Assets][${requestId}] [Scrape] Done: logo=${!!scrapeJson.data.logoUrl}, images=${scrapeJson.data.allImages?.length || 0}`)
-          return scrapeJson.data
+        let safeUrl: string
+        try {
+          safeUrl = validateExternalUrl(siteUrl)
+        } catch {
+          console.log(`[Visual Assets][${requestId}] [Scrape] Invalid/blocked URL: ${siteUrl}`)
+          return null
         }
-        return null
+        console.log(`[Visual Assets][${requestId}] [Scrape] Fetching: ${safeUrl}`)
+        try {
+          const data = await fetchScrape(safeUrl)
+          console.log(`[Visual Assets][${requestId}] [Scrape] Done: logo=${!!data.logoUrl}, images=${data.allImages?.length || 0}`)
+          return data
+        } catch (e) {
+          console.error(`[Visual Assets][${requestId}] [Scrape] Failed:`, e)
+          return null
+        }
       })(),
     ])
 

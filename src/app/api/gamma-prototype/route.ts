@@ -77,15 +77,36 @@ export async function POST(request: NextRequest) {
     const brandColors = data._brandColors as
       | { primary?: string; secondary?: string; accent?: string } | undefined
 
+    // Pull industry + brand voice for benchmarks / case-studies / voice enforcement.
+    const brandResearchObj = (data._brandResearch as Record<string, unknown> | undefined) || {}
+    const industry =
+      (brandResearchObj.industry as string | undefined) ||
+      (data.industry as string | undefined)
+    const brandVoice = brandResearchObj.brandVoiceGuide as
+      | { personality?: string; toneSpectrum?: string; languageStyle?: string; avoid?: string }
+      | undefined
+    const competitors = brandResearchObj.competitors
+    const hasCompetitors =
+      Array.isArray(competitors) ? competitors.length > 0 :
+      typeof competitors === 'string' ? competitors.trim().length > 0 : false
+    const hasPlatformMix = !!brandResearchObj.platformMix || !!brandResearchObj.platforms
+    const hasTimeline = !!brandResearchObj.timeline || !!data.campaignTimeline
+
     console.log('[gamma-proto] generating for', brandName, {
       hasBrief: !!brief,
       hasResearch: !!research,
       influencerCount: influencers.length,
       hasImages: Object.values(images).some(Boolean),
+      industry,
+      hasVoice: !!brandVoice?.personality,
+      hasCompetitors,
+      hasPlatformMix,
+      hasTimeline,
     })
 
     const { presentation, htmlSlides } = await generateAndRender({
       brandName, brief, research, influencers, brandColors, images,
+      industry, brandVoice, hasCompetitors, hasPlatformMix, hasTimeline,
     })
 
     return NextResponse.json({
