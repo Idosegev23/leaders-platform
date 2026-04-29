@@ -184,6 +184,15 @@ const LAYOUT_POOL: Record<string, string[]> = {
     'Case Study Spread — 2-3 mini case panels each with thumbnail + headline + one outcome metric',
     'Single Hero Case — one big case study with image, brief, result, and our role',
   ],
+  risks: [
+    'Two-Column Risk Matrix — left column "סיכון" entries, right column "תגובה" entries, color-coded',
+    'Stacked Risk Cards — 2-3 cards each with "סיכון" headline and "מה נעשה" body in muted text',
+  ],
+  nextSteps: [
+    'Action Timeline — horizontal arrow with 3-4 dated milestones (אישור / kickoff / launch / report)',
+    'Numbered Stack with Dates — vertical 01-04 list, each step has a date pill on the right',
+    'Calendar Strip — week-style strip with key actions on the relevant days',
+  ],
   testimonials: [
     'Quote Wall — 2-3 client quotes in serif italic, each with name + brand + small avatar',
     'Single Pull Quote — one large quote at 36px+ with attribution beneath',
@@ -442,7 +451,7 @@ async function generateSlidePlan(
   console.log(`[SlideDesigner][${requestId}] Step 2: Planner for "${brandName}"`)
 
   const cleanData = cleanDataForPrompt(data)
-  const brandResearch = data._brandResearch || {}
+  const brandResearch = (data._brandResearch || {}) as Record<string, unknown>
   const influencerResearch = data._influencerStrategy || data.influencerResearch || {}
 
   // Available images list
@@ -452,6 +461,55 @@ async function generateSlidePlan(
     .join('\n')
 
   const cd = designSystem.creativeDirection
+
+  // ── Voice enforcement: pull brandVoiceGuide if available ──
+  const voice = (brandResearch.brandVoiceGuide || {}) as {
+    personality?: string
+    toneSpectrum?: string
+    languageStyle?: string
+    avoid?: string
+  }
+  const tone = (typeof brandResearch.toneOfVoice === 'string' ? brandResearch.toneOfVoice : '') || ''
+  const personalityList = Array.isArray(brandResearch.brandPersonality) ? (brandResearch.brandPersonality as string[]) : []
+  const voiceBlock = (voice.personality || voice.toneSpectrum || tone || personalityList.length)
+    ? `<brand_voice>
+Personality: ${voice.personality || personalityList.join(', ') || 'unspecified'}
+Tone spectrum: ${voice.toneSpectrum || tone || 'professional'}
+Language style: ${voice.languageStyle || 'standard Hebrew'}
+AVOID: ${voice.avoid || 'corporate jargon, generic claims'}
+</brand_voice>`
+    : ''
+
+  // ── Competitor signal — used to decide if competitiveAnalysis is mandatory ──
+  const competitors = Array.isArray(brandResearch.competitors) ? (brandResearch.competitors as Array<Record<string, unknown>>) : []
+  const competitorCampaigns = Array.isArray(brandResearch.competitorCampaigns) ? (brandResearch.competitorCampaigns as Array<Record<string, unknown>>) : []
+  const hasCompetitorIntel = competitors.length > 0 || competitorCampaigns.length > 0
+
+  // ── Industry benchmark — feeds the metrics slide ──
+  const { lookupIndustryBenchmark, formatBenchmarkForPrompt } = await import('@/lib/benchmarks/industry')
+  const industryFromResearch = typeof brandResearch.industry === 'string' ? brandResearch.industry : ''
+  const industryFromData = typeof (data as Record<string, unknown>).industry === 'string'
+    ? ((data as Record<string, unknown>).industry as string)
+    : ''
+  const industryStr = industryFromResearch || industryFromData || ''
+  const benchmark = lookupIndustryBenchmark(industryStr)
+  const benchmarkBlock = `<industry_benchmark>
+${formatBenchmarkForPrompt(benchmark)}
+</industry_benchmark>`
+
+  // ── Case studies — proof points, matched by industry ──
+  const { fetchRelevantCaseStudies, formatCaseStudiesForPrompt } = await import('@/lib/case-studies/fetch')
+  const caseStudies = await fetchRelevantCaseStudies(benchmark.slug, 3)
+  const caseStudiesText = formatCaseStudiesForPrompt(caseStudies)
+  const caseStudiesBlock = caseStudiesText
+    ? `<leaders_case_studies>
+The following are real Leaders campaigns from our archive. Pick 1–2 most relevant and reference them in the caseStudies slide. NEVER invent case studies — only use these.
+${caseStudiesText}
+</leaders_case_studies>`
+    : ''
+  if (caseStudies.length > 0) {
+    console.log(`[SlideDesigner][${requestId}] 📚 Loaded ${caseStudies.length} case studies for industry "${benchmark.slug}"`)
+  }
 
   const prompt = `אתה קריאייטיב דיירקטור בכיר ב-Leaders, סוכנות שיווק דיגיטלי ישראלית מובילה.
 
@@ -467,8 +525,16 @@ ${JSON.stringify(brandResearch, null, 2)}
 ${JSON.stringify(influencerResearch, null, 2)}
 </influencer_research>
 
+${voiceBlock}
+
+${benchmarkBlock}
+
+${caseStudiesBlock}
+
 <available_images>
 ${imageList || 'אין תמונות זמינות'}
+
+PRIORITY: keys starting with "client" (clientHero1/2/3, clientProduct1-4, clientLifestyle1-3) are SCRAPED FROM THE BRAND'S OWN WEBSITE. Use them first for cover, brief, audience, bigIdea, deliverables. Generic stock keys (coverImage, brandImage, etc.) are fallbacks.
 </available_images>
 
 <creative_direction>
@@ -485,19 +551,27 @@ Emotional Arc: ${cd.emotionalArc}` : 'No creative direction available'}
 
 כתוב את הקופי העברי המדויק לכל שקף. אתה הקופירייטר והקריאייטיב דיירקטור — תהיה ספציפי, חד, ויצירתי.
 
-סוגי שקפים — מינימום 11, מקסימום 18. **כמה שקפים שמתאים למותג ולעושר הדאטה.**
-שקפי הליבה (חובה, בסדר הזה): cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing
+סוגי שקפים — מינימום 13, מקסימום 18. **כמה שקפים שמתאים למותג ולעושר הדאטה.**
 
-שקפים אופציונליים שאפשר להוסיף לעומק (במיקום הגיוני בתוך הקיים):
-- moodBoard: לוח השראה ויזואלי — סגנון, צבעים, אווירה. הכי מתאים אחרי bigIdea.
-- contentPillars: 3-5 עמודי תוכן (אם יש בריף עשיר עם הרבה כיוונים). אחרי strategy.
-- timeline: ציר זמן של הפעלת הקמפיין — שלבים + תאריכים. אחרי deliverables.
-- competitiveAnalysis: 2-4 מתחרים + מה לקוח ייחודי לעומתם. אחרי brief.
-- caseStudies: 2-3 קמפיינים דומים שעשינו (אם יש בדאטה _caseStudies). אחרי deliverables.
-- testimonials: עדויות לקוח (אם יש בדאטה _testimonials). אחרי closing.
-- mediaMix: פילוח ערוצים (אינסטגרם %, טיקטוק %, יוטיוב %). אחרי strategy או metrics.
+שקפי הליבה (חובה תמיד, בסדר הזה):
+cover → brief → goals → audience → insight → strategy → bigIdea → deliverables → influencers → metrics → caseStudies → risks → nextSteps → closing
 
-**החלטה כמה שקפים:** הוסף שקף אופציונלי רק אם יש בריף/מחקר מספיק עשיר כדי למלא אותו טוב. אל תמתח שקף ריק כדי "להגיע ל-18".
+שקפים מותנים — חייבים להיכלל אם הדאטה תומך:
+- competitiveAnalysis: **חובה אם יש competitors** ב-brand_research. מיקום: אחרי brief, לפני goals.
+${hasCompetitorIntel ? '   ✅ יש לך מתחרים ב-data — הכלל את השקף הזה בהכרח.' : '   ⚪ אין מתחרים ב-data — אל תוסיף.'}
+
+שקפים אופציונליים שאפשר להוסיף לעומק (במיקום הגיוני):
+- moodBoard: לוח השראה ויזואלי — אחרי bigIdea. רק אם יש לך תמונות clientHero/clientLifestyle בעלות אווירה ברורה.
+- contentPillars: 3-5 עמודי תוכן — אחרי strategy. רק אם יש בריף עשיר עם הרבה כיוונים.
+- timeline: ציר זמן של 3 phases — אחרי deliverables. רק אם יש לוח זמנים מוגדר בדאטה.
+- mediaMix: פילוח ערוצים % — אחרי strategy. רק אם הדאטה כוללת platform mix.
+
+הסבר תוכן כל שקף ליבה חדש:
+- **caseStudies**: בחר 1-2 case studies מהבלוק <leaders_case_studies> שהכי קרובים בקטגוריה ולקוח. כתוב לכל אחד: brand_name, brief 1-משפט, תוצאה אחת (engagement_rate או reach), מספר שמדבר. אם אין case studies — דלג.
+- **risks**: 2-3 סיכונים ריאליים בקמפיין הזה + תגובה לכל אחד. דוגמה: "סיכון: השקה ברגע מתגעש בסושיאל → תגובה: לדחות 48 שעות אם יש משבר תקשורתי". זה לא 'קליישה' — זה אזהרה כנה שמראה שאנחנו חושבים על הלקוח.
+- **nextSteps**: סיום קונקרטי. headline + 3-4 פעולות מתאריכים: "אישור עד יום ב' / kickoff ב-15.05 / launch ב-1.06 / report ב-30.06". זה השקף האחרון לפני closing — מה צריך לקרות עכשיו.
+
+**החלטה כמה שקפים:** התחל מ-13 (הליבה כולל caseStudies+risks+nextSteps). הוסף competitiveAnalysis אם יש מתחרים. הוסף עד 4 אופציונליים אם יש דאטה אמיתית למלא אותם. אל תמתח שקף ריק כדי להגיע ל-18.
 
 הסבר:
 - cover: שקף פתיחה ויזואלי
@@ -514,16 +588,18 @@ Emotional Arc: ${cd.emotionalArc}` : 'No creative direction available'}
 
 כללים:
 1. כל הטקסט בעברית בלבד! גם כותרת הcover חייבת להיות בעברית. שם המותג יכול להיות באנגלית אבל שאר הכותרת בעברית. דוגמה: "${brandName} — הסמכות של יוקרה חכמה" ולא "The Authority of Smart Luxury"
-2. cover ו-closing חובה
-3. כותרות: קצרות, פרובוקטיביות, ספציפיות למותג. לא "המטרות שלנו" אלא "3 יעדים שישנו את ${brandName}"
-4. גוף: מקסימום 2-3 משפטים. תמציתי וחד
-5. כרטיסים: כותרת + גוף קצר. מקסימום 5 כרטיסים
-6. בולט פוינטס: מקסימום 5 נקודות, כל אחת עד 10 מילים
-7. מספרים מפתח: השתמש בנתונים אמיתיים מהדאטה (תקציב, reach, KPIs). אם תקציב לא מצוין בדאטה — אל תמציא מספר! השתמש ב-KPIs אחרים כמו reach, engagement, המרות
-8. שייך תמונות קיימות (existingImageKey) כשהן רלוונטיות. אם אין תמונה מתאימה — כתוב imageDirection לתמונה שצריך ליצור
-9. influencers — כתוב אסטרטגיית משפיענים ספציפית (לא כללית!). אם יש שמות מומלצים — השתמש. אם לא — כתוב פרופילים לדוגמה
-10. כל שקף צריך emotionalTone שמתאים לסיפור הכולל
-11. המצגת היא מסע: אתגר → תובנה → פתרון → הוכחה → סגירה
+2. **טון המותג** ($\Leftarrow$ <brand_voice>) הוא חוק. אם הטון "צעיר ומשוחרר" — אסור לכתוב "נחנוך נוכחות דיגיטלית"; כתוב "נכיר אותם, נדבר ב-DM, נראה אנושיים". אם הטון "פרימיום ומאופק" — אל תשלוף אימוג'ים או מילים קלילות. אם יש AVOID list — אל תיגע באף מילה משם. **כל שורת קופי חייבת להישמע כמו המותג מדבר, לא כמו AI כותב.**
+3. cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, caseStudies, risks, nextSteps, closing — כל אלה חובה (לפי ה-task block).
+4. כותרות: קצרות, פרובוקטיביות, ספציפיות למותג. לא "המטרות שלנו" אלא "3 יעדים שישנו את ${brandName}"
+5. גוף: מקסימום 2-3 משפטים. תמציתי וחד
+6. כרטיסים: כותרת + גוף קצר. מקסימום 5 כרטיסים
+7. בולט פוינטס: מקסימום 5 נקודות, כל אחת עד 10 מילים
+8. **מספרים מפתח: השתמש בbenchmarks מ-<industry_benchmark> + נתוני הבריף. בשקף metrics — קבע יעד CPE/ER ספציפי וציין את ה-benchmark התעשייתי (לא ייצא מהאוויר). דוגמה: "יעד CPE ₪3.20 — ממוצע התעשייה ₪${benchmark.cpe.mid.toFixed(2)}, החלטה אגרסיבית". אסור להמציא מספרים שאין להם בסיס בדאטה.**
+9. שייך תמונות קיימות (existingImageKey) כשהן רלוונטיות. **תיעדף תמיד תמונות עם prefix "client" (סקייפ ישיר מהאתר של המותג)** — clientHero/clientProduct/clientLifestyle לפני stock כללי.
+10. influencers — השתמש בפרופילים מ-<influencer_research>. אם יש שמות אמיתיים — שמות אמיתיים. אם לא — כתוב פרופיל לדוגמה ב-bio = "[פרופיל לדוגמה]".
+11. **caseStudies (אם השקף קיים): השתמש ב-<leaders_case_studies> בלבד. אסור להמציא מותגים או תוצאות. ציין brand_name + תוצאה מספרית אחת + 1-משפט למה זה רלוונטי.**
+12. כל שקף צריך emotionalTone שמתאים לסיפור הכולל
+13. המצגת היא מסע: אתגר → תובנה → פתרון → הוכחה → סגירה
 
 כללים קריטיים לתוכן:
 - BRIEF: לא סיפור המותג! כתוב את האתגר — למה פנו אלינו? מה הבעיה? מקסימום 3 משפטים.
@@ -685,8 +761,8 @@ Emotional Arc: ${cd.emotionalArc}` : 'No creative direction available'}
 
       if (parsed?.slides?.length >= 5) {
         // Post-process: ensure slideType is always defined, sanitize content
-        const expectedCoreTypes = ['cover', 'brief', 'goals', 'audience', 'insight', 'strategy', 'bigIdea', 'deliverables', 'influencers', 'metrics', 'closing']
-        const allowedTypes = new Set([...expectedCoreTypes, 'moodBoard', 'contentPillars', 'timeline', 'competitiveAnalysis', 'caseStudies', 'testimonials', 'mediaMix'])
+        const expectedCoreTypes = ['cover', 'brief', 'goals', 'audience', 'insight', 'strategy', 'bigIdea', 'deliverables', 'influencers', 'metrics', 'caseStudies', 'risks', 'nextSteps', 'closing']
+        const allowedTypes = new Set([...expectedCoreTypes, 'moodBoard', 'contentPillars', 'timeline', 'competitiveAnalysis', 'testimonials', 'mediaMix'])
         for (let si = 0; si < parsed.slides.length; si++) {
           const slide = parsed.slides[si]
           if (!slide.slideType || typeof slide.slideType !== 'string' || slide.slideType.trim() === '') {
@@ -732,18 +808,33 @@ Emotional Arc: ${cd.emotionalArc}` : 'No creative direction available'}
 /** Fallback plan when AI fails */
 function buildFallbackPlan(data: PremiumProposalData, images: Record<string, string>): SlidePlan[] {
   const brandName = data.brandName || 'המותג'
-  // Fixed 9+2 slide sequence per Liran's feedback
+  const coverImg = images.clientHero1 ? 'clientHero1' : images.coverImage ? 'coverImage' : undefined
+  const briefImg = images.clientHero2 || images.clientLifestyle1 ? (images.clientHero2 ? 'clientHero2' : 'clientLifestyle1') : (images.brandImage ? 'brandImage' : undefined)
+  const audienceImg = images.clientLifestyle2 ? 'clientLifestyle2' : (images.audienceImage ? 'audienceImage' : undefined)
+  const bigIdeaImg = images.clientHero3 ? 'clientHero3' : (images.activityImage ? 'activityImage' : undefined)
+
   const plans: SlidePlan[] = [
-    { slideType: 'cover', title: brandName, subtitle: data.campaignName || 'הצעת קריאטיב', emotionalTone: 'dramatic', existingImageKey: images.coverImage ? 'coverImage' : undefined },
-    { slideType: 'brief', title: `האתגר של ${brandName}`, bodyText: data.brandObjective || data.brandBrief || '', emotionalTone: 'confident', existingImageKey: images.brandImage ? 'brandImage' : undefined },
+    { slideType: 'cover', title: brandName, subtitle: data.campaignName || 'הצעת קריאטיב', emotionalTone: 'dramatic', existingImageKey: coverImg },
+    { slideType: 'brief', title: `האתגר של ${brandName}`, bodyText: data.brandObjective || data.brandBrief || '', emotionalTone: 'confident', existingImageKey: briefImg },
     { slideType: 'goals', title: 'מטרות הקמפיין', bulletPoints: data.goals || [], emotionalTone: 'energetic' },
-    { slideType: 'audience', title: 'קהל היעד', bodyText: data.targetDescription || '', emotionalTone: 'warm', existingImageKey: images.audienceImage ? 'audienceImage' : undefined },
+    { slideType: 'audience', title: 'קהל היעד', bodyText: data.targetDescription || '', emotionalTone: 'warm', existingImageKey: audienceImg },
     { slideType: 'insight', title: data.keyInsight || 'התובנה', bodyText: data.insightData || '', emotionalTone: 'dramatic' },
     { slideType: 'strategy', title: data.strategyHeadline || 'האסטרטגיה', bodyText: data.strategyDescription || '', cards: (data.strategyPillars || []).map(p => ({ title: p.title, body: p.description })), emotionalTone: 'confident' },
-    { slideType: 'bigIdea', title: data.activityTitle || 'הקריאייטיב', bodyText: data.activityDescription || '', emotionalTone: 'bold', existingImageKey: images.activityImage ? 'activityImage' : undefined },
+    { slideType: 'bigIdea', title: data.activityTitle || 'הקריאייטיב', bodyText: data.activityDescription || '', emotionalTone: 'bold', existingImageKey: bigIdeaImg },
     { slideType: 'deliverables', title: 'תוצרים', bulletPoints: data.deliverables || [], emotionalTone: 'confident' },
     { slideType: 'influencers', title: 'משפיענים', bodyText: data.influencerResearch?.strategySummary || '', emotionalTone: 'energetic' },
     { slideType: 'metrics', title: 'KPI', bulletPoints: data.successMetrics || [], keyNumber: data.budget != null && data.budget > 0 ? `₪${data.budget.toLocaleString()}` : undefined, keyNumberLabel: 'תקציב', emotionalTone: 'analytical' },
+    { slideType: 'caseStudies', title: 'הוכחה — קמפיינים שעשינו', bodyText: 'דוגמאות מהארכיון של Leaders עבור מותגים בקטגוריה.', emotionalTone: 'confident' },
+    { slideType: 'risks', title: 'סיכונים ותגובות', cards: [
+      { title: 'תזמון השקה', body: 'נדחה ב-48 שעות אם יש משבר תקשורתי באותו שבוע.' },
+      { title: 'תקשורת משפיענים', body: 'חוזה עם clauseים לעמידה בקווי מותג + אישור פוסטים מראש.' },
+    ], emotionalTone: 'analytical' },
+    { slideType: 'nextSteps', title: 'הצעדים הבאים', bulletPoints: [
+      'אישור ההצעה תוך 7 ימים',
+      'kickoff עם הצוות 14 ימים מהאישור',
+      'התחלת קמפיין 30 יום לאחר kickoff',
+      'דוח ביצועים לאחר 30 יום',
+    ], emotionalTone: 'energetic' },
     { slideType: 'closing', title: `בואו נתחיל`, subtitle: brandName, tagline: `Leaders × ${brandName}`, emotionalTone: 'inspiring' },
   ]
 
@@ -1266,6 +1357,39 @@ export async function pipelineFoundation(
   const images: Record<string, string> = { ...(config.images || {}), ...(d._generatedImages as Record<string, string> || {}) }
   if (config.extraImages) {
     for (const extra of config.extraImages) images[extra.id] = extra.url
+  }
+
+  // Pull the brand's REAL imagery from scraping. These are the heroes/
+  // products/lifestyle shots from the client's own site — far more
+  // brand-accurate than stock or AI-generated images. We give them
+  // distinct keys so the planner can target them per slide type.
+  const scraped = (d._scraped || {}) as {
+    heroImages?: string[]
+    productImages?: string[]
+    lifestyleImages?: string[]
+  }
+  const pushIfNew = (key: string, url: string | undefined) => {
+    if (!url) return
+    if (Object.values(images).includes(url)) return
+    if (!images[key]) images[key] = url
+  }
+  pushIfNew('clientHero1',     scraped.heroImages?.[0])
+  pushIfNew('clientHero2',     scraped.heroImages?.[1])
+  pushIfNew('clientHero3',     scraped.heroImages?.[2])
+  pushIfNew('clientProduct1',  scraped.productImages?.[0])
+  pushIfNew('clientProduct2',  scraped.productImages?.[1])
+  pushIfNew('clientProduct3',  scraped.productImages?.[2])
+  pushIfNew('clientProduct4',  scraped.productImages?.[3])
+  pushIfNew('clientLifestyle1', scraped.lifestyleImages?.[0])
+  pushIfNew('clientLifestyle2', scraped.lifestyleImages?.[1])
+  pushIfNew('clientLifestyle3', scraped.lifestyleImages?.[2])
+
+  const scrapedCount =
+    (scraped.heroImages?.length ?? 0) +
+    (scraped.productImages?.length ?? 0) +
+    (scraped.lifestyleImages?.length ?? 0)
+  if (scrapedCount > 0) {
+    console.log(`[SlideDesigner][${requestId}] 🖼️ Injected ${scrapedCount} scraped client images (hero=${scraped.heroImages?.length ?? 0}, product=${scraped.productImages?.length ?? 0}, lifestyle=${scraped.lifestyleImages?.length ?? 0})`)
   }
 
   // Step 1: Design System
