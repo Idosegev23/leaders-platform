@@ -159,6 +159,45 @@ export async function editImageWithNanoBanana(
 }
 
 /**
+ * Composite a real product photo into an AI-generated scene.
+ *
+ * Use case: AI generated a generic "person using a cream" scene, but we have
+ * the actual product photo from the scraper. Nano Banana Pro can take both
+ * as references and produce a merged image where the AI scene now contains
+ * the *actual* branded product — with the real packaging + logo natively
+ * baked in, not slapped on the corner. This is the answer to "אם כבר משחה
+ * אז למה לא הלוגו עליה."
+ *
+ * Returns null on failure so callers can gracefully fall back to the
+ * original AI image.
+ */
+export async function injectProductIntoScene(opts: {
+  scene: ReferenceImage              // The AI-generated scene image
+  product: ReferenceImage             // The real product photo (white-bg or close-up)
+  brandName: string
+  productDescription?: string         // e.g. "Bepanthen baby cream tube, orange & blue packaging"
+  scenePlacement?: string             // e.g. "held in the model's hand", "on the bathroom counter"
+}): Promise<NanoBananaResult | null> {
+  const placement = opts.scenePlacement || "naturally integrated into the scene"
+  const desc = opts.productDescription || `the actual ${opts.brandName} product as shown in the second reference`
+  return generateWithNanoBanana({
+    prompt:
+      `Edit the first image (the scene). Replace the generic product (or empty hand) with ${desc}, ` +
+      `${placement}. Use the second reference image as the EXACT product to depict — preserve its packaging, colors, ` +
+      `typography, and the brand logo natively printed on the product surface. The product must be photorealistic, ` +
+      `correctly lit to match the scene's lighting, and proportional. Keep the rest of the original scene intact ` +
+      `(people, background, mood, composition). NO TEXT overlays, NO additional logos in corners — the only brand ` +
+      `presence is the logo natively on the actual product packaging.`,
+    references: [
+      { ...opts.scene, caption: 'The scene to edit — keep this composition + lighting' },
+      { ...opts.product, caption: `Reference product for ${opts.brandName} — exact packaging + logo to preserve` },
+    ],
+    aspectRatio: '16:9',
+    imageSize: '2K',
+  })
+}
+
+/**
  * Generate a slide background image with brand-consistent style.
  * Uses the brand logo as a reference so colors/style match.
  */

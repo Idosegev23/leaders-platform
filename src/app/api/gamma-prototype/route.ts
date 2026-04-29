@@ -37,6 +37,10 @@ export async function POST(request: NextRequest) {
 
     const data = doc.data as Record<string, unknown>
 
+    // Hoist research object so self-healing fallbacks (influencer / images /
+    // case-studies) can read it before the main pipeline call.
+    const brandResearchObj = (data._brandResearch as Record<string, unknown> | undefined) || {}
+
     const brandName = (data.brandName as string) || (data.brand as string) || 'Brand'
     const brief = [
       data.briefText,
@@ -96,12 +100,57 @@ export async function POST(request: NextRequest) {
     }).filter((i) => i.name)
     console.log(`[gamma-proto] influencers: ${influencers.length} (${enhancedRaw.length} enhanced, ${researchRaw.length} research)`)
 
+    // ─── Self-healing influencer fallback ────────────────────────
+    // If the wizard didn't produce a list (or the list is too thin), call
+    // the IMAI agent at deck-time using whatever we know about the brand.
+    // The deck never goes out with an empty influencer-grid.
+    if (influencers.length < 4 && brandName) {
+      try {
+        const brResearch = brandResearchObj as { industry?: string; targetDemographics?: { primaryAudience?: { gender?: string; ageRange?: string; lifestyle?: string } } }
+        const targetAudience = [
+          brResearch.targetDemographics?.primaryAudience?.gender,
+          brResearch.targetDemographics?.primaryAudience?.ageRange,
+          brResearch.targetDemographics?.primaryAudience?.lifestyle,
+        ].filter(Boolean).join(', ')
+        console.log(`[gamma-proto] 🔁 Self-healing: only ${influencers.length} influencers — running IMAI fallback`)
+        const { runInfluencerAgent } = await import('@/lib/gemini/imai-agent')
+        const fallback = await runInfluencerAgent({
+          brandName,
+          industry: brResearch.industry || '',
+          targetAudience,
+          goals: (data.goals as Array<{ title?: string }> | undefined)?.map((g) => g.title || '').filter(Boolean) || [],
+          budget: typeof data.budget === 'number' ? data.budget : undefined,
+          influencerCount: 8,
+        })
+        const augmented = fallback.influencers.map((i) => ({
+          name: i.fullname || i.username,
+          handle: i.username,
+          followers: i.followers ? `${(i.followers / 1000).toFixed(0)}K` : '?',
+          engagement: i.engagement_rate ? `${i.engagement_rate.toFixed(1)}%` : '?',
+          profilePicUrl: undefined,
+          isVerified: false,
+        })).filter((i) => i.name && !influencers.some(existing => existing.handle === i.handle))
+        const before = influencers.length
+        for (const inf of augmented) {
+          if (influencers.length >= 8) break
+          influencers.push(inf)
+        }
+        console.log(`[gamma-proto] 🔁 IMAI fallback returned ${augmented.length}, now have ${influencers.length} (was ${before})`)
+      } catch (imaiErr) {
+        console.warn(`[gamma-proto] IMAI fallback failed (non-fatal):`, imaiErr instanceof Error ? imaiErr.message : imaiErr)
+      }
+    }
+
     const imgs = (data._generatedImages as Record<string, string>) || {}
     const images = {
       cover: imgs.coverImage,
       brand: imgs.brandImage,
       audience: imgs.audienceImage,
-      activity: imgs.activityImage,
+      // Prefer the Nano-Banana-merged "real product in scene" image over the
+      // generic AI activity image for any slot depicting a product (bigIdea/
+      // deliverables). The merged version contains the actual brand product
+      // with the real logo on its packaging.
+      activity: imgs.productInSceneImage || imgs.activityImage,
     }
 
     // Real brand assets from the website scraper. These are AUTHENTIC product
@@ -128,7 +177,6 @@ export async function POST(request: NextRequest) {
       | { primary?: string; secondary?: string; accent?: string } | undefined
 
     // Pull industry + brand voice for benchmarks / case-studies / voice enforcement.
-    const brandResearchObj = (data._brandResearch as Record<string, unknown> | undefined) || {}
     const industry =
       (brandResearchObj.industry as string | undefined) ||
       (data.industry as string | undefined)

@@ -434,6 +434,48 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
 
       console.log(`[Visual Assets][${requestId}] Images generated: ${smartImageSet.images.length}/${smartImageSet.strategy.images.length}`)
       console.log(`[Visual Assets][${requestId}] Uploaded: cover=${!!imageUrls.coverImage}, brand=${!!imageUrls.brandImage}, audience=${!!imageUrls.audienceImage}, activity=${!!imageUrls.activityImage}, extras=${extraImageUrls.length}`)
+
+      // ─── Real-Product Injection (Nano Banana Pro) ───
+      // Take the AI activity scene + a real scraped product photo and produce
+      // a merged "real-product-in-real-scene" image. This is what gives
+      // bigIdea/deliverables slides imagery with the *actual* brand product
+      // (with the actual logo natively on the packaging) rather than a
+      // generic AI cream tube + a corner-stamped logo.
+      const realProduct = scrapedData?.productImages?.[0] || scrapedData?.heroImages?.[0]
+      const aiActivityBuffer = legacyMapping.activity?.imageData
+      if (realProduct && aiActivityBuffer) {
+        try {
+          console.log(`[Visual Assets][${requestId}] [Nano Banana] Injecting real product into AI scene…`)
+          const productRes = await fetch(realProduct, { signal: AbortSignal.timeout(8000) })
+          if (productRes.ok) {
+            const productBuf = Buffer.from(await productRes.arrayBuffer())
+            const productMime = productRes.headers.get('content-type') || 'image/jpeg'
+            const { injectProductIntoScene } = await import('@/lib/gemini/nano-banana-pro')
+            const merged = await injectProductIntoScene({
+              scene: { base64: aiActivityBuffer.toString('base64'), mimeType: 'image/png' },
+              product: { base64: productBuf.toString('base64'), mimeType: productMime },
+              brandName,
+              productDescription: `the actual ${brandName} product as shown in the second reference image — preserve packaging, colors, typography, and the brand logo natively on the surface`,
+              scenePlacement: 'naturally held or placed in the foreground of the existing scene, photorealistic and lit to match',
+            })
+            if (merged?.base64) {
+              const mergedBuf = Buffer.from(merged.base64, 'base64')
+              const productInSceneUrl = await uploadImageToStorage(
+                mergedBuf,
+                `proposals/${brandPrefix}/real_product_in_scene_${timestamp}.png`,
+              )
+              if (productInSceneUrl) {
+                imageUrls.productInSceneImage = productInSceneUrl
+                console.log(`[Visual Assets][${requestId}] [Nano Banana] ✅ Real product injected: ${productInSceneUrl}`)
+              }
+            } else {
+              console.log(`[Visual Assets][${requestId}] [Nano Banana] Returned null — keeping AI activity image only`)
+            }
+          }
+        } catch (nbErr) {
+          console.warn(`[Visual Assets][${requestId}] [Nano Banana] Injection failed (non-fatal):`, nbErr instanceof Error ? nbErr.message : nbErr)
+        }
+      }
     } catch (imgErr) {
       console.error(`[Visual Assets][${requestId}] Image generation failed entirely:`, imgErr)
     }
