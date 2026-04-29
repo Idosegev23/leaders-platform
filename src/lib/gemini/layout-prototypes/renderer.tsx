@@ -338,6 +338,35 @@ export interface RenderOptions {
   grid?: boolean
   /** Snap drag/nudge to the grid */
   snap?: boolean
+  /** Brand's own logo URL (scraped). Renders top-right opposite the Leaders mark. */
+  brandLogoUrl?: string
+}
+
+/**
+ * Logo overlay rendered on every non-cover/non-closing slide:
+ * - Leaders mark top-left ("powered by Leaders")
+ * - Brand logo top-right (if scraped)
+ * Cover and closing slides have their own dedicated branding so we skip them.
+ *
+ * Uses an absolute URL for the Leaders logo so it renders inside iframe
+ * srcDoc (about:blank origin) and inside Playwright PDF generation, where
+ * relative paths like "/logo.png" don't resolve.
+ */
+const LEADERS_LOGO_URL = 'https://fhgggqnaplshwbrzgima.supabase.co/storage/v1/object/public/assets/branding/leaders-logo.png'
+
+function renderLogoOverlay(layout: string, brandLogoUrl?: string): string {
+  if (layout === 'hero-cover' || layout === 'closing-cta') return ''
+  const leadersMark = `
+    <div data-role="leaders-mark" style="position:absolute; top:32px; left:32px; z-index:30; display:flex; align-items:center; gap:8px; pointer-events:none; opacity:0.85;">
+      <img src="${LEADERS_LOGO_URL}" alt="Leaders" style="height:24px; width:auto; filter:brightness(0) invert(1);" />
+      <span style="font-size:10px; font-weight:500; color:rgba(255,255,255,0.6); letter-spacing:1.5px; text-transform:uppercase;">Leaders</span>
+    </div>`
+  const brandMark = brandLogoUrl
+    ? `<div data-role="brand-mark" style="position:absolute; top:24px; right:32px; z-index:30; pointer-events:none; opacity:0.9;">
+         <img src="${brandLogoUrl}" alt="brand" style="height:36px; width:auto; max-width:140px; object-fit:contain;" />
+       </div>`
+    : ''
+  return leadersMark + brandMark
 }
 
 export function renderStructuredSlide(
@@ -371,6 +400,9 @@ export function renderStructuredSlide(
   body = applyElementStyles(body, slide.elementStyles)
   body = applyHidden(body, slide.hiddenRoles)
   body = applyBg(body, slide.bg)
+  // Logo overlay — Leaders mark + brand logo on every non-cover/closing slide.
+  const logoOverlay = renderLogoOverlay(slide.layout, opts.brandLogoUrl)
+  if (logoOverlay) body = body.replace(/<\/div>\s*$/, `${logoOverlay}</div>`)
   const gridOverlay = opts.grid
     ? `<div style="position:absolute; inset:0; z-index:8; pointer-events:none; background-image: linear-gradient(to right, rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.08) 1px, transparent 1px); background-size: 40px 40px;"></div>`
     : ''

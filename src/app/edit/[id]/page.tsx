@@ -299,7 +299,7 @@ export default function GammaProtoPage() {
 
   const slide = pres?.slides[idx]
   const html = useMemo(
-    () => (slide && pres ? renderStructuredSlide(slide, pres.designSystem, { editor: true, grid, snap }) : ''),
+    () => (slide && pres ? renderStructuredSlide(slide, pres.designSystem, { editor: true, grid, snap, brandLogoUrl: pres.brandLogoUrl }) : ''),
     [slide, pres, grid, snap],
   )
 
@@ -848,7 +848,7 @@ export default function GammaProtoPage() {
                 const issues = computeInstantIssues(s)
                 const validating = validatingSlide === i
                 return (
-                  <SlideThumbCompact key={i} slide={s} ds={pres.designSystem} index={i}
+                  <SlideThumbCompact key={i} slide={s} ds={pres.designSystem} brandLogoUrl={pres.brandLogoUrl} index={i}
                     active={i === idx} onClick={() => setIdx(i)}
                     statusColor={issues.length ? slideStatusColor(issues) : (s.meta?.validation?.source?.status === 'verified' ? '#22c55e' : undefined)}
                     validating={validating}
@@ -1900,9 +1900,10 @@ function BgPickerButton({ slide, ds, onChange }: {
 
 // ─── Slide thumbnail ──────────────────────────────────────
 
-function SlideThumbCompact({ slide, ds, index, active, onClick, onContextMenu, statusColor, validating }: {
+function SlideThumbCompact({ slide, ds, brandLogoUrl, index, active, onClick, onContextMenu, statusColor, validating }: {
   slide: StructuredSlide
   ds: StructuredPresentation['designSystem']
+  brandLogoUrl?: string
   index: number
   active: boolean
   onClick: () => void
@@ -1910,7 +1911,7 @@ function SlideThumbCompact({ slide, ds, index, active, onClick, onContextMenu, s
   statusColor?: string
   validating?: boolean
 }) {
-  const html = useMemo(() => renderStructuredSlide(slide, ds), [slide, ds])
+  const html = useMemo(() => renderStructuredSlide(slide, ds, { brandLogoUrl }), [slide, ds, brandLogoUrl])
   return (
     <div onClick={onClick} onContextMenu={onContextMenu}
       style={{
@@ -2109,14 +2110,15 @@ function CheatsheetModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function SlideThumb({ slide, ds, index, active, onClick }: {
+function SlideThumb({ slide, ds, brandLogoUrl, index, active, onClick }: {
   slide: StructuredSlide
   ds: StructuredPresentation['designSystem']
+  brandLogoUrl?: string
   index: number
   active: boolean
   onClick: () => void
 }) {
-  const html = useMemo(() => renderStructuredSlide(slide, ds), [slide, ds])
+  const html = useMemo(() => renderStructuredSlide(slide, ds, { brandLogoUrl }), [slide, ds, brandLogoUrl])
   return (
     <div onClick={onClick}
       style={{
@@ -2153,7 +2155,7 @@ function PresentationMode({ presentation, startIndex, onClose }: {
   const [i, setI] = useState(startIndex)
   const html = useMemo(() => {
     const s = presentation.slides[i]
-    return s ? renderStructuredSlide(s, presentation.designSystem) : ''
+    return s ? renderStructuredSlide(s, presentation.designSystem, { brandLogoUrl: presentation.brandLogoUrl }) : ''
   }, [presentation, i])
 
   useEffect(() => {

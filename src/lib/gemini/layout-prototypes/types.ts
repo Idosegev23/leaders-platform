@@ -180,6 +180,8 @@ export interface FreeElement {
 
 export interface StructuredPresentation {
   brandName: string
+  /** Brand's actual logo (scraped). Renderer overlays it on every non-cover/closing slide. */
+  brandLogoUrl?: string
   designSystem: DesignSystem
   slides: StructuredSlide[]
 }

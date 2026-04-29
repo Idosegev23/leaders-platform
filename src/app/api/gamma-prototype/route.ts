@@ -74,6 +74,26 @@ export async function POST(request: NextRequest) {
       activity: imgs.activityImage,
     }
 
+    // Real brand assets from the website scraper. These are AUTHENTIC product
+    // shots / lifestyle photos / actual logo from the brand's site, and they
+    // should be preferred over AI-generated images for any slot that depicts
+    // real products (deliverables, bigIdea, brief). Filter out junk like
+    // empty-shopping-cart placeholders the scraper sometimes catches.
+    const scrapedRaw = (data._scraped as Record<string, unknown>) || {}
+    const isProductLike = (url: string) =>
+      typeof url === 'string' &&
+      url.startsWith('http') &&
+      !/empty-(shopping|cart)|placeholder|spinner|loading|favicon/i.test(url) &&
+      !/\.(svg)(\?|$)/i.test(url)
+    const cleanList = (raw: unknown): string[] =>
+      (Array.isArray(raw) ? raw : []).filter((u): u is string => isProductLike(String(u))).slice(0, 8)
+    const scrapedAssets = {
+      brandLogoUrl: typeof scrapedRaw.logoUrl === 'string' ? scrapedRaw.logoUrl : undefined,
+      heroImages: cleanList(scrapedRaw.heroImages),
+      productImages: cleanList(scrapedRaw.productImages),
+      lifestyleImages: cleanList(scrapedRaw.lifestyleImages),
+    }
+
     const brandColors = data._brandColors as
       | { primary?: string; secondary?: string; accent?: string } | undefined
 
@@ -107,6 +127,7 @@ export async function POST(request: NextRequest) {
     const { presentation, htmlSlides } = await generateAndRender({
       brandName, brief, research, influencers, brandColors, images,
       industry, brandVoice, hasCompetitors, hasPlatformMix, hasTimeline,
+      scrapedAssets,
     })
 
     return NextResponse.json({

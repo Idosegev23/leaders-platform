@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     if (!pres?.slides?.length)
       return NextResponse.json({ error: 'No slides to export' }, { status: 400 })
 
-    const htmlSlides = pres.slides.map((s) => renderStructuredSlide(s, pres!.designSystem))
+    const htmlSlides = pres.slides.map((s) => renderStructuredSlide(s, pres!.designSystem, { brandLogoUrl: pres!.brandLogoUrl }))
     console.log(`[gamma-pdf] rendering ${htmlSlides.length} slides`)
 
     const pdfBuffer = await generateScreenshotPdf(htmlSlides, {

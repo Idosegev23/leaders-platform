@@ -61,7 +61,7 @@ export default async function SharePage({ params }: SharePageProps) {
   // Structured (gamma) — render each slide via the structured renderer, then reuse HtmlSlideshow
   if (isStructured && structuredPres) {
     const { renderStructuredSlide } = await import('@/lib/gemini/layout-prototypes/renderer')
-    const htmlSlides = structuredPres.slides.map(s => renderStructuredSlide(s, structuredPres.designSystem))
+    const htmlSlides = structuredPres.slides.map(s => renderStructuredSlide(s, structuredPres.designSystem, { brandLogoUrl: structuredPres.brandLogoUrl }))
     const HtmlSlideshow = (await import('@/components/presentation/HtmlSlideshow')).default
     return <HtmlSlideshow htmlSlides={htmlSlides} brandName={brandName} viewerConfig={viewerConfig} />
   }
