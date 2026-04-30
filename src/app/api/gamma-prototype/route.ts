@@ -146,11 +146,14 @@ export async function POST(request: NextRequest) {
       cover: imgs.coverImage,
       brand: imgs.brandImage,
       audience: imgs.audienceImage,
-      // Prefer the Nano-Banana-merged "real product in scene" image over the
-      // generic AI activity image for any slot depicting a product (bigIdea/
-      // deliverables). The merged version contains the actual brand product
-      // with the real logo on its packaging.
+      // Prefer Nano-Banana merged "real product in scene" images over
+      // generic AI activity. We have up to 3 different scenes — return all
+      // three so the prompt can spread them across bigIdea / deliverables /
+      // closing instead of repeating one image.
       activity: imgs.productInSceneImage || imgs.activityImage,
+      productScene1: imgs.productInSceneImage,
+      productScene2: imgs.productInSceneImage2,
+      productScene3: imgs.productInSceneImage3,
     }
 
     // Real brand assets from the website scraper. These are AUTHENTIC product

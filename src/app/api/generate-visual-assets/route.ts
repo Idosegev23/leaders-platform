@@ -436,45 +436,86 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
       console.log(`[Visual Assets][${requestId}] Uploaded: cover=${!!imageUrls.coverImage}, brand=${!!imageUrls.brandImage}, audience=${!!imageUrls.audienceImage}, activity=${!!imageUrls.activityImage}, extras=${extraImageUrls.length}`)
 
       // ─── Real-Product Injection (Nano Banana Pro) ───
-      // Take the AI activity scene + a real scraped product photo and produce
-      // a merged "real-product-in-real-scene" image. This is what gives
-      // bigIdea/deliverables slides imagery with the *actual* brand product
-      // (with the actual logo natively on the packaging) rather than a
-      // generic AI cream tube + a corner-stamped logo.
-      const realProduct = scrapedData?.productImages?.[0] || scrapedData?.heroImages?.[0]
+      // Generate up to 3 deck-styled product scenes by compositing real
+      // scraped product photos into AI scene contexts. Each gets a DIFFERENT
+      // scene description so bigIdea / deliverables / closing don't render
+      // the same merged image. Stored as productSceneImages so the gamma
+      // prompt can pick variety.
+      const sceneTargets: Array<{ key: string; placement: string }> = [
+        { key: 'productInSceneImage', placement: 'naturally held in the foreground of the existing scene, photorealistic and lit to match the original lighting' },
+        { key: 'productInSceneImage2', placement: 'placed centered on a clean surface with the original scene as a soft background, hero-shot composition' },
+        { key: 'productInSceneImage3', placement: 'integrated into the daily routine implied by the scene — bathroom shelf / dressing table / kitchen — naturalistic context' },
+      ]
       const aiActivityBuffer = legacyMapping.activity?.imageData
-      if (realProduct && aiActivityBuffer) {
-        try {
-          console.log(`[Visual Assets][${requestId}] [Nano Banana] Injecting real product into AI scene…`)
-          const productRes = await fetch(realProduct, { signal: AbortSignal.timeout(8000) })
-          if (productRes.ok) {
-            const productBuf = Buffer.from(await productRes.arrayBuffer())
-            const productMime = productRes.headers.get('content-type') || 'image/jpeg'
-            const { injectProductIntoScene } = await import('@/lib/gemini/nano-banana-pro')
+      const realProductUrls = [
+        ...(scrapedData?.productImages || []),
+        ...(scrapedData?.heroImages || []),
+      ].slice(0, sceneTargets.length)
+
+      if (realProductUrls.length && aiActivityBuffer) {
+        const { injectProductIntoScene } = await import('@/lib/gemini/nano-banana-pro')
+        // Fetch all product images in parallel; sequence the Nano Banana
+        // calls (it's slow, can rate-limit when called concurrently).
+        const productBuffers = await Promise.all(
+          realProductUrls.map(async (url) => {
+            try {
+              const res = await fetch(url, {
+                signal: AbortSignal.timeout(15000),
+                headers: { 'User-Agent': 'Mozilla/5.0 LeadersBot/1.0' },
+              })
+              if (!res.ok) {
+                console.warn(`[Visual Assets][${requestId}] [Nano Banana] Product fetch ${res.status}: ${url.slice(0, 100)}`)
+                return null
+              }
+              return {
+                base64: Buffer.from(await res.arrayBuffer()).toString('base64'),
+                mimeType: res.headers.get('content-type') || 'image/jpeg',
+                sourceUrl: url,
+              }
+            } catch (e) {
+              console.warn(`[Visual Assets][${requestId}] [Nano Banana] Product fetch threw: ${e instanceof Error ? e.message : e}`)
+              return null
+            }
+          }),
+        )
+        for (let i = 0; i < productBuffers.length; i++) {
+          const product = productBuffers[i]
+          const target = sceneTargets[i]
+          if (!product) continue
+          try {
+            console.log(`[Visual Assets][${requestId}] [Nano Banana] Generating ${target.key} from ${product.sourceUrl.slice(0, 80)}…`)
             const merged = await injectProductIntoScene({
               scene: { base64: aiActivityBuffer.toString('base64'), mimeType: 'image/png' },
-              product: { base64: productBuf.toString('base64'), mimeType: productMime },
+              product: { base64: product.base64, mimeType: product.mimeType },
               brandName,
-              productDescription: `the actual ${brandName} product as shown in the second reference image — preserve packaging, colors, typography, and the brand logo natively on the surface`,
-              scenePlacement: 'naturally held or placed in the foreground of the existing scene, photorealistic and lit to match',
+              productDescription: `the actual ${brandName} product as shown in the second reference image — preserve packaging, colors, typography, and the brand logo natively on the surface. Premium magazine-quality lighting, 1920×1080.`,
+              scenePlacement: target.placement,
             })
             if (merged?.base64) {
               const mergedBuf = Buffer.from(merged.base64, 'base64')
               const productInSceneUrl = await uploadImageToStorage(
                 mergedBuf,
-                `proposals/${brandPrefix}/real_product_in_scene_${timestamp}.png`,
+                `proposals/${brandPrefix}/${target.key}_${timestamp}.png`,
               )
               if (productInSceneUrl) {
-                imageUrls.productInSceneImage = productInSceneUrl
-                console.log(`[Visual Assets][${requestId}] [Nano Banana] ✅ Real product injected: ${productInSceneUrl}`)
+                imageUrls[target.key] = productInSceneUrl
+                console.log(`[Visual Assets][${requestId}] [Nano Banana] ✅ ${target.key}: ${productInSceneUrl}`)
+              } else {
+                console.warn(`[Visual Assets][${requestId}] [Nano Banana] ${target.key}: upload failed`)
               }
             } else {
-              console.log(`[Visual Assets][${requestId}] [Nano Banana] Returned null — keeping AI activity image only`)
+              console.warn(`[Visual Assets][${requestId}] [Nano Banana] ${target.key}: model returned null — likely safety block or token limit`)
             }
+          } catch (nbErr) {
+            console.error(`[Visual Assets][${requestId}] [Nano Banana] ${target.key} threw:`, nbErr instanceof Error ? nbErr.message : nbErr)
           }
-        } catch (nbErr) {
-          console.warn(`[Visual Assets][${requestId}] [Nano Banana] Injection failed (non-fatal):`, nbErr instanceof Error ? nbErr.message : nbErr)
         }
+        const succeeded = sceneTargets.filter((t) => imageUrls[t.key]).length
+        console.log(`[Visual Assets][${requestId}] [Nano Banana] Done: ${succeeded}/${sceneTargets.length} scenes generated`)
+      } else if (realProductUrls.length === 0) {
+        console.log(`[Visual Assets][${requestId}] [Nano Banana] Skipped: no scraped product images available`)
+      } else if (!aiActivityBuffer) {
+        console.log(`[Visual Assets][${requestId}] [Nano Banana] Skipped: no AI activity buffer to merge into`)
       }
     } catch (imgErr) {
       console.error(`[Visual Assets][${requestId}] Image generation failed entirely:`, imgErr)

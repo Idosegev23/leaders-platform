@@ -82,7 +82,7 @@ export async function fetchScrape(url: string): Promise<EnhancedScrapeResult> {
   const ogImage = extractMetaProperty(html, 'og:image', url)
   const favicon = extractFavicon(html, url)
 
-  // Logo
+  // Logo — also unwrap proxies so we get the real-resolution asset.
   const logoUrl = extractLogo(html, url)
 
   // Images
@@ -140,10 +140,12 @@ export async function fetchScrape(url: string): Promise<EnhancedScrapeResult> {
     title,
     description,
     screenshot: null,
-    logoUrl,
+    // Unwrap proxy URLs on the way out — the brand logo on Argania was a
+    // _next/image?w=384&q=75 thumbnail, useless for compositing.
+    logoUrl: logoUrl ? unwrapProxyImageUrl(logoUrl) : null,
     logoAlternatives: [],
     favicon,
-    ogImage,
+    ogImage: ogImage ? unwrapProxyImageUrl(ogImage) : null,
     heroImages: categorized.hero,
     productImages: categorized.product,
     lifestyleImages: categorized.lifestyle,
@@ -260,6 +262,58 @@ function extractLogo(html: string, baseUrl: string): string | null {
   return null
 }
 
+/**
+ * Many CDNs / SSR frameworks serve images through a proxy that scales them
+ * down for performance (Next.js /_next/image?url=…&w=384&q=75 is the worst
+ * offender — 384px wide, quality 75 → blurry). We want the *original* media
+ * URL so AI processing (Nano Banana, etc.) gets a real-resolution photo,
+ * and the deck doesn't render a 384px tile at 1920×1080.
+ *
+ * Returns the original URL when the input is a recognized proxy, otherwise
+ * returns the input unchanged.
+ */
+export function unwrapProxyImageUrl(input: string): string {
+  try {
+    const u = new URL(input)
+    // Next.js Image Optimization endpoint: /_next/image?url=<encoded>&w=…&q=…
+    if (u.pathname.endsWith('/_next/image') || u.pathname === '/_next/image') {
+      const inner = u.searchParams.get('url')
+      if (inner) {
+        const decoded = decodeURIComponent(inner)
+        // Inner URL is sometimes relative — resolve against the proxy origin.
+        try { return new URL(decoded, u.origin).toString() } catch { return decoded }
+      }
+    }
+    // Vercel Image Optimization (when self-hosted on a subdomain): same shape.
+    if (u.pathname.startsWith('/_vercel/image')) {
+      const inner = u.searchParams.get('url')
+      if (inner) {
+        const decoded = decodeURIComponent(inner)
+        try { return new URL(decoded, u.origin).toString() } catch { return decoded }
+      }
+    }
+    // Cloudflare Image Resizing inline transform:
+    //   /cdn-cgi/image/width=384,quality=75/<original-path-or-url>
+    // Strip the /cdn-cgi/image/<options>/ prefix.
+    if (u.pathname.startsWith('/cdn-cgi/image/')) {
+      const after = u.pathname.replace(/^\/cdn-cgi\/image\/[^/]+\//, '/')
+      // Sometimes the rest is a full URL appended after the options.
+      if (/^https?:\/\//i.test(after)) return after
+      return new URL(after, u.origin).toString()
+    }
+    // Imgix-style query bloat — keep the URL but strip resizing params.
+    if (/imgix\.net|imagekit\.io/.test(u.hostname)) {
+      ;['w', 'h', 'q', 'auto', 'fm', 'fit', 'mark', 'mark-w'].forEach((p) => u.searchParams.delete(p))
+      return u.toString()
+    }
+    // Wix Static images encode resize in the path: /v1/fill/w_384,h_384,q_75/…
+    if (/static\.wixstatic\.com/.test(u.hostname)) {
+      return u.toString().replace(/\/v1\/(fill|crop|fit)\/[^/]+\//, '/v1/fill/w_4000,h_4000,q_95/')
+    }
+  } catch { /* not a parseable URL — return as-is */ }
+  return input
+}
+
 function extractImages(html: string, baseUrl: string): string[] {
   const images = new Set<string>()
   const skipWords = ['placeholder', 'pixel', 'spacer', 'blank', 'transparent', 'tracking', '.gif']
@@ -267,7 +321,12 @@ function extractImages(html: string, baseUrl: string): string[] {
   function addImage(src: string) {
     if (!src || src.startsWith('data:')) return
     if (skipWords.some(w => src.toLowerCase().includes(w))) return
-    try { images.add(new URL(src, baseUrl).href) } catch { /* skip */ }
+    try {
+      // Always unwrap proxies so we keep the real media URL, not a downscaled
+      // thumbnail. Resolves relative paths against baseUrl first.
+      const abs = new URL(src, baseUrl).href
+      images.add(unwrapProxyImageUrl(abs))
+    } catch { /* skip */ }
   }
 
   // Standard img tags - src and data-src variants
