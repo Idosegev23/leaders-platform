@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback, Fragment } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { renderStructuredSlide } from '@/lib/gemini/layout-prototypes/renderer'
 import ShareDialog from '@/components/share/ShareDialog'
 import {
@@ -718,9 +719,16 @@ export default function GammaProtoPage() {
       {/* ─── Header ──────────────────────────── */}
       {!focusMode && (
       <header style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 18px', borderBottom: '1px solid #1f1f22', background: '#15151a', height: 56, flexShrink: 0 }}>
-        <button onClick={() => history.back()} style={{ ...iconBtn(), padding: 6 }} title="חזרה">
+        {/*
+         * Always link straight to the dashboard. history.back() used to land
+         * the user inside /generate/[id] (the loader they came from after
+         * creation), which would re-trigger generation. The dashboard is
+         * the only predictable "home" from the editor.
+         */}
+        <Link href="/dashboard" style={{ ...iconBtn(), padding: 6, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="חזרה לדשבורד">
           <ChevronLeft size={18} />
-        </button>
+          <span style={{ fontSize: 12, color: '#aaa' }}>דשבורד</span>
+        </Link>
         <h1 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{pres?.brandName || 'עורך מצגת'}</h1>
         <span style={{ fontSize: 11, color: saving === 'saving' ? '#fbbf24' : saving === 'saved' ? '#4ade80' : '#666' }}>
           {saving === 'saving' ? '• שומר…' : saving === 'saved' ? '✓ נשמר' : ''}
