@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { enrichStepData } from '@/components/wizard/wizard-utils'
 import type { WizardStepDataMap } from '@/types/wizard'
 import FlowStepper from '@/components/flow-stepper'
+import { DeepResearchPanel } from '@/components/research/DeepResearchPanel'
 
 type ResearchStage =
   | 'loading'
@@ -1321,6 +1322,14 @@ export default function ResearchPage() {
                 </div>
               </ResearchSection>
             )}
+
+            {/* Tier-2: Deep Research panels — opt-in, run in parallel,
+                 results merge back into the document. */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+              <DeepResearchPanel documentId={documentId} mode="brand" />
+              <DeepResearchPanel documentId={documentId} mode="influencers" />
+              <DeepResearchPanel documentId={documentId} mode="competitors" />
+            </div>
 
             {/* Bottom action bar */}
             <div className="flex items-center justify-center gap-4 pt-4 pb-8">

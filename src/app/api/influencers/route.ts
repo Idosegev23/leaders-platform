@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     console.log(`[API Influencers][${requestId}]    goals: [${(goals || []).join(', ')}]`)
     console.log(`[API Influencers][${requestId}]    budget: ${budget ? '₪' + budget.toLocaleString() : '(none)'}`)
 
-    const agentResult = await runInfluencerAgent({
+    let agentResult = await runInfluencerAgent({
       brandName,
       industry,
       targetAudience,
@@ -96,6 +96,68 @@ export async function POST(request: NextRequest) {
       budget,
       influencerCount: influencerCount || 8,
     })
+
+    // ─── Tier 2 fallback: Deep Research when IMAI exhausted ──────
+    // The IMAI agent returns 0 influencers when every tool call hit
+    // no_tokens_remaining. Rather than ship an empty list, escalate to
+    // Gemini Deep Research with Google Search grounding to find real
+    // Israeli influencers in the niche. Bounded inline poll: 90s max,
+    // never breaches the route's 600s budget.
+    if (!agentResult.influencers.length) {
+      const { isImaiQuotaExhausted } = await import('@/lib/imai/client')
+      if (isImaiQuotaExhausted()) {
+        console.log(`[API Influencers][${requestId}] 🔁 Tier 2: IMAI exhausted — running Deep Research fallback`)
+        try {
+          const { startDeepResearch, pollUntilComplete, extractText, buildInfluencerSearchPrompt } =
+            await import('@/lib/gemini/deep-research')
+          const interaction = await startDeepResearch({
+            prompt: buildInfluencerSearchPrompt({
+              brandName, industry, targetAudience, goals, budget,
+              count: influencerCount || 8,
+            }),
+            agent: 'deep-research-preview-04-2026',
+            tools: [{ type: 'google_search' }, { type: 'url_context' }],
+          })
+          const completed = await pollUntilComplete(interaction.id, { timeoutMs: 90_000, pollIntervalMs: 5000 })
+          if (completed.status === 'completed') {
+            const text = extractText(completed)
+            // Try to parse the JSON block out of the response.
+            const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*"influencers"[\s\S]*\}/)
+            const raw = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text
+            try {
+              const parsed = JSON.parse(raw) as {
+                influencers?: Array<{ name?: string; handle?: string; estimatedFollowers?: number; tier?: string; rationale?: string }>
+                strategySummary?: string
+              }
+              const dr = parsed.influencers || []
+              if (dr.length) {
+                agentResult = {
+                  influencers: dr.map((i) => ({
+                    username: (i.handle || '').replace(/^@/, ''),
+                    fullname: i.name || '',
+                    followers: typeof i.estimatedFollowers === 'number' ? i.estimatedFollowers : 0,
+                    engagement_rate: 0,
+                    tier: i.tier || '',
+                    rationale: i.rationale || '',
+                    is_verified: false,
+                  })),
+                  strategy: parsed.strategySummary || 'אסטרטגיית ליהוק מבוססת Deep Research',
+                  toolCalls: agentResult.toolCalls,
+                  rawText: text,
+                }
+                console.log(`[API Influencers][${requestId}] ✅ Deep Research fallback returned ${dr.length} influencers`)
+              }
+            } catch (parseErr) {
+              console.warn(`[API Influencers][${requestId}] Deep Research returned text that didn't parse as JSON:`, parseErr instanceof Error ? parseErr.message : parseErr)
+            }
+          } else {
+            console.log(`[API Influencers][${requestId}] Deep Research not done in 90s (status=${completed.status}) — returning what we have. Interaction ${interaction.id} continues server-side.`)
+          }
+        } catch (drErr) {
+          console.warn(`[API Influencers][${requestId}] Deep Research fallback failed (non-fatal):`, drErr instanceof Error ? drErr.message : drErr)
+        }
+      }
+    }
 
     // Map agent results to the legacy "strategy.recommendations" shape
     // so the existing wizard step can consume them without changes.
