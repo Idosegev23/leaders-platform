@@ -20,12 +20,42 @@ function getApiKey(): string {
   return key
 }
 
+/**
+ * Process-wide circuit breaker. When IMAI returns "no_tokens_remaining"
+ * (account credits exhausted), every subsequent call is short-circuited
+ * with a clear error for the next 30 minutes. This prevents the research
+ * agent from burning its 15-iteration budget on 7+ consecutive 400s, and
+ * surfaces a clear quota-exhausted error to upstream callers so they can
+ * fall back to alternative sources.
+ *
+ * The breaker is in-memory per Vercel function instance — when the
+ * function recycles or 30 minutes pass, the next request retries IMAI.
+ */
+let imaiQuotaExhaustedUntil = 0
+const QUOTA_BACKOFF_MS = 30 * 60 * 1000 // 30 min
+
+export class ImaiQuotaExhaustedError extends Error {
+  constructor() {
+    super('IMAI account credits exhausted (no_tokens_remaining). Quota will be probed again in 30 minutes. Top up at https://imai.co or wait.')
+    this.name = 'ImaiQuotaExhaustedError'
+  }
+}
+
+export function isImaiQuotaExhausted(): boolean {
+  return Date.now() < imaiQuotaExhaustedUntil
+}
+
 async function imaiRequest<T>(
   method: 'GET' | 'POST',
   endpoint: string,
   body?: Record<string, unknown>,
   params?: Record<string, string>,
 ): Promise<T> {
+  // Circuit breaker: don't even hit the network when the breaker is open.
+  if (isImaiQuotaExhausted()) {
+    throw new ImaiQuotaExhaustedError()
+  }
+
   const url = new URL(`${BASE_URL}${endpoint}`)
   if (params) {
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
@@ -43,6 +73,14 @@ async function imaiRequest<T>(
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({ error: 'unknown' }))
     const errMsg = errBody.error || errBody.error_message || errBody.detail || errBody.message || JSON.stringify(errBody).slice(0, 200)
+    // Trip the breaker on any "no_tokens_remaining" response — once IMAI
+    // says the account is dry, every subsequent call this session will
+    // also fail. Spamming the API just wastes time and produces noise.
+    if (typeof errMsg === 'string' && /no_tokens_remaining/i.test(errMsg)) {
+      imaiQuotaExhaustedUntil = Date.now() + QUOTA_BACKOFF_MS
+      console.error(`[IMAI] 🚨 Quota exhausted — circuit breaker tripped for 30 min. Endpoint: ${endpoint}`)
+      throw new ImaiQuotaExhaustedError()
+    }
     throw new Error(`IMAI ${res.status} (${endpoint}): ${errMsg}`)
   }
 
