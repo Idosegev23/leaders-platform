@@ -444,6 +444,24 @@ function categorizeImages(images: string[], html: string): {
     }
   }
 
+  // Smart redistribution: most brand sites only fire the heuristic for
+  // ONE bucket (e.g. /quickshop/stores/<brand>/ → all "shop" → all
+  // product, hero+lifestyle empty). The deck needs all three buckets
+  // populated so brief/audience/closing get imagery too. Promote the
+  // first few from the over-full bucket to fill empty ones.
+  if (product.length > 0 && hero.length === 0) {
+    const promoted = product.splice(0, Math.min(3, Math.floor(product.length / 3)))
+    hero.push(...promoted)
+  }
+  if (product.length > 0 && lifestyle.length === 0) {
+    const promoted = product.splice(0, Math.min(5, Math.floor(product.length / 2)))
+    lifestyle.push(...promoted)
+  }
+  if (lifestyle.length > 0 && hero.length === 0) {
+    const promoted = lifestyle.splice(0, Math.min(2, Math.floor(lifestyle.length / 4)))
+    hero.push(...promoted)
+  }
+
   return {
     hero: hero.slice(0, 10),
     product: product.slice(0, 20),

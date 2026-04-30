@@ -542,6 +542,18 @@ ${websiteContext}
       console.log(`[Gemini Deep Research] Found ${research.competitors?.length || 0} competitors, ${research.sources?.length || 0} sources`)
       if (attempt > 0) console.log(`[Gemini Deep Research] ✅ Synthesis succeeded with fallback model (${model})`)
 
+      // Visual DNA extraction — runs as a dedicated short-prompt call so the
+      // model gives it 100% attention. The main synthesis prompt is ~30
+      // fields long and Gemini routinely drops optional ones at the end.
+      // Failure is non-fatal: the deck falls back to default decorativeStyle.
+      try {
+        if (!research.visualDNA) {
+          research.visualDNA = await extractVisualDNA(brandName, research, websiteData)
+        }
+      } catch (vErr) {
+        console.warn(`[Gemini Deep Research] Visual DNA extraction failed (non-fatal):`, vErr instanceof Error ? vErr.message : vErr)
+      }
+
       return research
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
@@ -584,6 +596,79 @@ export async function researchBrand(
 
   console.log(`[Gemini Deep Research] Data gathering complete. Synthesizing...`)
   return synthesizeResearch(brandName, gatheredData, websiteData)
+}
+
+/**
+ * Dedicated Visual Brand DNA extractor. Runs as its own short-prompt call
+ * with structured-output mode so Gemini cannot silently drop the field
+ * (which it does in the long synthesis prompt). Always returns a complete
+ * visualDNA object — falls back to a sensible default if the model errors.
+ *
+ * Two reasons this exists as a separate call:
+ * 1. Reliability — long prompts (~30 required fields) cause Gemini to skip
+ *    optional ones at the end. A focused ~10-field prompt has ~100% return.
+ * 2. Quality — the model can think specifically about visual aesthetics
+ *    instead of cramming it between competitors and risks.
+ */
+async function extractVisualDNA(
+  brandName: string,
+  research: BrandResearch,
+  websiteData?: ScrapedWebsite,
+): Promise<NonNullable<BrandResearch['visualDNA']>> {
+  console.log(`[Visual DNA] Extracting for ${brandName}`)
+  const prompt = `אתה Art Director ויזואלי בכיר. נתח את ה-DNA הוויזואלי של המותג "${brandName}" וסווג אותו ל-7 שדות מובנים.
+
+## רקע על המותג
+- תעשייה: ${research.industry || 'לא ידוע'}
+- אישיות: ${research.brandPersonality?.join(', ') || 'מקצועי'}
+- ערכים: ${research.brandValues?.join(', ') || 'לא צוין'}
+- מיקום בשוק: ${research.marketPosition || 'לא ידוע'}
+- מחיר: ${research.pricePositioning || 'לא ידוע'}
+- קהל יעד: ${research.targetDemographics?.primaryAudience?.gender || ''} ${research.targetDemographics?.primaryAudience?.ageRange || ''}, ${research.targetDemographics?.primaryAudience?.lifestyle || ''}
+- צבעי מותג: ${(research.visualIdentity?.primaryColors || []).join(', ') || 'לא ידוע'}
+- mood keywords: ${(research.visualIdentity?.moodKeywords || []).join(', ') || 'לא צוין'}
+${websiteData?.title ? `- כותרת אתר: ${websiteData.title}` : ''}
+${websiteData?.description ? `- תיאור meta: ${websiteData.description}` : ''}
+
+## משימה
+החזר JSON בלבד עם המבנה הזה (כל השדות חובה — אסור null):
+{
+  "photoStyle": "אחד מ-EXACTLY: clinical | lifestyle | editorial | documentary | illustrated | minimal-product",
+  "productStyle": "אחד מ-EXACTLY: white-bg-hero | lifestyle-context | hand-held | flat-lay | extreme-close",
+  "decorativeStyle": "אחד מ-EXACTLY: minimal | maximalist | organic-soft | geometric-strict | retro | brutalist",
+  "lightingStyle": "אחד מ-EXACTLY: bright-clean | golden-hour | studio-flash | moody-low-key | natural-soft",
+  "typographyMood": "אחד מ-EXACTLY: serif-editorial | sans-tight | sans-airy | display-bold | monospace-tech",
+  "recurringPattern": { "type": "אחד מ: wave | dots | lines | gradient | grid | none", "description": "תיאור 1 משפט (או 'אין' אם type=none)" },
+  "moodDescription": "תיאור 2-3 משפטים של המראה הוויזואלי הכללי. דוגמה: 'sterile, premium, baby-safe — bright clean lighting on muted pastels with soft organic curves' או 'rugged outdoor israeli grit — golden hour on natural textures with bold geometric type'."
+}
+
+הנחיות:
+- pharma/skincare → photoStyle="clinical" or "minimal-product", lightingStyle="bright-clean", decorativeStyle="organic-soft"
+- outdoor/sports → photoStyle="documentary" or "lifestyle", lightingStyle="golden-hour", decorativeStyle="brutalist" or "geometric-strict"
+- luxury/beauty → photoStyle="editorial", lightingStyle="studio-flash" or "moody-low-key", typographyMood="serif-editorial"
+- food/F&B → photoStyle="lifestyle", productStyle="flat-lay" or "hand-held", lightingStyle="natural-soft"
+- tech/SaaS → photoStyle="minimal-product", typographyMood="monospace-tech" or "sans-tight", decorativeStyle="geometric-strict"
+
+JSON בלבד, ללא markdown, ללא הסבר. אסור null או undefined באף שדה.`
+
+  const result = await callAI({
+    model: PRO_MODEL_DEFAULT,
+    prompt,
+    callerId: `visual-dna-${brandName}`,
+    geminiConfig: {
+      thinkingConfig: { thinkingLevel: 'LOW' as never },
+      responseMimeType: 'application/json',
+      maxOutputTokens: 1500,
+      temperature: 0.4,
+    },
+  })
+
+  const parsed = parseGeminiJson<NonNullable<BrandResearch['visualDNA']>>(result.text)
+  if (!parsed?.photoStyle || !parsed?.decorativeStyle) {
+    throw new Error('Visual DNA extraction returned incomplete data')
+  }
+  console.log(`[Visual DNA] ✅ ${brandName}: ${parsed.photoStyle} / ${parsed.decorativeStyle} / ${parsed.lightingStyle}`)
+  return parsed
 }
 
 /**
