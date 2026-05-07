@@ -44,6 +44,10 @@
     {
       "path": "/api/cron/reminders",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/drive/sync-closed-briefs",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

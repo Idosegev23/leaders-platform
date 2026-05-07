@@ -173,13 +173,19 @@ export async function PATCH(
  * Run the post-submission cascade for a client-brief link. Fires
  * fire-and-forget from the PATCH handler; never throws to the caller.
  *
+ * IMPORTANT — manual gating (per user spec, 2026-04-30):
+ *   The Drive folder is NOT auto-moved to "נסגר", and the per-client
+ *   workspace under "ניהול לקוח" is NOT auto-created here. Both happen
+ *   ONLY when a human physically moves the brief folder into "נסגר" in
+ *   Drive. The /api/drive/sync-closed-briefs cron picks that up and runs
+ *   ensureClientWorkspace() at that point. This keeps the agency in
+ *   control of what counts as a "real" closed brief vs a half-finished
+ *   submission that still needs review.
+ *
  * Steps (all best-effort, logged on failure):
- *   1. Move the per-client Drive folder to "נסגר" or "נפל".
- *   2. On completion only — create the per-client workspace under "ניהול
- *      לקוח" with the 7 standard subfolders and stamp its id on the link.
- *   3. Email management: "client X submitted brief".
- *   4. Push a status update to the ClickUp task linked to this lead.
- *   5. Stamp activity_log so the dashboard ticker picks up the event.
+ *   1. Email management: "client X submitted brief" (still fires here).
+ *   2. Push a status update to the ClickUp task linked to this lead.
+ *   3. Stamp activity_log so the dashboard ticker picks up the event.
  */
 async function runClientBriefCascade(params: {
   linkId: string
@@ -202,48 +208,11 @@ async function runClientBriefCascade(params: {
     { auth: { persistSession: false } },
   )
 
-  let workspaceLink: string | null = null
+  // Workspace is now gated on the manual Drive move. The completion mail
+  // doesn't promise a workspace link yet.
+  const workspaceLink: string | null = null
 
-  // 1. Move the brief folder.
-  if (params.driveFolderId) {
-    try {
-      const { moveClientBriefFolder } = await import('@/lib/google-drive/client-folders')
-      const ok = await moveClientBriefFolder({
-        folderId: params.driveFolderId,
-        to: params.transition === 'completed' ? 'completed' : 'failed',
-      })
-      console.log(`${tag} drive move → ${params.transition}: ${ok ? 'ok' : 'failed'}`)
-    } catch (e) {
-      console.warn(`${tag} drive move error:`, e instanceof Error ? e.message : e)
-    }
-  } else {
-    console.log(`${tag} no driveFolderId stored — skipping move`)
-  }
-
-  // 2. Create the per-client workspace (only on completion).
-  if (params.transition === 'completed') {
-    try {
-      const { ensureClientWorkspace } = await import('@/lib/google-drive/client-folders')
-      const ws = await ensureClientWorkspace({ clientName: params.clientName })
-      workspaceLink = ws.webViewLink
-      console.log(`${tag} workspace ${ws.created ? 'created' : 'reused'}: ${ws.workspaceId}`)
-      // Stamp on the link so the inner-meeting / kickoff flow can find it.
-      await service
-        .from('document_links')
-        .update({
-          metadata: {
-            ...(await readLinkMeta(service, params.linkId)),
-            workspace_drive_folder_id: ws.workspaceId,
-            workspace_drive_folder_link: ws.webViewLink,
-          },
-        })
-        .eq('id', params.linkId)
-    } catch (e) {
-      console.warn(`${tag} workspace creation error:`, e instanceof Error ? e.message : e)
-    }
-  }
-
-  // 3. Email management.
+  // 1. Email management.
   try {
     const { sendToManagement } = await import('@/lib/gmail/management')
     const html = params.transition === 'completed'
@@ -273,7 +242,7 @@ async function runClientBriefCascade(params: {
     console.warn(`${tag} mgmt mail error:`, e instanceof Error ? e.message : e)
   }
 
-  // 4. ClickUp status (only when the link is tied to a lead).
+  // 2. ClickUp status (only when the link is tied to a lead).
   if (params.leadId) {
     try {
       const { data: lead } = await service
@@ -297,7 +266,7 @@ async function runClientBriefCascade(params: {
     }
   }
 
-  // 5. activity_log
+  // 3. activity_log
   try {
     await service.from('activity_log').insert({
       source: 'leaders_ui',
@@ -369,9 +338,12 @@ function buildMgmtBriefCompletedHtml(opts: {
       <h1 style="font-size:22px;font-weight:700;margin:0 0 12px;line-height:1.3;">בריף חדש התקבל</h1>
       <p style="font-size:15px;line-height:1.7;margin:0 0 16px;"><strong>${escapeHtml(opts.clientName)}</strong>${opts.clientEmail ? ` (${escapeHtml(opts.clientEmail)})` : ''} השלים את הבריף.${opts.senderName ? ` הופנה ע״י ${escapeHtml(opts.senderName)}.` : ''}</p>
       ${opts.submissionPreview ? `<div style="background:#f9f7f2;border:1px solid #e8e5dc;border-radius:6px;padding:14px 16px;font-size:13px;line-height:1.8;margin-bottom:16px;">${opts.submissionPreview}</div>` : ''}
-      ${opts.workspaceLink ? `<p style="margin:24px 0;"><a href="${opts.workspaceLink}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:11px 24px;border-radius:9999px;font-weight:600;display:inline-block;">פתח את תיקיית הלקוח</a></p>` : ''}
-      <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0;">
-      <p style="font-size:12px;color:#888;margin:0;">הצעד הבא: לפתוח טופס התנעה ב-Leaders × OS ולבחור את הלקוח מרשימת בריפים סגורים.</p>
+      <div style="background:#fff8e1;border-right:3px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:20px 0;font-size:13px;line-height:1.7;">
+        <strong>הצעד הבא:</strong> לעבור לתיקיית "בריפים ראשוניים" ב-Drive,
+        לקרוא את הבריף, ואם הוא תקין — להעביר ידנית את התיקייה ל-"נסגר".
+        ברגע שזה קורה, נפתח אוטומטית workspace מלא ללקוח עם 7 תת-תיקיות
+        תחת "ניהול לקוח", ויהיה אפשר לפתוח טופס התנעה.
+      </div>
     </div></body></html>`
 }
 

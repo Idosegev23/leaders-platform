@@ -213,6 +213,55 @@ export async function ensureClientWorkspace(params: {
   }
 }
 
+/**
+ * Scan the "נסגר" folder for client briefs that someone manually moved
+ * there. For each one, ensure a per-client workspace exists under
+ * "ניהול לקוח" (with the 7 standard subfolders). Idempotent — re-running
+ * is safe; existing workspaces are reused.
+ *
+ * Returns a per-client breakdown so callers can email management about
+ * the *newly* created workspaces only.
+ */
+export async function scanClosedBriefsAndCreateWorkspaces(): Promise<{
+  scanned: number
+  created: Array<{ clientName: string; workspaceId: string; webViewLink: string }>
+  reused: Array<{ clientName: string; workspaceId: string; webViewLink: string }>
+  failed: Array<{ clientName: string; error: string }>
+}> {
+  const drive = await createDriveClient()
+  const created: Array<{ clientName: string; workspaceId: string; webViewLink: string }> = []
+  const reused: Array<{ clientName: string; workspaceId: string; webViewLink: string }> = []
+  const failed: Array<{ clientName: string; error: string }> = []
+
+  // List all folders directly under "נסגר".
+  const closedFolderListing = await drive.files.list({
+    q: `'${DRIVE_ANCHORS.BRIEFS_COMPLETED}' in parents and trashed=false and mimeType='${FOLDER_MIME}'`,
+    fields: 'files(id, name)',
+    pageSize: 200,
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  })
+  const closedFolders = closedFolderListing.data.files || []
+
+  for (const f of closedFolders) {
+    if (!f.name) continue
+    try {
+      const ws = await ensureClientWorkspace({ clientName: f.name })
+      const entry = {
+        clientName: f.name,
+        workspaceId: ws.workspaceId,
+        webViewLink: ws.webViewLink,
+      }
+      if (ws.created) created.push(entry)
+      else reused.push(entry)
+    } catch (e) {
+      failed.push({ clientName: f.name, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  return { scanned: closedFolders.length, created, reused, failed }
+}
+
 async function listSubfolders(
   parentId: string,
 ): Promise<Record<string, { id: string; webViewLink: string }>> {
