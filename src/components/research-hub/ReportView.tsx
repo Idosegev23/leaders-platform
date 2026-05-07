@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { cn } from "@/lib/utils";
 import type { Report } from "@/lib/research-hub/prompts/synthesizer";
 
@@ -153,66 +154,7 @@ export function ReportView({
         </section>
       ) : null}
 
-      {sources.length ? (
-        <section className="sources-section">
-          <SectionLabel>מקורות</SectionLabel>
-          <p
-            className={cn(
-              "text-muted-foreground mb-3",
-              printMode ? "text-[10px]" : "text-[12px]",
-            )}
-          >
-            סך הכל {sources.length} מקורות. הקליק ב-PDF פותח את הכתובת המלאה במקור המקוון.
-          </p>
-          <ol
-            className={cn(
-              "sources-list",
-              printMode
-                ? "columns-2 gap-x-6 text-[9.5px] leading-snug"
-                : "columns-1 sm:columns-2 gap-x-6 text-[12px]",
-            )}
-          >
-            {sources.map((s, i) => {
-              const host = (() => {
-                try {
-                  return new URL(s.url).hostname.replace(/^www\./, "");
-                } catch {
-                  return s.url;
-                }
-              })();
-              return (
-                <li
-                  key={i}
-                  className={cn(
-                    "break-inside-avoid mb-1.5 flex gap-1.5 items-baseline",
-                    printMode ? "" : "leading-relaxed",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "text-brand-accent shrink-0 numeral",
-                      printMode ? "text-[9px]" : "text-[11px]",
-                    )}
-                  >
-                    [{i + 1}]
-                  </span>
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-brand-secondary hover:text-brand-accent min-w-0"
-                  >
-                    <span className="font-medium">{truncate(s.title, 80) || host}</span>
-                    {s.title ? (
-                      <span className="text-muted-foreground"> · {host}</span>
-                    ) : null}
-                  </a>
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      ) : null}
+      {sources.length ? <SourcesBlock sources={sources} printMode={printMode} /> : null}
     </article>
   );
 }
@@ -220,6 +162,115 @@ export function ReportView({
 function truncate(s: string | undefined, n: number): string {
   if (!s) return "";
   return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function SourcesBlock({
+  sources,
+  printMode,
+}: {
+  sources: ReportSource[];
+  printMode: boolean;
+}) {
+  const total = sources.length;
+  const titledCount = sources.filter((s) => s.title && s.title.trim()).length;
+  const hosts = new Set(sources.map((s) => hostOf(s.url)));
+  // Compact mode kicks in when sources have no editorial info to show — all
+  // identical Google redirector URLs with no titles is the common case for
+  // Deep Research output. Render as a clickable index strip instead of a
+  // 248-line list that eats 2-3 pages.
+  const isCompact = titledCount === 0;
+  const singleHost = hosts.size === 1 ? Array.from(hosts)[0] : null;
+
+  return (
+    <section className="sources-section">
+      <SectionLabel>מקורות</SectionLabel>
+      <p
+        className={cn(
+          "text-muted-foreground mb-3",
+          printMode ? "text-[10px] leading-snug" : "text-[12px]",
+        )}
+      >
+        {total} מקורות{singleHost ? ` (כולם דרך ${singleHost} — Google מנתבת אוטומטית)` : ""}
+        . לחיצה על מספר פותחת את הכתובת המקורית.
+      </p>
+
+      {isCompact ? (
+        <div
+          className={cn(
+            "flex flex-wrap gap-x-2 gap-y-1.5 text-brand-secondary",
+            printMode ? "text-[9.5px]" : "text-[12px]",
+          )}
+        >
+          {sources.map((s, i) => (
+            <a
+              key={i}
+              href={s.url}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(
+                "numeral hover:text-brand-accent",
+                printMode
+                  ? "px-1.5 py-0.5 rounded border border-[rgb(var(--brand-mist))]"
+                  : "px-2 py-0.5 rounded-full border border-[rgb(var(--brand-mist))] bg-brand-pearl/40",
+              )}
+            >
+              [{i + 1}]
+            </a>
+          ))}
+        </div>
+      ) : (
+        <ol
+          className={cn(
+            "sources-list",
+            printMode
+              ? "columns-2 gap-x-6 text-[9.5px] leading-snug"
+              : "columns-1 sm:columns-2 gap-x-6 text-[12px]",
+          )}
+        >
+          {sources.map((s, i) => {
+            const host = hostOf(s.url);
+            return (
+              <li
+                key={i}
+                className={cn(
+                  "break-inside-avoid mb-1.5 flex gap-1.5 items-baseline",
+                  printMode ? "" : "leading-relaxed",
+                )}
+              >
+                <span
+                  className={cn(
+                    "text-brand-accent shrink-0 numeral",
+                    printMode ? "text-[9px]" : "text-[11px]",
+                  )}
+                >
+                  [{i + 1}]
+                </span>
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-brand-secondary hover:text-brand-accent min-w-0"
+                >
+                  <span className="font-medium">{truncate(s.title, 80) || host}</span>
+                  {s.title ? (
+                    <span className="text-muted-foreground"> · {host}</span>
+                  ) : null}
+                </a>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -237,6 +288,7 @@ function Markdown({ children }: { children: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw]}
       components={{
         h1: (p) => <h2 className="text-2xl font-semibold text-brand-primary mt-6 mb-3" {...p} />,
         h2: (p) => <h3 className="text-xl font-semibold text-brand-primary mt-5 mb-2" {...p} />,
