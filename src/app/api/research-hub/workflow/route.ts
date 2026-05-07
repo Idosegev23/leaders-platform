@@ -21,6 +21,7 @@ import {
   type Report,
 } from "@/lib/research-hub/prompts/synthesizer";
 import { ANGLES, ANGLE_GROUPS, getAngles, type AngleId } from "@/lib/research-hub/angles";
+import { sendResearchDoneEmail } from "@/lib/research-hub/email";
 
 export const maxDuration = 800;
 
@@ -381,43 +382,29 @@ export const { POST } = serve<Init>(
       });
     }
 
-    // ─── 6. NOTIFY (best-effort email webhook) ───────────────────────
-    if (job.notify_email && !process.env.RESEARCH_DONE_WEBHOOK_URL) {
-      await context.run("notify_no_webhook", async () => {
-        await event(
-          "notify",
-          "error",
-          `מייל לא נשלח אל ${job.notify_email} — RESEARCH_DONE_WEBHOOK_URL לא מוגדר ב-Vercel`,
-        );
-      });
-    }
-    if (job.notify_email && process.env.RESEARCH_DONE_WEBHOOK_URL) {
+    // ─── 6. NOTIFY (direct via Gmail API — no webhook needed) ────────
+    // Borrows the OAuth refresh token of one of the Leaders users in
+    // user_google_tokens to send the email. Owner first, then most-recent
+    // fallback for dev-mode jobs whose user_id isn't a real auth user.
+    if (job.notify_email) {
       await context.run("notify_email", async () => {
         try {
-          const res = await fetch(process.env.RESEARCH_DONE_WEBHOOK_URL!, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              jobId,
-              reportId,
-              email: job.notify_email,
-              topic: job.topic,
-              title: report.title,
-              subtitle: report.subtitle,
-              executive_summary: report.executive_summary,
-              reportUrl: `${appUrl}/research-hub/reports/${reportId}`,
-              jobUrl: `${appUrl}/research-hub/jobs/${jobId}`,
-              pdfUrl: pdfRendered ? `${appUrl}/api/research-hub/pdf/${jobId}/download` : null,
-              language: job.language,
-              depth: job.depth,
-            }),
+          const sent = await sendResearchDoneEmail({
+            jobUserId: job.user_id,
+            toEmail: job.notify_email!,
+            topic: job.topic,
+            title: report.title,
+            subtitle: report.subtitle,
+            executiveSummary: report.executive_summary,
+            reportUrl: `${appUrl}/research-hub/reports/${reportId}`,
+            jobUrl: `${appUrl}/research-hub/jobs/${jobId}`,
+            pdfUrl: pdfRendered ? `${appUrl}/api/research-hub/pdf/${jobId}/download` : null,
           });
           await event(
             "notify",
-            res.ok ? "done" : "error",
-            res.ok
-              ? `מייל נשלח אל ${job.notify_email}`
-              : `שליחת המייל נכשלה (${res.status})`,
+            "done",
+            `מייל נשלח אל ${job.notify_email} מ-${sent.from}`,
+            { messageId: sent.messageId, from: sent.from },
           );
         } catch (e) {
           await event(
