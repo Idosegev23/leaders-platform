@@ -74,7 +74,13 @@ export default async function ResearchHubHome() {
         </div>
 
         <Suspense fallback={<div className="text-muted-foreground text-[13px]">טוען טופס…</div>}>
-          <NewResearchForm />
+          <NewResearchForm
+            defaultNotifyEmail={
+              userEmail && userEmail.includes("@") && !userEmail.endsWith("@docmaker.local")
+                ? userEmail
+                : null
+            }
+          />
         </Suspense>
 
         {recentJobs && recentJobs.length > 0 ? (

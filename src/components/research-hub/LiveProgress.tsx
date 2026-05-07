@@ -281,6 +281,8 @@ function stepLabel(step: string) {
   if (step === "save_findings") return "שמירת ממצאים";
   if (step === "save_report") return "שמירת דוח";
   if (step === "pdf") return "ייצוא PDF";
+  if (step === "notify") return "שליחת מייל";
+  if (step === "set_researching") return "התחלת מחקר";
   if (step === "finalize") return "סיום";
   if (step === "done") return "הושלם";
   if (step === "workflow") return "תהליך";

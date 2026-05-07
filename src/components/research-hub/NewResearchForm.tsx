@@ -45,7 +45,11 @@ const DEPTHS: {
   },
 ];
 
-export function NewResearchForm() {
+export function NewResearchForm({
+  defaultNotifyEmail,
+}: {
+  defaultNotifyEmail?: string | null;
+}) {
   const router = useRouter();
   const search = useSearchParams();
   const seedJobId = search?.get("seed") ?? null;
@@ -53,6 +57,7 @@ export function NewResearchForm() {
   const [topic, setTopic] = useState(search?.get("topic") ?? "");
   const [brief, setBrief] = useState(search?.get("brief") ?? "");
   const [refinement, setRefinement] = useState("");
+  const [notifyEmail, setNotifyEmail] = useState(defaultNotifyEmail ?? "");
   const [angles, setAngles] = useState<AngleId[]>(() => {
     const raw = search?.get("angles");
     if (!raw) return allAngleIds();
@@ -97,6 +102,7 @@ export function NewResearchForm() {
           angles,
           depth,
           language: "he",
+          notifyEmail: notifyEmail.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -169,6 +175,25 @@ export function NewResearchForm() {
               />
             </div>
           ) : null}
+
+          <div>
+            <label className="block text-[13px] font-medium text-brand-primary mb-2">
+              שלחו לי מייל כשהדוח מוכן{" "}
+              <span className="text-muted-foreground font-normal">
+                — אפשר לסגור את החלון ולחזור
+              </span>
+            </label>
+            <Input
+              dir="ltr"
+              type="email"
+              placeholder="name@example.com"
+              value={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.value)}
+            />
+            <p className="text-[11px] text-muted-foreground mt-1.5">
+              ברירת מחדל: המייל שאיתו התחברת. המחקר רץ ברקע ב-QStash גם אם תסגרי את הדפדפן.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

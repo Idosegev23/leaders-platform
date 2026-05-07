@@ -12,18 +12,24 @@ const Body = z.object({
   angles: z.array(z.string()).optional(),
   depth: z.enum(["express", "standard", "maximum"]).default("standard"),
   language: z.enum(["he", "en"]).default("he"),
+  // Email to ping when the report is ready. Default = the authed user's
+  // own email; override only if the user wants the link sent elsewhere.
+  notifyEmail: z.string().email().optional().or(z.literal("")).transform((v) => (v ? v : undefined)),
 });
 
 export async function POST(req: Request) {
   // 1. Auth — same pattern as the rest of the hub: dev-mode bypass otherwise Supabase user
   let userId: string;
+  let userEmail: string | null = null;
   if (isDevMode) {
     userId = DEV_AUTH_USER.id;
+    userEmail = DEV_AUTH_USER.email ?? null;
   } else {
     const supabase = await createSupabaseServer();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     userId = user.id;
+    userEmail = user.email ?? null;
   }
 
   // 2. Validate
@@ -39,6 +45,15 @@ export async function POST(req: Request) {
 
   const angles = payload.angles?.length ? payload.angles : allAngleIds();
 
+  // Notify-email priority: explicit override → authed user's email → none.
+  // We only store a value that looks like a real address (skips the dev-mode
+  // placeholder dev@docmaker.local so we don't send mail to a fake inbox).
+  const candidateEmail = payload.notifyEmail ?? userEmail ?? null;
+  const notifyEmail =
+    candidateEmail && candidateEmail.includes("@") && !candidateEmail.endsWith("@docmaker.local")
+      ? candidateEmail
+      : null;
+
   // 3. Insert job (service role bypasses RLS but we keep user_id correct)
   const service = createSupabaseService();
   const { data: job, error: jobErr } = await service
@@ -51,6 +66,7 @@ export async function POST(req: Request) {
       depth: payload.depth,
       language: payload.language,
       status: "queued",
+      notify_email: notifyEmail,
     })
     .select("id")
     .single();

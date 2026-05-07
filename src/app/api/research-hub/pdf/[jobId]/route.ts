@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import puppeteer from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
+// Use @sparticuz/chromium (NOT -min). The hub already bundles this for the
+// proposal-deck PDF flow, so it's available everywhere with no extra env vars.
+import chromium from "@sparticuz/chromium";
 import { createSupabaseService } from "@/lib/research-hub/service";
 
 export const runtime = "nodejs";
@@ -12,21 +14,51 @@ async function renderPdf(reportId: string, appUrl: string) {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const url = `${appUrl}/research-hub/reports/${reportId}/pdf?key=${encodeURIComponent(key)}`;
 
-  const executablePath = process.env.CHROMIUM_PACK_URL
-    ? await chromium.executablePath(process.env.CHROMIUM_PACK_URL)
-    : await chromium.executablePath();
+  const isServerless = process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL;
+  const extraArgs = [
+    "--force-color-profile=srgb",
+    "--disable-web-security",
+    "--allow-running-insecure-content",
+  ];
 
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath,
-    headless: true,
-  });
+  const browser = isServerless
+    ? await puppeteer.launch({
+        args: [...chromium.args, ...extraArgs],
+        defaultViewport: { width: 1280, height: 1800 },
+        executablePath: await chromium.executablePath(),
+        headless: true,
+      })
+    : await puppeteer.launch({
+        headless: true,
+        executablePath:
+          process.platform === "darwin"
+            ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            : process.platform === "win32"
+              ? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+              : "/usr/bin/google-chrome",
+        args: ["--no-sandbox", "--disable-setuid-sandbox", ...extraArgs],
+      });
 
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 1800 });
     await page.goto(url, { waitUntil: "networkidle0", timeout: 120_000 });
     await page.evaluateHandle("document.fonts.ready");
+
+    // Print fixes copied from the proposal-deck flow — keeps colors crisp
+    // and gradients/shadows visible in the PDF instead of washed out.
+    await page.addStyleTag({
+      content: `
+        html, body, div, section, article {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+        [style*="box-shadow"], [style*="text-shadow"] {
+          -webkit-filter: blur(0) !important;
+        }
+      `,
+    });
 
     const pdf = await page.pdf({
       format: "A4",

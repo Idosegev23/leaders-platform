@@ -59,6 +59,7 @@ export const { POST } = serve<Init>(
         angles: AngleId[];
         depth: "express" | "standard" | "maximum";
         language: "he" | "en";
+        notify_email?: string | null;
       };
     });
 
@@ -107,7 +108,12 @@ export const { POST } = serve<Init>(
     });
 
     // ─── 2. RESEARCH ─────────────────────────────────────────────────
-    await sb.from("research_jobs").update({ status: "researching" }).eq("id", jobId);
+    // CRITICAL: any side effect outside context.run replays on every step
+    // invocation, which overrides later status updates (e.g. "done" gets
+    // reset to "researching" on the workflow's final tick).
+    await context.run("set_researching", async () => {
+      await sb.from("research_jobs").update({ status: "researching" }).eq("id", jobId);
+    });
 
     type Bucket = { id: string; label: string; brief: string };
 
@@ -347,22 +353,83 @@ export const { POST } = serve<Init>(
     });
 
     // ─── 5. RENDER PDF (out of process via context.call) ─────────────
-    if (process.env.CHROMIUM_PACK_URL) {
-      const appUrl = process.env.APP_URL ?? context.url.replace(/\/api\/.*$/, "");
+    // The hub bundles @sparticuz/chromium so this works without any extra
+    // env vars. Wrapped in try/catch so a PDF failure doesn't abort the
+    // whole workflow — the on-screen report is still available regardless.
+    const appUrl = process.env.APP_URL ?? context.url.replace(/\/api\/.*$/, "");
+    let pdfRendered = false;
+    try {
       await context.call("render_pdf", {
         url: `${appUrl}/api/research-hub/pdf/${jobId}`,
         method: "POST",
         body: JSON.stringify({ reportId }),
         headers: { "content-type": "application/json" },
-        retries: 2,
+        retries: 1,
         timeout: 600,
       });
-      await event("pdf", "done", "PDF נוצר");
-    } else {
-      await event("pdf", "progress", "PDF דולג: CHROMIUM_PACK_URL לא מוגדר");
+      pdfRendered = true;
+      await context.run("pdf_done_event", async () => {
+        await event("pdf", "done", "PDF נוצר");
+      });
+    } catch (e) {
+      await context.run("pdf_failed_event", async () => {
+        await event(
+          "pdf",
+          "error",
+          `יצירת PDF נכשלה: ${(e as Error).message?.slice(0, 200) ?? "unknown"}`,
+        );
+      });
     }
 
-    // ─── 6. FINALIZE ─────────────────────────────────────────────────
+    // ─── 6. NOTIFY (best-effort email webhook) ───────────────────────
+    if (job.notify_email && !process.env.RESEARCH_DONE_WEBHOOK_URL) {
+      await context.run("notify_no_webhook", async () => {
+        await event(
+          "notify",
+          "error",
+          `מייל לא נשלח אל ${job.notify_email} — RESEARCH_DONE_WEBHOOK_URL לא מוגדר ב-Vercel`,
+        );
+      });
+    }
+    if (job.notify_email && process.env.RESEARCH_DONE_WEBHOOK_URL) {
+      await context.run("notify_email", async () => {
+        try {
+          const res = await fetch(process.env.RESEARCH_DONE_WEBHOOK_URL!, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jobId,
+              reportId,
+              email: job.notify_email,
+              topic: job.topic,
+              title: report.title,
+              subtitle: report.subtitle,
+              executive_summary: report.executive_summary,
+              reportUrl: `${appUrl}/research-hub/reports/${reportId}`,
+              jobUrl: `${appUrl}/research-hub/jobs/${jobId}`,
+              pdfUrl: pdfRendered ? `${appUrl}/api/research-hub/pdf/${jobId}/download` : null,
+              language: job.language,
+              depth: job.depth,
+            }),
+          });
+          await event(
+            "notify",
+            res.ok ? "done" : "error",
+            res.ok
+              ? `מייל נשלח אל ${job.notify_email}`
+              : `שליחת המייל נכשלה (${res.status})`,
+          );
+        } catch (e) {
+          await event(
+            "notify",
+            "error",
+            `שליחת המייל נכשלה: ${(e as Error).message?.slice(0, 200) ?? "unknown"}`,
+          );
+        }
+      });
+    }
+
+    // ─── 7. FINALIZE ─────────────────────────────────────────────────
     await context.run("finalize", async () => {
       await sb
         .from("research_jobs")
