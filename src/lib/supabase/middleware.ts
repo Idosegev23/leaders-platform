@@ -76,9 +76,16 @@ export async function updateSession(request: NextRequest) {
     // Note: /api/research-hub/workflow is intentionally public — it's
     // signed by QStash; the verify handler accepts/rejects the call there.
   ]
-  const isProtectedPath = protectedPaths.some(path =>
-    request.nextUrl.pathname.startsWith(path)
-  )
+  // Public exception: the print-target page used by puppeteer to render
+  // the research-hub PDF. The page itself gates on a `?key=<service role>`
+  // check; without this carve-out the middleware redirects puppeteer to
+  // /login and the PDF ends up containing the login screen.
+  const isResearchHubPdfPrintPage =
+    /^\/research-hub\/reports\/[^/]+\/pdf$/.test(request.nextUrl.pathname)
+
+  const isProtectedPath =
+    !isResearchHubPdfPrintPage &&
+    protectedPaths.some((path) => request.nextUrl.pathname.startsWith(path))
 
   // Admin-only routes
   const adminPaths = ['/admin']
