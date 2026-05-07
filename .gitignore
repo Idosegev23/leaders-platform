@@ -37,3 +37,6 @@ next-env.d.ts
 /generated-pdfs
 
 *.pdf
+
+# Local working drafts (proposal decks, sales docs) — not source of truth
+/proposal
