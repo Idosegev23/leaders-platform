@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient as createSupabaseServer } from "@/lib/supabase/server";
@@ -72,7 +73,9 @@ export default async function ResearchHubHome() {
           </p>
         </div>
 
-        <NewResearchForm />
+        <Suspense fallback={<div className="text-muted-foreground text-[13px]">טוען טופס…</div>}>
+          <NewResearchForm />
+        </Suspense>
 
         {recentJobs && recentJobs.length > 0 ? (
           <section className="mt-20">

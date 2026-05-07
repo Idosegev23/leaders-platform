@@ -12,8 +12,12 @@ export function geminiClient() {
 }
 
 export const MODELS = {
+  // The publicly available Deep Research agent (per
+  // https://ai.google.dev/gemini-api/docs/interactions). The "-max-" variant
+  // is gated to allowlisted accounts and returns "unknown agent" otherwise;
+  // override via GEMINI_DEEP_RESEARCH_MODEL if your account has Max access.
   deepResearch:
-    process.env.GEMINI_DEEP_RESEARCH_MODEL ?? "deep-research-max-preview-04-2026",
+    process.env.GEMINI_DEEP_RESEARCH_MODEL ?? "deep-research-preview-04-2026",
   reasoning: process.env.GEMINI_REASONING_MODEL ?? "gemini-3.1-pro-preview",
   fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.1-flash-lite-preview",
 } as const;

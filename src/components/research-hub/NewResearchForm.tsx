@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/research-hub/ui/button";
 import { Input, Textarea } from "@/components/research-hub/ui/input";
 import { Card, CardContent } from "@/components/research-hub/ui/card";
 import { Badge } from "@/components/research-hub/ui/badge";
 import { AnglePicker } from "./AnglePicker";
-import { allAngleIds, type AngleId } from "@/lib/research-hub/angles";
+import { allAngleIds, ANGLES, type AngleId } from "@/lib/research-hub/angles";
 import { cn } from "@/lib/utils";
-import { Sparkles, Telescope, Microscope } from "lucide-react";
+import { Sparkles, Telescope, Microscope, Lightbulb } from "lucide-react";
+
+const ALL_IDS = new Set<string>(ANGLES.map((a) => a.id));
+const VALID_DEPTH = new Set(["express", "standard", "maximum"]);
 
 const DEPTHS: {
   id: "express" | "standard" | "maximum";
@@ -48,24 +51,53 @@ const DEPTHS: {
 
 export function NewResearchForm() {
   const router = useRouter();
-  const [topic, setTopic] = useState("");
-  const [brief, setBrief] = useState("");
-  const [angles, setAngles] = useState<AngleId[]>(allAngleIds());
-  const [depth, setDepth] = useState<"express" | "standard" | "maximum">("standard");
+  const search = useSearchParams();
+  const seedJobId = search?.get("seed") ?? null;
+
+  const [topic, setTopic] = useState(search?.get("topic") ?? "");
+  const [brief, setBrief] = useState(search?.get("brief") ?? "");
+  const [refinement, setRefinement] = useState("");
+  const [angles, setAngles] = useState<AngleId[]>(() => {
+    const raw = search?.get("angles");
+    if (!raw) return allAngleIds();
+    const parsed = raw.split(",").map((s) => s.trim()).filter((s) => ALL_IDS.has(s)) as AngleId[];
+    return parsed.length ? parsed : allAngleIds();
+  });
+  const [depth, setDepth] = useState<"express" | "standard" | "maximum">(() => {
+    const raw = search?.get("depth");
+    return raw && VALID_DEPTH.has(raw) ? (raw as "express" | "standard" | "maximum") : "standard";
+  });
   const [pending, startTransition] = useTransition();
+
+  // Surface a one-time toast when arriving from a previous job
+  useEffect(() => {
+    if (seedJobId) toast.message("הטופס מולא מתוך מחקר קודם — ערוך, חדד וחקור שוב.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedJobId]);
 
   function submit() {
     if (topic.trim().length < 3) {
       toast.error("נושא חייב להיות לפחות 3 תווים");
       return;
     }
+    // If user entered refinement notes, append them to the brief so the
+    // planner sees them. Keep them clearly labelled so it's obvious what's
+    // an old brief vs. a refinement note.
+    const composedBrief = (() => {
+      const b = brief.trim();
+      const r = refinement.trim();
+      if (!r) return b || undefined;
+      const tag = seedJobId ? "שיפורים מהמחקר הקודם" : "הערות חידוד";
+      return [b, b ? "" : null, `--- ${tag} ---`, r].filter((x) => x !== null).join("\n");
+    })();
+
     startTransition(async () => {
       const res = await fetch("/api/research-hub/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: topic.trim(),
-          brief: brief.trim() || undefined,
+          brief: composedBrief,
           angles,
           depth,
           language: "he",
@@ -84,6 +116,20 @@ export function NewResearchForm() {
 
   return (
     <div className="space-y-8">
+      {seedJobId ? (
+        <div className="rounded-2xl border border-brand-gold/30 bg-brand-gold-light/40 p-4 flex items-start gap-3">
+          <Lightbulb className="size-5 text-brand-gold shrink-0 mt-0.5" />
+          <div className="flex-1 text-[13px] leading-relaxed">
+            <p className="font-semibold text-brand-primary mb-1">
+              חקירה מחדש על בסיס מחקר קודם
+            </p>
+            <p className="text-muted-foreground">
+              הנושא, הברייף, הזוויות והעומק הועתקו אוטומטית. ערוך כל שדה לפי הצורך, או הוסף הוראות חידוד למטה.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       <Card>
         <CardContent className="pt-6 space-y-5">
           <div>
@@ -109,6 +155,24 @@ export function NewResearchForm() {
               onChange={(e) => setBrief(e.target.value)}
             />
           </div>
+
+          {seedJobId ? (
+            <div>
+              <label className="block text-[13px] font-medium text-brand-primary mb-2">
+                שיפורים למחקר{" "}
+                <span className="text-muted-foreground font-normal">
+                  — מה לחקור עמוק יותר, מה החסר היה במחקר הקודם
+                </span>
+              </label>
+              <Textarea
+                dir="auto"
+                placeholder="לדוגמה: התעמק יותר בתמחור פרימיום, הוסף ניתוח מתחרות מיפן, החסר היה ניתוח של דור Z..."
+                value={refinement}
+                onChange={(e) => setRefinement(e.target.value)}
+                className="min-h-[100px] border-brand-gold/40 bg-brand-gold-light/20 focus-visible:border-brand-gold"
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

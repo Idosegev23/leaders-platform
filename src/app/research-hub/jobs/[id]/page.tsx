@@ -4,6 +4,7 @@ import { createClient as createSupabaseServer } from "@/lib/supabase/server";
 import { createSupabaseService } from "@/lib/research-hub/service";
 import { isDevMode } from "@/lib/auth/dev-mode";
 import { LiveProgress } from "@/components/research-hub/LiveProgress";
+import type { Plan } from "@/components/research-hub/PlanView";
 import { Badge } from "@/components/research-hub/ui/badge";
 import { ArrowRight, FileText, Download } from "lucide-react";
 import { Button } from "@/components/research-hub/ui/button";
@@ -45,6 +46,19 @@ export default async function JobPage({
 
   const isDone = job.status === "done";
   const isFailed = job.status === "failed";
+  const isCancelled = job.status === "cancelled";
+
+  // Build a "rerun with refinements" URL — pre-fills the new-research form
+  // with this job's topic / brief / depth / angles and a seed reference.
+  const rerunParams = new URLSearchParams();
+  rerunParams.set("seed", id);
+  if (job.topic) rerunParams.set("topic", job.topic as string);
+  if (job.brief) rerunParams.set("brief", job.brief as string);
+  if (job.depth) rerunParams.set("depth", job.depth as string);
+  if (Array.isArray(job.angles) && job.angles.length) {
+    rerunParams.set("angles", (job.angles as string[]).join(","));
+  }
+  const rerunHref = `/research-hub?${rerunParams.toString()}`;
 
   return (
     <div className="min-h-screen bg-background">
@@ -84,9 +98,7 @@ export default async function JobPage({
         {isDone && report ? (
           <div className="mb-8 rounded-2xl bg-brand-primary text-white p-6 shadow-wizard-md flex items-center justify-between gap-4">
             <div>
-              <Badge variant="gold" className="mb-2">
-                הדוח מוכן
-              </Badge>
+              <Badge variant="gold" className="mb-2">הדוח מוכן</Badge>
               <h2 className="font-cormorant italic text-2xl">דוח אסטרטגי מלא נכתב</h2>
               <p className="text-white/70 text-[13px] mt-1">
                 לחץ לצפייה בדוח, להורדה כ-PDF או לשיתוף.
@@ -118,10 +130,21 @@ export default async function JobPage({
           </div>
         ) : null}
 
+        {isCancelled ? (
+          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <h3 className="text-amber-900 font-semibold mb-1">המחקר בוטל</h3>
+            <p className="text-[13px] text-amber-800">
+              ניתן לפתוח מחדש עם שיפורים — הזוויות והברייף יישמרו אוטומטית.
+            </p>
+          </div>
+        ) : null}
+
         <LiveProgress
           jobId={id}
           initialStatus={job.status as string}
           initialEvents={(events ?? []) as never[]}
+          initialPlan={(job.plan as Plan | null) ?? null}
+          rerunHref={rerunHref}
         />
       </main>
     </div>
