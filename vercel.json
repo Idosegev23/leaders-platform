@@ -48,6 +48,10 @@
     {
       "path": "/api/drive/sync-closed-briefs",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/renew-drive-watch",
+      "schedule": "0 6 * * *"
     }
   ]
 }
