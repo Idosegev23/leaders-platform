@@ -353,34 +353,37 @@ export const { POST } = serve<Init>(
       return rep.id as string;
     });
 
-    // ─── 5. RENDER PDF (out of process via context.call) ─────────────
-    // The hub bundles @sparticuz/chromium so this works without any extra
-    // env vars. Wrapped in try/catch so a PDF failure doesn't abort the
-    // whole workflow — the on-screen report is still available regardless.
+    // ─── 5. RENDER PDF (in-process via fetch) ────────────────────────
+    // Note: we use a plain fetch wrapped in context.run rather than
+    // context.call. context.call delegates to a fresh QStash dispatch and
+    // its replay state is fragile around try/catch — a thrown error
+    // produces an "Incompatible step name" error on the next tick.
+    // PDF render is ~10s, well inside the workflow's maxDuration budget.
     const appUrl = process.env.APP_URL ?? context.url.replace(/\/api\/.*$/, "");
-    let pdfRendered = false;
-    try {
-      await context.call("render_pdf", {
-        url: `${appUrl}/api/research-hub/pdf/${jobId}`,
-        method: "POST",
-        body: JSON.stringify({ reportId }),
-        headers: { "content-type": "application/json" },
-        retries: 1,
-        timeout: 600,
-      });
-      pdfRendered = true;
-      await context.run("pdf_done_event", async () => {
+    const pdfResult = await context.run("render_pdf", async () => {
+      try {
+        const res = await fetch(`${appUrl}/api/research-hub/pdf/${jobId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reportId }),
+        });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          await event("pdf", "error", `יצירת PDF נכשלה (${res.status}): ${detail.slice(0, 200)}`);
+          return { ok: false };
+        }
         await event("pdf", "done", "PDF נוצר");
-      });
-    } catch (e) {
-      await context.run("pdf_failed_event", async () => {
+        return { ok: true };
+      } catch (e) {
         await event(
           "pdf",
           "error",
           `יצירת PDF נכשלה: ${(e as Error).message?.slice(0, 200) ?? "unknown"}`,
         );
-      });
-    }
+        return { ok: false };
+      }
+    });
+    const pdfRendered = pdfResult.ok;
 
     // ─── 6. NOTIFY (direct via Gmail API — no webhook needed) ────────
     // Borrows the OAuth refresh token of one of the Leaders users in
