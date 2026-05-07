@@ -7,11 +7,18 @@ interface ClientFolder {
   id: string
   client_name: string
   has_meeting: boolean
+  /** When true, this entry came from a completed client-brief (not legacy
+   *  client_folders). Surface a ✓ badge so the team knows there's a real
+   *  brief on file ready to inform the kickoff. */
+  hasCompletedBrief?: boolean
+  /** When the client has a completed brief, this is the link token so the
+   *  parent form can fetch the submission_data and pre-fill its fields. */
+  briefLinkToken?: string
 }
 
 interface ClientFolderSelectorProps {
   value: string
-  onChange: (value: string, folderId?: string) => void
+  onChange: (value: string, folderId?: string, briefLinkToken?: string) => void
   error?: string
   disabled?: boolean
 }
@@ -35,23 +42,62 @@ export default function ClientFolderSelector({
   const fetchFolders = async () => {
     try {
       const supabase = createClient()
-      const { data: foldersData, error: foldersError } = await supabase
-        .from('client_folders')
-        .select('id, client_name')
-        .order('client_name')
-      if (foldersError) throw foldersError
+      const [foldersResult, meetingsResult, completedBriefsResult] = await Promise.all([
+        supabase.from('client_folders').select('id, client_name').order('client_name'),
+        supabase.from('inner_meeting_forms').select('folder_id').not('folder_id', 'is', null),
+        // Pull clients with a completed client-brief — this is the new source
+        // of truth for "kickoff candidates" since we ditched Make.com.
+        fetch('/api/clients/with-completed-brief')
+          .then((r) => (r.ok ? r.json() : { clients: [] }))
+          .catch(() => ({ clients: [] })),
+      ])
 
-      const { data: meetings } = await supabase
-        .from('inner_meeting_forms')
-        .select('folder_id')
-        .not('folder_id', 'is', null)
-
-      const meetingFolderIds = new Set((meetings ?? []).map((m) => m.folder_id))
-      const available = (foldersData || [])
-        .map((f) => ({ ...f, has_meeting: meetingFolderIds.has(f.id) }))
+      const meetingFolderIds = new Set(
+        (meetingsResult.data ?? []).map((m) => m.folder_id),
+      )
+      const legacy = (foldersResult.data || [])
+        .map((f) => ({
+          id: f.id,
+          client_name: f.client_name,
+          has_meeting: meetingFolderIds.has(f.id),
+          hasCompletedBrief: false,
+        }))
         .filter((f) => !f.has_meeting)
 
-      setFolders(available)
+      type CompletedBriefClient = {
+        link_id: string
+        link_token: string
+        client_name: string | null
+        client_email: string | null
+      }
+      const completed: ClientFolder[] = (
+        (completedBriefsResult as { clients?: CompletedBriefClient[] }).clients || []
+      )
+        .filter((c) => !!c.client_name)
+        .map((c) => ({
+          // Reuse link_id as the folder id so the parent form's
+          // selectedFolderId mechanic still works downstream.
+          id: c.link_id,
+          client_name: c.client_name as string,
+          has_meeting: false,
+          hasCompletedBrief: true,
+          briefLinkToken: c.link_token,
+        }))
+
+      // De-dupe by lowercased client_name, prefer the completed-brief entry
+      // (it has more useful data attached).
+      const merged = new Map<string, ClientFolder>()
+      for (const c of completed) merged.set(c.client_name.toLowerCase(), c)
+      for (const f of legacy) {
+        const key = f.client_name.toLowerCase()
+        if (!merged.has(key)) merged.set(key, f)
+      }
+      const sorted = Array.from(merged.values()).sort((a, b) => {
+        // Completed briefs first, then alphabetical.
+        if (a.hasCompletedBrief !== b.hasCompletedBrief) return a.hasCompletedBrief ? -1 : 1
+        return a.client_name.localeCompare(b.client_name, 'he')
+      })
+      setFolders(sorted)
     } catch (error) {
       console.error('Error fetching folders:', error)
     } finally {
@@ -64,7 +110,7 @@ export default function ClientFolderSelector({
   )
 
   const handleSelect = (folder: ClientFolder) => {
-    onChange(folder.client_name, folder.id)
+    onChange(folder.client_name, folder.id, folder.briefLinkToken)
     setIsOpen(false)
     setSearchQuery('')
     setManualMode(false)
@@ -157,9 +203,14 @@ export default function ClientFolderSelector({
                   key={folder.id}
                   type="button"
                   onClick={() => handleSelect(folder)}
-                  className="w-full px-4 py-3 text-right hover:bg-blue-50 transition-colors"
+                  className="w-full px-4 py-3 text-right hover:bg-blue-50 transition-colors flex items-center justify-between gap-2"
                 >
                   <span className="font-medium text-gray-900">{folder.client_name}</span>
+                  {folder.hasCompletedBrief && (
+                    <span className="text-[10px] font-bold tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                      ✓ בריף
+                    </span>
+                  )}
                 </button>
               ))
             )}

@@ -293,10 +293,39 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
                 render={({ field }) => (
                   <ClientFolderSelector
                     value={field.value || ''}
-                    onChange={(value, folderId) => {
+                    onChange={(value, folderId, briefLinkToken) => {
                       field.onChange(value)
-                      if (folderId) {
-                        setSelectedFolderId(folderId)
+                      if (folderId) setSelectedFolderId(folderId)
+                      // When the picked client has a completed brief, fetch
+                      // the submission_data and pre-fill the kickoff fields
+                      // that map 1:1 (about brand / audiences / goals /
+                      // insight / strategy / creative). Saves the team
+                      // re-typing what the client already wrote.
+                      if (briefLinkToken) {
+                        fetch(`/api/links/${briefLinkToken}`)
+                          .then((r) => (r.ok ? r.json() : null))
+                          .then((link: { metadata?: { submission_data?: Record<string, unknown> } } | null) => {
+                            const sub = link?.metadata?.submission_data
+                            if (!sub) return
+                            const pick = (k: string) =>
+                              typeof sub[k] === 'string' ? (sub[k] as string) : ''
+                            const prefill = (key: string, candidates: string[]) => {
+                              for (const c of candidates) {
+                                const v = pick(c)
+                                if (v) {
+                                  setValue(key as never, v as never, { shouldDirty: true })
+                                  return
+                                }
+                              }
+                            }
+                            prefill('aboutBrand',     ['about_brand', 'aboutBrand', 'brand_description', 'brandStory'])
+                            prefill('targetAudiences', ['target_audience', 'targetAudience', 'audience'])
+                            prefill('goals',           ['goals', 'campaign_goal', 'campaignGoal', 'mainGoal'])
+                            prefill('insight',         ['insight', 'key_insight', 'keyInsight'])
+                            prefill('strategy',        ['strategy', 'strategy_direction', 'strategyDirection'])
+                            prefill('creative',        ['creative', 'creative_direction', 'creativeDirection'])
+                          })
+                          .catch(() => {})
                       }
                     }}
                     error={errors.clientName?.message}

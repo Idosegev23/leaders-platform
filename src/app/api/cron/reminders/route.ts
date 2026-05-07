@@ -432,22 +432,39 @@ export async function GET(request: Request) {
     }
   }
 
-  // Webhook batch for #2 + #3 only.
+  // Native batch for #2 + #3 — single Gmail to management with the full
+  // reminders list. Replaces the legacy Make.com webhook (REMINDERS_WEBHOOK
+  // is preserved as an opt-in escape hatch but defaults to skipped now).
   let webhookStatus: 'skipped' | 'ok' | 'failed' = 'skipped'
-  if (webhookReminders.length > 0 && !REMINDERS_WEBHOOK.includes('PLACEHOLDER')) {
+  if (webhookReminders.length > 0) {
+    // Optional: still call the legacy webhook if explicitly configured.
+    if (process.env.REMINDERS_WEBHOOK_URL && !REMINDERS_WEBHOOK.includes('PLACEHOLDER')) {
+      try {
+        const res = await fetch(REMINDERS_WEBHOOK, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            generated_at: new Date().toISOString(),
+            reminders: webhookReminders,
+          }),
+        })
+        webhookStatus = res.ok ? 'ok' : 'failed'
+      } catch (e) {
+        console.error('Reminders webhook failed (non-fatal — native mail still runs):', e)
+        webhookStatus = 'failed'
+      }
+    }
+    // Native: email management with the consolidated list.
     try {
-      const res = await fetch(REMINDERS_WEBHOOK, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          generated_at: new Date().toISOString(),
-          reminders: webhookReminders,
-        }),
+      const { sendToManagement } = await import('@/lib/gmail/management')
+      const html = buildRemindersDigestHtml(webhookReminders)
+      const result = await sendToManagement({
+        subject: `📋 תזכורות יומיות — ${webhookReminders.length} פריטים`,
+        html,
       })
-      webhookStatus = res.ok ? 'ok' : 'failed'
+      console.log(`[reminders] mgmt mail: sent=${result.sent} failed=${result.failed.length}`)
     } catch (e) {
-      console.error('Reminders webhook failed:', e)
-      webhookStatus = 'failed'
+      console.error('[reminders] mgmt mail failed:', e instanceof Error ? e.message : e)
     }
   }
 
@@ -473,4 +490,80 @@ export async function GET(request: Request) {
       reminders: webhookReminders,
     },
   })
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Native reminders digest — Hebrew HTML for the daily mgmt email.
+ * ──────────────────────────────────────────────────────────────────── */
+
+type AnyReminder = WebhookReminder
+
+function buildRemindersDigestHtml(reminders: AnyReminder[]): string {
+  const stale = reminders.filter((r) => r.kind === 'stale_inner_meeting_draft') as Array<
+    Extract<AnyReminder, { kind: 'stale_inner_meeting_draft' }>
+  >
+  const upcoming = reminders.filter((r) => r.kind === 'upcoming_deadline') as Array<
+    Extract<AnyReminder, { kind: 'upcoming_deadline' }>
+  >
+
+  const staleRows = stale
+    .map(
+      (r) => `<tr>
+        <td style="padding:8px 12px;font-size:13px;border-bottom:1px solid #eee;">${esc(r.title || '(ללא כותרת)')}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#666;border-bottom:1px solid #eee;">${esc(r.last_editor_name || r.last_editor_email || '—')}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#c2410c;text-align:left;border-bottom:1px solid #eee;">${r.days_idle} ימים</td>
+      </tr>`,
+    )
+    .join('')
+
+  const upcomingRows = upcoming
+    .map(
+      (r) => `<tr>
+        <td style="padding:8px 12px;font-size:13px;border-bottom:1px solid #eee;">${esc(r.client_name || '—')}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#666;border-bottom:1px solid #eee;">${esc(deadlineLabel(r.deadline_type))}</td>
+        <td style="padding:8px 12px;font-size:13px;color:${r.hours_until <= 12 ? '#dc2626' : '#c2410c'};text-align:left;border-bottom:1px solid #eee;">בעוד ${r.hours_until} שעות</td>
+      </tr>`,
+    )
+    .join('')
+
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:'Heebo',sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;">
+    <div style="max-width:680px;margin:0 auto;background:#fff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;">
+      <p style="font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:#888;margin:0 0 16px;">Leaders × OS · תזכורות יומיות</p>
+      <h1 style="font-size:22px;font-weight:700;margin:0 0 24px;line-height:1.3;">${reminders.length} פריטים דורשים תשומת לב</h1>
+
+      ${stale.length === 0 ? '' : `
+      <h2 style="font-size:14px;font-weight:700;margin:24px 0 12px;color:#1a1a2e;">טופסי התנעה תקועים (${stale.length})</h2>
+      <table style="width:100%;border-collapse:collapse;background:#fafaf7;border:1px solid #eee;border-radius:6px;overflow:hidden;">
+        <thead><tr style="background:#f5f3ef;">
+          <th style="padding:8px 12px;font-size:11px;text-align:right;font-weight:700;color:#666;letter-spacing:.05em;">לקוח / כותרת</th>
+          <th style="padding:8px 12px;font-size:11px;text-align:right;font-weight:700;color:#666;letter-spacing:.05em;">עורך אחרון</th>
+          <th style="padding:8px 12px;font-size:11px;text-align:left;font-weight:700;color:#666;letter-spacing:.05em;">לא נגעו</th>
+        </tr></thead>
+        <tbody>${staleRows}</tbody>
+      </table>`}
+
+      ${upcoming.length === 0 ? '' : `
+      <h2 style="font-size:14px;font-weight:700;margin:24px 0 12px;color:#1a1a2e;">דדליינים ב-48 השעות הקרובות (${upcoming.length})</h2>
+      <table style="width:100%;border-collapse:collapse;background:#fafaf7;border:1px solid #eee;border-radius:6px;overflow:hidden;">
+        <thead><tr style="background:#f5f3ef;">
+          <th style="padding:8px 12px;font-size:11px;text-align:right;font-weight:700;color:#666;letter-spacing:.05em;">לקוח</th>
+          <th style="padding:8px 12px;font-size:11px;text-align:right;font-weight:700;color:#666;letter-spacing:.05em;">סוג דדליין</th>
+          <th style="padding:8px 12px;font-size:11px;text-align:left;font-weight:700;color:#666;letter-spacing:.05em;">בעוד</th>
+        </tr></thead>
+        <tbody>${upcomingRows}</tbody>
+      </table>`}
+
+      <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0;">
+      <p style="font-size:11px;color:#888;margin:0;">
+        נוצר ב-${new Date().toLocaleString('he-IL')} · Leaders × OS
+      </p>
+    </div></body></html>`
+}
+
+function deadlineLabel(type: 'creative' | 'internal' | 'client'): string {
+  return type === 'creative' ? 'דדליין קריאייטיב' : type === 'internal' ? 'דדליין פנימי' : 'דדליין ללקוח'
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

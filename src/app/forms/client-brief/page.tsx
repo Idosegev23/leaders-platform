@@ -4,7 +4,6 @@ import { useState, useEffect, Suspense } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useSearchParams } from 'next/navigation'
-import axios from 'axios'
 import Image from 'next/image'
 import StepperWithValidation, { Step } from '@/components/client-brief/StepperWithValidation'
 import { FormData, formSchema, formSchemaEn } from '@/types/client-brief'
@@ -102,33 +101,30 @@ function BriefContent() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true)
     try {
-      const payload: Record<string, unknown> = { ...data }
-
-      if (link) {
-        payload._hub_token = link.token
-        payload._created_by_email = link.created_by_email
-        payload._created_by_name = link.created_by_name
-        payload._client_email = link.client_email
-        payload._client_name = link.client_name
-        payload._sent_at = link.created_at
+      // Native pipeline: PATCH the link with status=completed AND the full
+      // submission payload as submission_data. The server-side cascade does
+      // everything Make.com used to do (move Drive folder, create the per-
+      // client workspace, mail management, sync ClickUp, log activity).
+      if (!link?.token) {
+        // No link context (someone is hitting the form URL directly without
+        // a token). Just clear local progress and show the success screen —
+        // we have nothing to attach the submission to.
+        setSubmitSuccess(true)
+        clearFormData(token)
+        return
       }
-
-      const webhookUrl = isEnglish
-        ? 'https://hook.eu2.make.com/cpoy8k5bwarv2p3fhzgkkcdtp5qeqq7w'
-        : 'https://hook.eu2.make.com/uryu3mv7m9tu3dtbkqto6qfdbnrdbjr0'
-
-      await axios.post(webhookUrl, payload, {
+      const res = await fetch(`/api/links/${link.token}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'completed',
+          submission_data: data,
+        }),
       })
-
-      if (link?.token) {
-        fetch(`/api/links/${link.token}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'completed' }),
-        }).catch(() => {})
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { error?: string }).error || `HTTP ${res.status}`)
       }
-
       setSubmitSuccess(true)
       clearFormData(token)
     } catch (error) {

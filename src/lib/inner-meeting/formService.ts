@@ -155,7 +155,15 @@ export async function completeForm(
   data: InnerMeetingFormData,
 ): Promise<boolean> {
   try {
-    const webhookData: Record<string, unknown> = {
+    // Native pipeline: POST to our own /api/inner-meeting/complete which
+    // sends the kickoff brief to management via Gmail (using the caller's
+    // refresh_token), marks forms.status=completed, and writes activity_log.
+    // Replaces the legacy Make.com webhook at hook.eu2.make.com/q840w368….
+    //
+    // sanitizeText() is preserved on free-text fields to keep the
+    // double-quote stripping that the old Make scenario depended on (some
+    // downstream tools — a future PPT export — break on stray quotes).
+    const payload = {
       clientName: sanitizeText(data.clientName),
       meetingDate: data.meetingDate,
       participants: data.participants.map((p) => ({
@@ -163,26 +171,31 @@ export async function completeForm(
         email: p.email,
         hebrewName: sanitizeText(p.hebrewName),
       })),
-      creativeWriter: {
-        name: sanitizeText(data.creativeWriter[0].name),
-        email: data.creativeWriter[0].email,
-        hebrewName: sanitizeText(data.creativeWriter[0].hebrewName),
-      },
-      presenter: {
-        name: sanitizeText(data.presenter[0].name),
-        email: data.presenter[0].email,
-        hebrewName: sanitizeText(data.presenter[0].hebrewName),
-      },
-      presentationMaker: {
-        name: sanitizeText(data.presentationMaker[0].name),
-        email: data.presentationMaker[0].email,
-        hebrewName: sanitizeText(data.presentationMaker[0].hebrewName),
-      },
-      accountManager: {
-        name: sanitizeText(data.accountManager[0].name),
-        email: data.accountManager[0].email,
-        hebrewName: sanitizeText(data.accountManager[0].hebrewName),
-      },
+      creativeWriter: data.creativeWriter.map((p) => ({
+        name: sanitizeText(p.name),
+        email: p.email,
+        hebrewName: sanitizeText(p.hebrewName),
+      })),
+      presenter: data.presenter.map((p) => ({
+        name: sanitizeText(p.name),
+        email: p.email,
+        hebrewName: sanitizeText(p.hebrewName),
+      })),
+      presentationMaker: data.presentationMaker.map((p) => ({
+        name: sanitizeText(p.name),
+        email: p.email,
+        hebrewName: sanitizeText(p.hebrewName),
+      })),
+      accountManager: data.accountManager.map((p) => ({
+        name: sanitizeText(p.name),
+        email: p.email,
+        hebrewName: sanitizeText(p.hebrewName),
+      })),
+      mediaPerson: (data.mediaPerson || []).map((p) => ({
+        name: sanitizeText(p.name),
+        email: p.email,
+        hebrewName: sanitizeText(p.hebrewName),
+      })),
       aboutBrand: sanitizeText(data.aboutBrand),
       targetAudiences: sanitizeText(data.targetAudiences),
       goals: sanitizeText(data.goals),
@@ -199,27 +212,16 @@ export async function completeForm(
       clientDeadline: data.clientDeadline,
     }
 
-    if (data.mediaPerson && data.mediaPerson.length > 0) {
-      webhookData.mediaPerson = {
-        name: sanitizeText(data.mediaPerson[0].name),
-        email: data.mediaPerson[0].email,
-        hebrewName: sanitizeText(data.mediaPerson[0].hebrewName),
-      }
+    const response = await fetch('/api/inner-meeting/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ formId, payload }),
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error((err as { error?: string }).error || `HTTP ${response.status}`)
     }
-
-    const response = await fetch(
-      'https://hook.eu2.make.com/q840w368tibatfkrv9nx6sxtoqr2orm3',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(webhookData),
-      },
-    )
-    if (!response.ok) throw new Error('Webhook failed')
-
-    const supabase = getClient()
-    const { error } = await supabase.from('forms').update({ status: 'completed' }).eq('id', formId)
-    if (error) throw error
+    // The endpoint already updates forms.status — no need to repeat here.
     return true
   } catch (error) {
     console.error('Error completing form:', error)
