@@ -53,14 +53,21 @@ export function DeepResearchPanel({ documentId, mode, label, onComplete }: Props
   useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
 
   // On mount: check if a previous run exists for this mode + document.
+  // 404 from the status endpoint just means "no prior run yet" — handle it
+  // silently so a fresh document with no _deepResearch field doesn't error.
   useEffect(() => {
+    if (!documentId) return
     let alive = true
     ;(async () => {
       try {
         const res = await fetch(`/api/deep-research/status?documentId=${documentId}&mode=${mode}`)
-        if (!res.ok) return
-        const json = await res.json() as { status?: string; text?: string; parsed?: unknown; startedAt?: string }
         if (!alive) return
+        if (res.status === 404) return // no prior run — start state is fine
+        if (!res.ok) return
+        const json = await res.json().catch(() => null) as
+          | { status?: string; text?: string; parsed?: unknown; startedAt?: string }
+          | null
+        if (!alive || !json) return
         if (json.status === 'completed' && json.text) {
           setStatus('completed')
           setResult({ text: json.text, parsed: json.parsed })
@@ -68,7 +75,7 @@ export function DeepResearchPanel({ documentId, mode, label, onComplete }: Props
           setStatus('in_progress')
           if (json.startedAt) setStartedAt(new Date(json.startedAt).getTime())
         }
-      } catch { /* no prior run */ }
+      } catch { /* network error — stay idle */ }
     })()
     return () => { alive = false }
   }, [documentId, mode])
