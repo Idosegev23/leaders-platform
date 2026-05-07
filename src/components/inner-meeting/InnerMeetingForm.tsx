@@ -28,6 +28,10 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
   const [showDraftNameDialog, setShowDraftNameDialog] = useState(false)
   const [draftName, setDraftName] = useState('')
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
+  // When the user picks an existing ClickUp customer list, kickoff tasks
+  // get created in it (instead of creating a brand new list). null = new
+  // client → /api/inner-meeting/complete will create a fresh list.
+  const [selectedClickupListId, setSelectedClickupListId] = useState<string | null>(null)
 
   const { form, innerForm, updateField, initializeForm } = useRealtimeForm()
   const { user } = useInnerMeetingUser()
@@ -237,7 +241,9 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
     setShowConfirmDialog(false)
 
     try {
-      const success = await completeForm(form.id, pendingSubmitData)
+      const success = await completeForm(form.id, pendingSubmitData, {
+        clickupListId: selectedClickupListId,
+      })
       
       if (success) {
         // Log activity
@@ -293,9 +299,12 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
                 render={({ field }) => (
                   <ClientFolderSelector
                     value={field.value || ''}
-                    onChange={(value, folderId, briefLinkToken) => {
+                    onChange={(value, folderId, briefLinkToken, clickupListId) => {
                       field.onChange(value)
                       if (folderId) setSelectedFolderId(folderId)
+                      // Pass the picked ClickUp list id through to submit;
+                      // null when the client is brand new → cascade creates one.
+                      setSelectedClickupListId(clickupListId ?? null)
                       // When the picked client has a completed brief, fetch
                       // the submission_data and pre-fill the kickoff fields
                       // that map 1:1 (about brand / audiences / goals /

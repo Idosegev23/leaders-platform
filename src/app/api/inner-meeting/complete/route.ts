@@ -60,12 +60,16 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null) as {
     formId?: string
     payload?: KickoffPayload
+    /** Existing ClickUp customer-list id (when picked from the dropdown).
+     *  If null/missing, the cascade creates a new list under the
+     *  "Leaders Customers" folder using payload.clientName. */
+    clickupListId?: string | null
   } | null
   if (!body?.formId || !body.payload) {
     return NextResponse.json({ error: 'formId and payload required' }, { status: 400 })
   }
 
-  const { formId, payload } = body
+  const { formId, payload, clickupListId: existingListId } = body
   const tag = `[kickoff:${formId.slice(0, 8)}]`
   console.log(`${tag} complete — sender=${user.email} client="${payload.clientName}"`)
 
@@ -103,6 +107,121 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 })
   }
 
+  // 2.5 ClickUp cascade — find-or-create customer list, then create one
+  // task per picked role (assignee = the picked user). All best-effort:
+  // failures here don't fail the form completion.
+  let clickup: {
+    listId: string | null
+    listName: string | null
+    listCreated: boolean
+    driveFolderUrl: string | null
+    tasks: Array<{ role: string; status: string; taskUrl?: string; error?: string }>
+  } = { listId: null, listName: null, listCreated: false, driveFolderUrl: null, tasks: [] }
+  try {
+    const {
+      findOrCreateCustomerList,
+      createKickoffTasks,
+      type: _t1,
+    } = await import('@/lib/clickup/customer-tasks').then((m) => ({
+      findOrCreateCustomerList: m.findOrCreateCustomerList,
+      createKickoffTasks: m.createKickoffTasks,
+      type: undefined,
+    }))
+    void _t1
+
+    // Resolve the customer list — picked from dropdown OR find-or-create.
+    let listId: string
+    let listName: string
+    let listCreated = false
+    if (existingListId) {
+      listId = existingListId
+      listName = payload.clientName
+      console.log(`${tag} ClickUp: using existing list ${listId} ("${listName}")`)
+    } else {
+      const resolved = await findOrCreateCustomerList({ name: payload.clientName })
+      listId = resolved.id
+      listName = resolved.name
+      listCreated = resolved.created
+      console.log(
+        `${tag} ClickUp: ${listCreated ? 'created' : 'matched'} list ${listId} ("${listName}")`,
+      )
+    }
+
+    // Resolve the Drive workspace URL (set when the brief completed) —
+    // we link every kickoff task back to the per-client folder.
+    let driveFolderUrl: string | null = null
+    try {
+      const { data: link } = await service
+        .from('document_links')
+        .select('metadata')
+        .eq('client_name', payload.clientName)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const meta = (link?.metadata as Record<string, unknown> | null) ?? {}
+      driveFolderUrl =
+        (meta.workspace_drive_folder_link as string | undefined) ||
+        (meta.brief_drive_folder_link as string | undefined) ||
+        null
+    } catch { /* non-fatal */ }
+
+    // Build picks from each role-array head (only roles with a real email).
+    type RoleKey = 'creativeWriter' | 'presenter' | 'presentationMaker' | 'accountManager' | 'mediaPerson'
+    const roleEntries: Array<[RoleKey, Participant[] | undefined]> = [
+      ['creativeWriter', payload.creativeWriter],
+      ['presenter', payload.presenter],
+      ['presentationMaker', payload.presentationMaker],
+      ['accountManager', payload.accountManager],
+      ['mediaPerson', payload.mediaPerson],
+    ]
+    const picks = roleEntries
+      .map(([key, arr]) => {
+        const head = arr?.[0]
+        if (!head?.email) return null
+        return { key, email: head.email, name: head.name, hebrewName: head.hebrewName }
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null)
+
+    if (picks.length === 0) {
+      console.log(`${tag} ClickUp: no role-picks with emails — skipping task creation`)
+    } else {
+      const senderName = user.user_metadata?.full_name ?? user.email
+      const briefHtml = buildKickoffHtml(payload, senderName)
+      const tasks = await createKickoffTasks({
+        listId,
+        clientName: payload.clientName,
+        meetingDate: payload.meetingDate,
+        driveFolderUrl: driveFolderUrl || undefined,
+        picks,
+        briefDescriptionHtml: briefHtml,
+        deadlines: {
+          creative: payload.creativeDeadline ? new Date(payload.creativeDeadline).getTime() : undefined,
+          internal: payload.internalDeadline ? new Date(payload.internalDeadline).getTime() : undefined,
+          client:   payload.clientDeadline   ? new Date(payload.clientDeadline).getTime()   : undefined,
+        },
+        prefixWithDate: !!existingListId, // existing list → date-prefix tasks
+      })
+      const created = tasks.filter((t) => t.status === 'created').length
+      const failed = tasks.filter((t) => t.status === 'failed').length
+      const skipped = tasks.filter((t) => t.status === 'skipped_no_user').length
+      console.log(`${tag} ClickUp tasks: created=${created} failed=${failed} skipped_no_user=${skipped}`)
+      clickup = {
+        listId,
+        listName,
+        listCreated,
+        driveFolderUrl,
+        tasks: tasks.map((t) => ({
+          role: t.role,
+          status: t.status,
+          taskUrl: t.taskUrl,
+          error: t.error,
+        })),
+      }
+    }
+  } catch (e) {
+    console.warn(`${tag} ClickUp cascade error (non-fatal):`, e instanceof Error ? e.message : e)
+  }
+
   // 3. activity_log
   try {
     await service.from('activity_log').insert({
@@ -122,7 +241,11 @@ export async function POST(req: Request) {
     console.warn(`${tag} activity_log error:`, e instanceof Error ? e.message : e)
   }
 
-  return NextResponse.json({ ok: true, mail: { sent: mailSent, failed: mailFailed } })
+  return NextResponse.json({
+    ok: true,
+    mail: { sent: mailSent, failed: mailFailed },
+    clickup,
+  })
 }
 
 function buildKickoffHtml(p: KickoffPayload, senderName: string): string {

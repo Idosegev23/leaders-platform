@@ -14,11 +14,20 @@ interface ClientFolder {
   /** When the client has a completed brief, this is the link token so the
    *  parent form can fetch the submission_data and pre-fill its fields. */
   briefLinkToken?: string
+  /** When true, this entry comes from ClickUp's "Leaders Customers" folder
+   *  — i.e. there's already a project list for this client there, and the
+   *  kickoff cascade should add tasks to it instead of creating a new one. */
+  clickupListId?: string
 }
 
 interface ClientFolderSelectorProps {
   value: string
-  onChange: (value: string, folderId?: string, briefLinkToken?: string) => void
+  onChange: (
+    value: string,
+    folderId?: string,
+    briefLinkToken?: string,
+    clickupListId?: string,
+  ) => void
   error?: string
   disabled?: boolean
 }
@@ -42,15 +51,22 @@ export default function ClientFolderSelector({
   const fetchFolders = async () => {
     try {
       const supabase = createClient()
-      const [foldersResult, meetingsResult, completedBriefsResult] = await Promise.all([
-        supabase.from('client_folders').select('id, client_name').order('client_name'),
-        supabase.from('inner_meeting_forms').select('folder_id').not('folder_id', 'is', null),
-        // Pull clients with a completed client-brief — this is the new source
-        // of truth for "kickoff candidates" since we ditched Make.com.
-        fetch('/api/clients/with-completed-brief')
-          .then((r) => (r.ok ? r.json() : { clients: [] }))
-          .catch(() => ({ clients: [] })),
-      ])
+      const [foldersResult, meetingsResult, completedBriefsResult, clickupCustomersResult] =
+        await Promise.all([
+          supabase.from('client_folders').select('id, client_name').order('client_name'),
+          supabase.from('inner_meeting_forms').select('folder_id').not('folder_id', 'is', null),
+          // Pull clients with a completed client-brief — this is the new
+          // source of truth for "kickoff candidates" since we ditched Make.com.
+          fetch('/api/clients/with-completed-brief')
+            .then((r) => (r.ok ? r.json() : { clients: [] }))
+            .catch(() => ({ clients: [] })),
+          // Existing ClickUp customer lists — kickoff tasks go INTO these.
+          // If a client appears here, the user is picking a known active
+          // project rather than creating a new entry.
+          fetch('/api/clickup/customers')
+            .then((r) => (r.ok ? r.json() : { customers: [] }))
+            .catch(() => ({ customers: [] })),
+        ])
 
       const meetingFolderIds = new Set(
         (meetingsResult.data ?? []).map((m) => m.folder_id),
@@ -84,17 +100,46 @@ export default function ClientFolderSelector({
           briefLinkToken: c.link_token,
         }))
 
-      // De-dupe by lowercased client_name, prefer the completed-brief entry
-      // (it has more useful data attached).
+      type ClickUpCustomer = { id: string; name: string }
+      const cuLists = (
+        (clickupCustomersResult as { customers?: ClickUpCustomer[] }).customers || []
+      )
+
+      // De-dupe by lowercased client_name. Priority order:
+      //   1. Completed brief (has submission_data → can pre-fill kickoff fields)
+      //   2. ClickUp customer list (existing project — kickoff goes there)
+      //   3. Legacy client_folders
+      // When we already have a completed-brief entry AND a matching ClickUp
+      // list, we attach the ClickUp list_id to the existing entry so the
+      // parent form learns both pieces of info.
       const merged = new Map<string, ClientFolder>()
       for (const c of completed) merged.set(c.client_name.toLowerCase(), c)
+      for (const cu of cuLists) {
+        const key = cu.name.toLowerCase()
+        const existing = merged.get(key)
+        if (existing) {
+          existing.clickupListId = cu.id
+        } else {
+          merged.set(key, {
+            id: `clickup-${cu.id}`,
+            client_name: cu.name,
+            has_meeting: false,
+            hasCompletedBrief: false,
+            clickupListId: cu.id,
+          })
+        }
+      }
       for (const f of legacy) {
         const key = f.client_name.toLowerCase()
         if (!merged.has(key)) merged.set(key, f)
       }
       const sorted = Array.from(merged.values()).sort((a, b) => {
-        // Completed briefs first, then alphabetical.
-        if (a.hasCompletedBrief !== b.hasCompletedBrief) return a.hasCompletedBrief ? -1 : 1
+        // Completed briefs first → ClickUp customers next → legacy last.
+        const score = (x: ClientFolder) =>
+          x.hasCompletedBrief ? 0 : x.clickupListId ? 1 : 2
+        const sa = score(a)
+        const sb = score(b)
+        if (sa !== sb) return sa - sb
         return a.client_name.localeCompare(b.client_name, 'he')
       })
       setFolders(sorted)
@@ -110,7 +155,7 @@ export default function ClientFolderSelector({
   )
 
   const handleSelect = (folder: ClientFolder) => {
-    onChange(folder.client_name, folder.id, folder.briefLinkToken)
+    onChange(folder.client_name, folder.id, folder.briefLinkToken, folder.clickupListId)
     setIsOpen(false)
     setSearchQuery('')
     setManualMode(false)
@@ -206,11 +251,18 @@ export default function ClientFolderSelector({
                   className="w-full px-4 py-3 text-right hover:bg-blue-50 transition-colors flex items-center justify-between gap-2"
                 >
                   <span className="font-medium text-gray-900">{folder.client_name}</span>
-                  {folder.hasCompletedBrief && (
-                    <span className="text-[10px] font-bold tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-                      ✓ בריף
-                    </span>
-                  )}
+                  <span className="flex items-center gap-1">
+                    {folder.hasCompletedBrief && (
+                      <span className="text-[10px] font-bold tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                        ✓ בריף
+                      </span>
+                    )}
+                    {folder.clickupListId && (
+                      <span className="text-[10px] font-bold tracking-wider text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5">
+                        ClickUp
+                      </span>
+                    )}
+                  </span>
                 </button>
               ))
             )}

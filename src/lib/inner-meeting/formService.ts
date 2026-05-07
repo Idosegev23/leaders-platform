@@ -153,6 +153,12 @@ export async function updateFormParticipants(
 export async function completeForm(
   formId: string,
   data: InnerMeetingFormData,
+  opts?: {
+    /** When the user picked an existing customer from the dropdown, this
+     *  is its ClickUp list id — the kickoff cascade adds tasks there
+     *  instead of creating a fresh list. */
+    clickupListId?: string | null
+  },
 ): Promise<boolean> {
   try {
     // Native pipeline: POST to our own /api/inner-meeting/complete which
@@ -215,7 +221,11 @@ export async function completeForm(
     const response = await fetch('/api/inner-meeting/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ formId, payload }),
+      body: JSON.stringify({
+        formId,
+        payload,
+        clickupListId: opts?.clickupListId ?? null,
+      }),
     })
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
