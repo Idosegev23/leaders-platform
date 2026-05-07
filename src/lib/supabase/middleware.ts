@@ -69,8 +69,12 @@ export async function updateSession(request: NextRequest) {
     '/generate', '/edit',
     // New hub rubrics (Phases 2–5)
     '/inner-meeting', '/summary', '/send',
+    // Deep Research Agent (Phase 8)
+    '/research-hub',
     // Note: /forms/* is intentionally public — clients without an account
     // use `/forms/client-brief?token=xxx` to fill the brief.
+    // Note: /api/research-hub/workflow is intentionally public — it's
+    // signed by QStash; the verify handler accepts/rejects the call there.
   ]
   const isProtectedPath = protectedPaths.some(path =>
     request.nextUrl.pathname.startsWith(path)

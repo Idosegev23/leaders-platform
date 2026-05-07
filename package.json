@@ -16,8 +16,11 @@
     "@hookform/resolvers": "^5.2.2",
     "@pdf-lib/fontkit": "^1.1.1",
     "@sparticuz/chromium": "^143.0.0",
+    "@sparticuz/chromium-min": "^148.0.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.2",
+    "@upstash/qstash": "^2.10.1",
+    "@upstash/workflow": "^1.2.1",
     "ai": "^6.0.154",
     "axios": "^1.15.2",
     "canvas-confetti": "^1.9.4",
@@ -42,12 +45,15 @@
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.72.1",
     "react-konva": "^18.2.14",
+    "react-markdown": "^10.1.0",
     "react-rnd": "^10.5.2",
+    "remark-gfm": "^4.0.1",
     "sharp": "^0.34.5",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.6.1",
     "tailwindcss-animate": "^1.0.7",
-    "uuid": "^11.0.3"
+    "uuid": "^11.0.3",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",

@@ -58,6 +58,14 @@ const RUBRICS: Rubric[] = [
     targetUrl: '/summary',
     flowType: 'coming_soon',
   },
+  {
+    slug: 'deep-research',
+    name: 'מחקר עומק',
+    english: 'Deep Research',
+    description: 'דוח אסטרטגי מלא — שוק, תחרות, הזדמנויות',
+    targetUrl: '/research-hub',
+    flowType: 'direct_form',
+  },
 ]
 
 export default async function DashboardPage() {
@@ -103,7 +111,7 @@ export default async function DashboardPage() {
       </header>
 
       {/* Rubrics */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-20 md:mb-28">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-20 md:mb-28">
         {RUBRICS.map((r, idx) => {
           const num = String(idx + 1).padStart(2, '0')
           const isComingSoon = r.flowType === 'coming_soon'

@@ -451,3 +451,25 @@
 }
 
 .pause-on-hover:hover { animation-play-state: paused; }
+
+/* -------------------------------------------------------------- */
+/* Research Hub — editorial dividers, numerals, PDF page styling   */
+/* -------------------------------------------------------------- */
+
+.divider-dotted {
+  background-image: radial-gradient(circle, rgb(var(--brand-mist)) 1px, transparent 1px);
+  background-size: 8px 8px;
+  background-repeat: repeat-x;
+  background-position: center;
+  height: 1px;
+}
+
+.numeral {
+  font-family: var(--font-cormorant), Georgia, serif;
+  font-feature-settings: "lnum" 1, "tnum" 1;
+}
+
+.pdf-page {
+  background: #fff;
+  color: rgb(var(--brand-primary));
+}
