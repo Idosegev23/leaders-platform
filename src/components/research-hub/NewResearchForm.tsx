@@ -19,31 +19,27 @@ const DEPTHS: {
   id: "express" | "standard" | "maximum";
   label: string;
   desc: string;
-  cost: string;
   time: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
   {
     id: "express",
     label: "אקספרס",
-    desc: "סקירת-על מהירה. דוח אחד מקיף.",
-    cost: "$3-7",
+    desc: "סקירת-על מהירה לקבלת ההקשר העיקרי. מתאים להחלטות זריזות וראייה ראשונית.",
     time: "~10 דק'",
     icon: Sparkles,
   },
   {
     id: "standard",
     label: "סטנדרט",
-    desc: "מחקר עומק לפי 4 קבוצות זוויות במקביל.",
-    cost: "$12-28",
+    desc: "מחקר רציני שמכסה את כל הזוויות ב-4 קבוצות מקבילות. ההמלצה לרוב הברייפים.",
     time: "~25 דק'",
     icon: Telescope,
   },
   {
     id: "maximum",
     label: "מקסימום",
-    desc: "מחקר נפרד לכל זווית. עומק מקסימלי.",
-    cost: "$35-80",
+    desc: "מחקר נפרד לכל זווית. כשצריך עומק שעומד בפני לקוח/מנכ״ל ומקור לכל מספר.",
     time: "~50 דק'",
     icon: Microscope,
   },
@@ -196,7 +192,7 @@ export function NewResearchForm() {
               >
                 <div className="flex items-center justify-between mb-3">
                   <Icon className={cn("size-5", active ? "text-brand-gold" : "text-brand-secondary")} />
-                  <Badge variant={active ? "gold" : "muted"}>{d.cost}</Badge>
+                  <Badge variant={active ? "gold" : "muted"}>{d.time}</Badge>
                 </div>
                 <div className="text-[16px] font-semibold mb-1">{d.label}</div>
                 <div
@@ -209,7 +205,7 @@ export function NewResearchForm() {
                 </div>
                 <div
                   className={cn(
-                    "text-[11px] mt-3 tracking-wider uppercase",
+                    "text-[11px] mt-3 tracking-wider uppercase opacity-0",
                     active ? "text-white/50" : "text-muted-foreground",
                   )}
                 >

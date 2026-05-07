@@ -33,7 +33,7 @@ export default async function JobsPage() {
   const service = createSupabaseService();
   const { data: jobs } = await service
     .from("research_jobs")
-    .select("id, topic, status, depth, created_at, finished_at, cost_cents")
+    .select("id, topic, status, depth, created_at, finished_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(100);
@@ -76,9 +76,6 @@ export default async function JobsPage() {
                     </div>
                     <div className="text-[12px] text-muted-foreground mt-0.5">
                       {timeAgoHe(j.created_at as string)} · {j.depth as string}
-                      {(j.cost_cents as number)
-                        ? ` · $${((j.cost_cents as number) / 100).toFixed(2)}`
-                        : ""}
                     </div>
                   </div>
                   <Badge variant={s.variant}>{s.label}</Badge>
