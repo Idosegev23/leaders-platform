@@ -61,7 +61,7 @@ export function ReportView({
             </p>
           ) : null}
           {s.key_numbers?.length ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+            <div className="key-numbers-grid grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
               {s.key_numbers.map((kn, i) => (
                 <div
                   key={i}
@@ -93,7 +93,7 @@ export function ReportView({
             {report.recommendations.map((r, i) => (
               <div
                 key={i}
-                className="rounded-2xl border border-[rgb(var(--brand-mist))] bg-white p-6"
+                className="rec-card rounded-2xl border border-[rgb(var(--brand-mist))] bg-white p-6"
               >
                 <div className="flex items-start justify-between gap-4 mb-3">
                   <h3 className="font-cormorant italic text-2xl text-brand-primary">
@@ -154,27 +154,72 @@ export function ReportView({
       ) : null}
 
       {sources.length ? (
-        <section className="page-break-section">
+        <section className="sources-section">
           <SectionLabel>מקורות</SectionLabel>
-          <ol className="space-y-1.5">
-            {sources.map((s, i) => (
-              <li key={i} className="flex gap-3 text-[13px]">
-                <span className="text-brand-accent shrink-0 numeral">[{i + 1}]</span>
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-brand-secondary hover:text-brand-accent break-all"
+          <p
+            className={cn(
+              "text-muted-foreground mb-3",
+              printMode ? "text-[10px]" : "text-[12px]",
+            )}
+          >
+            סך הכל {sources.length} מקורות. הקליק ב-PDF פותח את הכתובת המלאה במקור המקוון.
+          </p>
+          <ol
+            className={cn(
+              "sources-list",
+              printMode
+                ? "columns-2 gap-x-6 text-[9.5px] leading-snug"
+                : "columns-1 sm:columns-2 gap-x-6 text-[12px]",
+            )}
+          >
+            {sources.map((s, i) => {
+              const host = (() => {
+                try {
+                  return new URL(s.url).hostname.replace(/^www\./, "");
+                } catch {
+                  return s.url;
+                }
+              })();
+              return (
+                <li
+                  key={i}
+                  className={cn(
+                    "break-inside-avoid mb-1.5 flex gap-1.5 items-baseline",
+                    printMode ? "" : "leading-relaxed",
+                  )}
                 >
-                  {s.title || s.url}
-                </a>
-              </li>
-            ))}
+                  <span
+                    className={cn(
+                      "text-brand-accent shrink-0 numeral",
+                      printMode ? "text-[9px]" : "text-[11px]",
+                    )}
+                  >
+                    [{i + 1}]
+                  </span>
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-brand-secondary hover:text-brand-accent min-w-0"
+                  >
+                    <span className="font-medium">{truncate(s.title, 80) || host}</span>
+                    {s.title ? (
+                      <span className="text-muted-foreground"> · {host}</span>
+                    ) : null}
+                  </a>
+                </li>
+              );
+            })}
           </ol>
         </section>
       ) : null}
     </article>
   );
+}
+
+function truncate(s: string | undefined, n: number): string {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
