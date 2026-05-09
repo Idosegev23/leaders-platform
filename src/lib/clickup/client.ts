@@ -64,6 +64,38 @@ export async function updateClickUpTaskStatus(
 export const LEADS_CLICKUP_LIST_ID =
   process.env.CLICKUP_LEADS_LIST_ID ?? '901509407870'
 
+/**
+ * Post a comment on a ClickUp task. Used by the send-brief trigger to
+ * report success ("✅ נשלח") or specific failure causes (missing email,
+ * sender not connected, etc.) directly inside ClickUp so the user sees
+ * the result on the same task they just clicked.
+ */
+export async function addClickUpTaskComment(
+  taskId: string,
+  commentText: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${CLICKUP_BASE}/task/${taskId}/comment`, {
+      method: 'POST',
+      headers: {
+        Authorization: token(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        comment_text: commentText,
+        notify_all: false,
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      return { ok: false, error: `ClickUp ${res.status}: ${body.slice(0, 200)}` }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function createClickUpLeadTask(params: {
   name: string
   description: string

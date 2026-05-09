@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { CLICKUP_STATUS_TO_LEAD, LEAD_STATUS_TO_CLICKUP } from '@/lib/clickup/client'
+import {
+  BRIEF_TRIGGER_STATUS,
+  runClickUpSendBriefTrigger,
+} from '@/lib/clickup/send-brief-trigger'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -145,13 +149,34 @@ export async function POST(request: Request) {
   // skip if the NEW ClickUp status is already the forward-map of the
   // lead's CURRENT status (meaning this event was triggered by us).
   let reverseSyncApplied: { from: string; to: string } | null = null
+  let briefTriggerFired = false
   if (entityType === 'lead' && entityId && payload.event === 'taskStatusUpdated') {
     const first = payload.history_items?.[0]
     const newClickUpStatus = typeof first?.after === 'object' && first?.after
       ? ((first.after as { status?: string }).status ?? null)
       : typeof first?.after === 'string' ? first.after : null
+    const beforeClickUpStatus = typeof first?.before === 'object' && first?.before
+      ? ((first.before as { status?: string }).status ?? null)
+      : typeof first?.before === 'string' ? first.before : null
 
-    if (newClickUpStatus) {
+    // ── Brief-send trigger: status flipped to "📤 שלח בריף" ──
+    // Fire-and-forget. The trigger handler validates the lead, sends
+    // the brief if all fields are present, then either advances to
+    // "ליד אחרי שיחה" (success) or reverts to beforeClickUpStatus
+    // (failure) — and posts a comment on the task in either case.
+    // Skip the reverse-sync below for THIS specific transition because
+    // the trigger handler is the one driving the next status change.
+    if (taskId && newClickUpStatus === BRIEF_TRIGGER_STATUS) {
+      briefTriggerFired = true
+      void runClickUpSendBriefTrigger({
+        taskId,
+        leadId: entityId,
+        triggeredByEmail: actor.email,
+        previousStatus: beforeClickUpStatus,
+      })
+    }
+
+    if (!briefTriggerFired && newClickUpStatus) {
       const nextLeadStatus = CLICKUP_STATUS_TO_LEAD[newClickUpStatus]
       if (nextLeadStatus) {
         const { data: leadRow } = await supabase
