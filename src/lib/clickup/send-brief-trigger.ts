@@ -59,15 +59,49 @@ async function revertStatus(taskId: string, previousStatus: string | null) {
   })
 }
 
+/**
+ * Resolve the ClickUp user_id for the email of whoever clicked the
+ * status. Lets us @-mention them in comments for an immediate native
+ * notification (browser popup + bell badge + mobile push).
+ */
+async function resolveActorClickUpId(actorEmail: string | null): Promise<number | undefined> {
+  if (!actorEmail) return undefined
+  try {
+    const res = await fetch('https://api.clickup.com/api/v2/team', {
+      headers: { Authorization: process.env.CLICKUP_API_KEY || '' },
+    })
+    if (!res.ok) return undefined
+    const json = (await res.json()) as {
+      teams?: Array<{ members?: Array<{ user?: { id?: number; email?: string } }> }>
+    }
+    const target = actorEmail.toLowerCase()
+    for (const t of json.teams || []) {
+      for (const m of t.members || []) {
+        if (m.user?.email?.toLowerCase() === target && typeof m.user.id === 'number') {
+          return m.user.id
+        }
+      }
+    }
+  } catch { /* fall through */ }
+  return undefined
+}
+
 /** Best-effort comment + status revert pair. Used on every failure path. */
 async function failWithComment(
   taskId: string,
   previousStatus: string | null,
   comment: string,
   reason: string,
+  assigneeUserId?: number,
 ): Promise<RunResult> {
   console.log(`[clickup-send-brief] task=${taskId} fail: ${reason}`)
-  await addClickUpTaskComment(taskId, comment).catch((e) => {
+  // notify_all + @mention the actor → triggers ClickUp's native browser/
+  // mobile/bell notification so the user sees the failure as a popup
+  // even if they navigated away from the task.
+  await addClickUpTaskComment(taskId, comment, {
+    notifyAll: true,
+    assigneeUserId,
+  }).catch((e) => {
     console.warn(`[clickup-send-brief] addComment failed:`, e)
   })
   await revertStatus(taskId, previousStatus)
@@ -81,6 +115,10 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
   )
   const sb = service()
 
+  // Resolve the actor's ClickUp user_id once — used to @-mention them in
+  // every comment so they get a real popup notification.
+  const actorClickUpId = await resolveActorClickUpId(triggeredByEmail)
+
   // 1. Load the lead row.
   const { data: lead, error: leadErr } = await sb
     .from('leads')
@@ -93,6 +131,7 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ לא ניתן לשלוח בריף — הליד לא נמצא במערכת. פנה ל-CTO.`,
       'lead_not_found',
+      actorClickUpId,
     )
   }
 
@@ -109,6 +148,7 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ לא ניתן לשלוח בריף — חסר ${what}. עדכן ב-Leaders × OS (דף הליד) ונסה שוב.`,
       `missing:${missing.join(',')}`,
+      actorClickUpId,
     )
   }
 
@@ -119,6 +159,7 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ לא הצלחנו לזהות מי שינה את הסטטוס. נסה שוב כשאתה מחובר ל-ClickUp.`,
       'no_actor_email',
+      actorClickUpId,
     )
   }
   const { data: senderUser } = await sb
@@ -133,6 +174,7 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ לא ניתן לשלוח — ${firstName} לא רשום במערכת Leaders × OS. עליו להיכנס פעם אחת ולאשר את ההרשאות.`,
       'sender_not_in_users',
+      actorClickUpId,
     )
   }
   const { data: tokenRow } = await sb
@@ -147,6 +189,7 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ לא ניתן לשלוח — ${firstName} לא חיבר Gmail במערכת. עליו להיכנס פעם אחת ל-Leaders × OS, לאשר את ההרשאות, ואז ניתן לנסות שוב.`,
       'no_refresh_token',
+      actorClickUpId,
     )
   }
 
@@ -169,6 +212,7 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ שליחה נכשלה: ${e instanceof Error ? e.message : String(e)}. נסה שוב או פנה ל-CTO.`,
       'send_threw',
+      actorClickUpId,
     )
   }
 
@@ -178,14 +222,21 @@ export async function runClickUpSendBriefTrigger(input: RunInput): Promise<RunRe
       previousStatus,
       `❌ שליחת המייל נכשלה: ${result.mailError || 'unknown'}. בריף נשמר ב-Drive — אפשר לשלוח את הקישור ידנית: ${result.fullLink}`,
       'mail_failed',
+      actorClickUpId,
     )
   }
 
   // 5. Success — comment + advance status.
+  // notify_all + @mention triggers ClickUp's native popup notification
+  // (browser push, bell badge, mobile push) so the actor sees an
+  // immediate "✅ נשלח" without having to scroll to the comments tab.
   const successComment = result.driveFolderLink
     ? `✅ בריף נשלח אל ${(lead.email as string).trim()}\n📁 תיקיית הלקוח ב-Drive: ${result.driveFolderLink}\n🔗 הקישור שנשלח: ${result.fullLink}`
     : `✅ בריף נשלח אל ${(lead.email as string).trim()}\n🔗 הקישור שנשלח: ${result.fullLink}`
-  await addClickUpTaskComment(taskId, successComment).catch((e) => {
+  await addClickUpTaskComment(taskId, successComment, {
+    notifyAll: true,
+    assigneeUserId: actorClickUpId,
+  }).catch((e) => {
     console.warn(`[clickup-send-brief] success comment failed:`, e)
   })
   await updateClickUpTaskStatus(taskId, BRIEF_SUCCESS_STATUS).catch((e) => {

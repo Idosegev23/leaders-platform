@@ -69,26 +69,49 @@ export const LEADS_CLICKUP_LIST_ID =
  * report success ("✅ נשלח") or specific failure causes (missing email,
  * sender not connected, etc.) directly inside ClickUp so the user sees
  * the result on the same task they just clicked.
+ *
+ * `notifyAll: true` (default) triggers ClickUp's native notification —
+ * bell icon badge, browser push popup if the user has notifications
+ * enabled, and a mobile push if they have the app. This is what makes
+ * the result feel like a "popup" rather than a buried activity entry.
+ *
+ * `assigneeUserId` optionally embeds a `@username`-style mention block
+ * in the rich comment so the user gets a personal mention notification
+ * (independent of notify_all).
  */
 export async function addClickUpTaskComment(
   taskId: string,
   commentText: string,
+  opts?: { notifyAll?: boolean; assigneeUserId?: number },
 ): Promise<{ ok: boolean; error?: string }> {
   try {
+    const notifyAll = opts?.notifyAll ?? true
+    // ClickUp's rich `comment` array supports a "user" block which renders
+    // as a real @mention. Build a comment that opens with the mention so
+    // the assignee gets pinged personally.
+    const body: Record<string, unknown> = opts?.assigneeUserId
+      ? {
+          comment: [
+            { type: 'user', user: { id: opts.assigneeUserId } },
+            { text: ' ' + commentText },
+          ],
+          notify_all: notifyAll,
+        }
+      : {
+          comment_text: commentText,
+          notify_all: notifyAll,
+        }
     const res = await fetch(`${CLICKUP_BASE}/task/${taskId}/comment`, {
       method: 'POST',
       headers: {
         Authorization: token(),
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        comment_text: commentText,
-        notify_all: false,
-      }),
+      body: JSON.stringify(body),
     })
     if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      return { ok: false, error: `ClickUp ${res.status}: ${body.slice(0, 200)}` }
+      const responseBody = await res.text().catch(() => '')
+      return { ok: false, error: `ClickUp ${res.status}: ${responseBody.slice(0, 200)}` }
     }
     return { ok: true }
   } catch (e) {
