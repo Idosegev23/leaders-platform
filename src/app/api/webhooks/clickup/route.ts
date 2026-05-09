@@ -160,20 +160,27 @@ export async function POST(request: Request) {
       : typeof first?.before === 'string' ? first.before : null
 
     // ── Brief-send trigger: status flipped to "📤 שלח בריף" ──
-    // Fire-and-forget. The trigger handler validates the lead, sends
-    // the brief if all fields are present, then either advances to
-    // "ליד אחרי שיחה" (success) or reverts to beforeClickUpStatus
-    // (failure) — and posts a comment on the task in either case.
+    // AWAIT the trigger so Vercel doesn't kill the function before the
+    // Drive + Gmail calls finish. The webhook can take ~3-5s — well
+    // within ClickUp's 10s delivery timeout. (An earlier "void
+    // fire-and-forget" version produced no DB writes / no comment
+    // because the serverless instance terminated immediately after
+    // returning 200.)
+    //
     // Skip the reverse-sync below for THIS specific transition because
     // the trigger handler is the one driving the next status change.
     if (taskId && newClickUpStatus === BRIEF_TRIGGER_STATUS) {
       briefTriggerFired = true
-      void runClickUpSendBriefTrigger({
-        taskId,
-        leadId: entityId,
-        triggeredByEmail: actor.email,
-        previousStatus: beforeClickUpStatus,
-      })
+      try {
+        await runClickUpSendBriefTrigger({
+          taskId,
+          leadId: entityId,
+          triggeredByEmail: actor.email,
+          previousStatus: beforeClickUpStatus,
+        })
+      } catch (e) {
+        console.error('[clickup-webhook] runClickUpSendBriefTrigger threw:', e)
+      }
     }
 
     if (!briefTriggerFired && newClickUpStatus) {
