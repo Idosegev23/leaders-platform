@@ -69,6 +69,8 @@ export async function updateSession(request: NextRequest) {
     '/generate', '/edit',
     // New hub rubrics (Phases 2–5)
     '/inner-meeting', '/summary', '/send',
+    // Hub transparency: dedicated per-brief view (employees only)
+    '/briefs',
     // Deep Research Agent (Phase 8)
     '/research-hub',
     // Note: /forms/* is intentionally public — clients without an account

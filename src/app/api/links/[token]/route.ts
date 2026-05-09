@@ -146,24 +146,30 @@ export async function PATCH(
 
   // ─── Native side effects on completion / failure (replaces Make.com) ───
   // For client-brief links specifically, run the Drive + Gmail + ClickUp
-  // cascade. All best-effort: failures are logged but the PATCH still
-  // returns 200 because the link's primary state was already saved above.
+  // cascade. We MUST await — Vercel kills the function as soon as the
+  // PATCH returns 200, which leaves a fire-and-forget cascade dead in the
+  // water (mgmt mail never goes out, Drive doc never written). Same fix
+  // pattern as the ClickUp send-brief webhook (commit c1e3063).
+  // The cascade never throws to the caller; failures are logged inside.
   const docType = (existingLink.document_types as { slug?: string; name?: string } | null) ?? {}
   if (docType.slug === 'client-brief' && (status === 'completed' || status === 'failed')) {
-    runClientBriefCascade({
-      linkId: existingLink.id,
-      token: existingLink.token,
-      clientName: existingLink.client_name || 'לקוח',
-      clientEmail: existingLink.client_email || null,
-      senderEmail: existingLink.created_by_email || null,
-      senderName: existingLink.created_by_name || null,
-      leadId: existingLink.lead_id || null,
-      driveFolderId: (currentMeta.brief_drive_folder_id as string | undefined) || null,
-      submissionData: submission_data || (currentMeta.submission_data as Record<string, unknown> | undefined) || null,
-      transition: status,
-    }).catch((e) => {
+    try {
+      await runClientBriefCascade({
+        linkId: existingLink.id,
+        token: existingLink.token,
+        clientName: existingLink.client_name || 'לקוח',
+        clientEmail: existingLink.client_email || null,
+        senderEmail: existingLink.created_by_email || null,
+        senderName: existingLink.created_by_name || null,
+        leadId: existingLink.lead_id || null,
+        driveFolderId: (currentMeta.brief_drive_folder_id as string | undefined) || null,
+        submissionData: submission_data || (currentMeta.submission_data as Record<string, unknown> | undefined) || null,
+        language: (currentMeta.language as 'he' | 'en' | undefined) || 'he',
+        transition: status,
+      })
+    } catch (e) {
       console.error('[brief-cascade] unexpected error:', e instanceof Error ? e.message : e)
-    })
+    }
   }
 
   return NextResponse.json({ ok: true })
@@ -197,6 +203,7 @@ async function runClientBriefCascade(params: {
   leadId: string | null
   driveFolderId: string | null
   submissionData: Record<string, unknown> | null
+  language?: 'he' | 'en'
   transition: 'completed' | 'failed'
 }): Promise<void> {
   const tag = `[brief-cascade:${params.token.slice(0, 8)}]`
@@ -212,6 +219,43 @@ async function runClientBriefCascade(params: {
   // doesn't promise a workspace link yet.
   const workspaceLink: string | null = null
 
+  // 0. Write the brief content as a Google Doc into the brief folder so
+  //    the team has something to read in Drive (replaces the Make.com
+  //    "create doc" step). Best-effort; mgmt mail still goes out if this
+  //    fails. Only on completion — failed/abandoned briefs have no useful
+  //    payload to write.
+  let briefDocLink: string | null = null
+  if (
+    params.transition === 'completed' &&
+    params.driveFolderId &&
+    params.submissionData &&
+    Object.keys(params.submissionData).length > 0
+  ) {
+    try {
+      const { uploadBriefDocToFolder } = await import('@/lib/brief/upload-doc')
+      const result = await uploadBriefDocToFolder({
+        folderId: params.driveFolderId,
+        clientName: params.clientName,
+        senderName: params.senderName,
+        senderEmail: params.senderEmail,
+        submission: params.submissionData as Parameters<typeof uploadBriefDocToFolder>[0]['submission'],
+        language: params.language,
+        submittedAt: new Date().toISOString(),
+      })
+      briefDocLink = result.viewLink
+      // Persist the doc link on the link's metadata so /briefs/[token] +
+      // the dashboard can show it.
+      const meta = await readLinkMeta(service, params.linkId)
+      await service
+        .from('document_links')
+        .update({ metadata: { ...meta, brief_drive_doc_id: result.fileId, brief_drive_doc_link: result.viewLink } })
+        .eq('id', params.linkId)
+      console.log(`${tag} brief doc ${result.reused ? 'reused' : 'created'}: ${result.viewLink}`)
+    } catch (e) {
+      console.warn(`${tag} brief doc upload failed (non-fatal):`, e instanceof Error ? e.message : e)
+    }
+  }
+
   // 1. Email management.
   try {
     const { sendToManagement } = await import('@/lib/gmail/management')
@@ -221,6 +265,7 @@ async function runClientBriefCascade(params: {
           clientEmail: params.clientEmail,
           senderName: params.senderName,
           workspaceLink,
+          briefDocLink,
           submissionPreview: summariseSubmission(params.submissionData),
         })
       : buildMgmtBriefFailedHtml({
@@ -282,6 +327,7 @@ async function runClientBriefCascade(params: {
         document_link_id: params.linkId,
         token: params.token,
         workspace_drive_folder_link: workspaceLink,
+        brief_drive_doc_link: briefDocLink,
       },
     })
   } catch (e) {
@@ -330,6 +376,7 @@ function buildMgmtBriefCompletedHtml(opts: {
   clientEmail: string | null
   senderName: string | null
   workspaceLink: string | null
+  briefDocLink: string | null
   submissionPreview: string
 }): string {
   return `<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:'Heebo',sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;">
@@ -338,6 +385,7 @@ function buildMgmtBriefCompletedHtml(opts: {
       <h1 style="font-size:22px;font-weight:700;margin:0 0 12px;line-height:1.3;">בריף חדש התקבל</h1>
       <p style="font-size:15px;line-height:1.7;margin:0 0 16px;"><strong>${escapeHtml(opts.clientName)}</strong>${opts.clientEmail ? ` (${escapeHtml(opts.clientEmail)})` : ''} השלים את הבריף.${opts.senderName ? ` הופנה ע״י ${escapeHtml(opts.senderName)}.` : ''}</p>
       ${opts.submissionPreview ? `<div style="background:#f9f7f2;border:1px solid #e8e5dc;border-radius:6px;padding:14px 16px;font-size:13px;line-height:1.8;margin-bottom:16px;">${opts.submissionPreview}</div>` : ''}
+      ${opts.briefDocLink ? `<p style="margin:18px 0;"><a href="${opts.briefDocLink}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:9999px;font-weight:600;display:inline-block;">פתח את הבריף ב-Google Doc ↗</a></p>` : ''}
       <div style="background:#fff8e1;border-right:3px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:20px 0;font-size:13px;line-height:1.7;">
         <strong>הצעד הבא:</strong> לעבור לתיקיית "בריפים ראשוניים" ב-Drive,
         לקרוא את הבריף, ואם הוא תקין — להעביר ידנית את התיקייה ל-"נסגר".

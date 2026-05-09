@@ -203,6 +203,18 @@ function TimelineItem({ row }: { row: ActivityRow }) {
             : row.action_type.includes('push')     ? 'bg-emerald-500'
             : 'bg-brand-primary/55'
 
+  // Surfaces a "View brief" link for client-brief lifecycle events that
+  // carry a token in their payload (sent / opened / completed / failed).
+  const briefToken = (row.payload as { token?: string } | null)?.token ?? null
+  const showBriefLink =
+    !!briefToken &&
+    (
+      row.action_type === 'client_brief_completed' ||
+      row.action_type === 'client_brief_failed' ||
+      row.action_type === 'client_brief_sent' ||
+      row.action_type.endsWith('_sent')
+    )
+
   return (
     <li className="relative ps-8">
       <span className={`absolute start-[1px] top-2 h-2.5 w-2.5 rounded-full ring-2 ring-brand-pearl ${dot}`} />
@@ -216,11 +228,21 @@ function TimelineItem({ row }: { row: ActivityRow }) {
       <p className="text-[14px] text-brand-primary leading-relaxed">
         {row.summary || row.action_type}
       </p>
-      {row.actor_name && (
-        <p className="mt-1 text-[11px] text-brand-primary/55 font-rubik tracking-[0.02em] font-medium">
-          {row.actor_name}{row.actor_email ? ` · ${row.actor_email}` : ''}
-        </p>
-      )}
+      <div className="mt-1 flex items-center gap-3 flex-wrap">
+        {row.actor_name && (
+          <span className="text-[11px] text-brand-primary/55 font-rubik tracking-[0.02em] font-medium">
+            {row.actor_name}{row.actor_email ? ` · ${row.actor_email}` : ''}
+          </span>
+        )}
+        {showBriefLink && (
+          <Link
+            href={`/briefs/${briefToken}`}
+            className="text-[11px] text-brand-accent hover:underline font-rubik tracking-[0.04em] font-medium"
+          >
+            צפה בבריף ↗
+          </Link>
+        )}
+      </div>
     </li>
   )
 }

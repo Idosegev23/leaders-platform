@@ -269,23 +269,43 @@ export default function SendLinkClient({
           <p className="text-sm text-muted-foreground text-center py-6">עדיין לא יצרת לינקים</p>
         ) : (
           <div className="space-y-2">
-            {recentLinks.map((link) => (
-              <div
-                key={link.id}
-                className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{link.client_name ?? '(ללא שם)'}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(link.created_at)}
-                    {link.client_email ? ` · ${link.client_email}` : ''}
-                  </p>
+            {recentLinks.map((link) => {
+              // Only completed client-brief links have something useful to show
+              // on the dedicated /briefs/[token] page (full submission body).
+              // For pending/opened links there's no submission yet, so we keep
+              // the row non-clickable.
+              const showBriefLink = docType.slug === 'client-brief' && link.status === 'completed'
+              const inner = (
+                <>
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{link.client_name ?? '(ללא שם)'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDate(link.created_at)}
+                      {link.client_email ? ` · ${link.client_email}` : ''}
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColor(link.status)}`}>
+                    {statusLabel(link.status)}
+                  </span>
+                </>
+              )
+              return showBriefLink ? (
+                <Link
+                  key={link.id}
+                  href={`/briefs/${link.token}`}
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  {inner}
+                </Link>
+              ) : (
+                <div
+                  key={link.id}
+                  className="flex items-center justify-between p-3 border rounded-lg"
+                >
+                  {inner}
                 </div>
-                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColor(link.status)}`}>
-                  {statusLabel(link.status)}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
