@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from 'react'
 import { PRICE_QUOTE_SERVICES } from '@/lib/constants/price-quote-services'
 import type { PriceQuoteData, BudgetItem, ContentMixItem } from '@/types/price-quote'
 import { SendForSignatureDialog } from '@/components/price-quote/SendForSignatureDialog'
+import CustomerPicker from '@/components/customer-picker/CustomerPicker'
 
 // ─── Default state ───
 const defaultBudgetItems: BudgetItem[] = [
@@ -41,6 +42,33 @@ export default function PriceQuotePage() {
   // ─── Generic field updater ───
   const updateField = useCallback(<K extends keyof PriceQuoteData>(key: K, value: PriceQuoteData[K]) => {
     setData(prev => ({ ...prev, [key]: value }))
+  }, [])
+
+  // ─── Customer picker handler ───
+  // When the user picks a client that has a completed brief, we pull
+  // submission_data and pre-fill the campaign name + contact name.
+  // Saves the team from re-typing what's already in the brief.
+  const onClientPicked = useCallback(async (opt: { name: string; briefLinkToken?: string }) => {
+    setData(prev => ({ ...prev, clientName: opt.name }))
+    if (!opt.briefLinkToken) return
+    try {
+      const res = await fetch(`/api/links/${opt.briefLinkToken}`)
+      if (!res.ok) return
+      const link = (await res.json()) as { metadata?: { submission_data?: Record<string, unknown> } }
+      const sub = link.metadata?.submission_data
+      if (!sub) return
+      const pick = (k: string) => (typeof sub[k] === 'string' ? (sub[k] as string) : '')
+      const candidates = {
+        campaignName: ['campaign_name', 'campaignName', 'campaign'],
+        contactName: ['contact_name', 'contactName', 'mainContact', 'pointOfContact'],
+      }
+      setData(prev => {
+        const next = { ...prev }
+        for (const c of candidates.campaignName) { const v = pick(c); if (v) { next.campaignName = v; break } }
+        for (const c of candidates.contactName)  { const v = pick(c); if (v) { next.contactName  = v; break } }
+        return next
+      })
+    } catch { /* non-fatal */ }
   }, [])
 
   // ─── Service toggle ───
@@ -253,7 +281,14 @@ export default function PriceQuotePage() {
           {/* Header fields */}
           <Section title="פרטים כלליים">
             <div className="grid grid-cols-2 gap-4">
-              <Input label="שם הלקוח" value={data.clientName} onChange={v => updateField('clientName', v)} required />
+              <CustomerPicker
+                value={data.clientName}
+                onChange={onClientPicked}
+                required
+                label="שם הלקוח"
+                placeholder="בחר לקוח קיים או הוסף חדש"
+                className="col-span-1"
+              />
               <Input label="שם הקמפיין" value={data.campaignName} onChange={v => updateField('campaignName', v)} required />
               <Input label="תאריך" value={data.date} onChange={v => updateField('date', v)} />
               <Input label="שם איש קשר" value={data.contactName} onChange={v => updateField('contactName', v)} />

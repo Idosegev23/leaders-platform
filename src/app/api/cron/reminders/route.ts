@@ -23,10 +23,6 @@ export const maxDuration = 60
  * Auth: Vercel Cron adds `Authorization: Bearer ${CRON_SECRET}` when the
  * env var is set. We only gate when the var is present — dev convenience.
  */
-const REMINDERS_WEBHOOK =
-  process.env.REMINDERS_WEBHOOK_URL ||
-  'https://hook.eu2.make.com/PLACEHOLDER_REPLACE_ME_reminders'
-
 function isAuthorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) return true
@@ -433,28 +429,10 @@ export async function GET(request: Request) {
   }
 
   // Native batch for #2 + #3 — single Gmail to management with the full
-  // reminders list. Replaces the legacy Make.com webhook (REMINDERS_WEBHOOK
-  // is preserved as an opt-in escape hatch but defaults to skipped now).
-  let webhookStatus: 'skipped' | 'ok' | 'failed' = 'skipped'
+  // reminders list. (Make.com integration was removed entirely on
+  // 2026-05-09 per user spec — no remaining external webhook here.)
+  let mailDelivery: 'skipped' | 'ok' | 'failed' = 'skipped'
   if (webhookReminders.length > 0) {
-    // Optional: still call the legacy webhook if explicitly configured.
-    if (process.env.REMINDERS_WEBHOOK_URL && !REMINDERS_WEBHOOK.includes('PLACEHOLDER')) {
-      try {
-        const res = await fetch(REMINDERS_WEBHOOK, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            generated_at: new Date().toISOString(),
-            reminders: webhookReminders,
-          }),
-        })
-        webhookStatus = res.ok ? 'ok' : 'failed'
-      } catch (e) {
-        console.error('Reminders webhook failed (non-fatal — native mail still runs):', e)
-        webhookStatus = 'failed'
-      }
-    }
-    // Native: email management with the consolidated list.
     try {
       const { sendToManagement } = await import('@/lib/gmail/management')
       const html = buildRemindersDigestHtml(webhookReminders)
@@ -462,9 +440,11 @@ export async function GET(request: Request) {
         subject: `📋 תזכורות יומיות — ${webhookReminders.length} פריטים`,
         html,
       })
+      mailDelivery = result.sent > 0 ? 'ok' : 'failed'
       console.log(`[reminders] mgmt mail: sent=${result.sent} failed=${result.failed.length}`)
     } catch (e) {
       console.error('[reminders] mgmt mail failed:', e instanceof Error ? e.message : e)
+      mailDelivery = 'failed'
     }
   }
 
@@ -480,8 +460,8 @@ export async function GET(request: Request) {
       failed: failedBriefs,
       details: briefResults,
     },
-    webhook: {
-      status: webhookStatus,
+    digest_mail: {
+      status: mailDelivery,
       count: webhookReminders.length,
       by_kind: webhookReminders.reduce<Record<string, number>>((acc, r) => {
         acc[r.kind] = (acc[r.kind] ?? 0) + 1
