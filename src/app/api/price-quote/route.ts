@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
+import { generatePriceQuotePages, generateAllQuotePages } from '@/templates/price-quote/price-quote-template'
 import { generateMultiPagePdf } from '@/lib/playwright/pdf'
 import type { PriceQuoteData } from '@/types/price-quote'
 
@@ -76,7 +76,9 @@ export async function GET(request: NextRequest) {
   try {
     const data: PriceQuoteData = JSON.parse(dataParam)
     const origin = request.headers.get('origin') || request.headers.get('referer')?.replace(/\/[^/]*$/, '') || 'http://localhost:3000'
-    const pages = generatePriceQuotePages(data, origin)
+    // For the preview we always render all 4 pages — disabled pages stay visible
+    // in the editor so the user can keep editing them before re-enabling.
+    const pages = generateAllQuotePages(data, origin)
     const idx = Math.max(0, Math.min(pageNum - 1, pages.length - 1))
 
     return new NextResponse(pages[idx], {

@@ -1,8 +1,18 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import { PRICE_QUOTE_SERVICES } from '@/lib/constants/price-quote-services'
-import type { PriceQuoteData, BudgetItem, ContentMixItem } from '@/types/price-quote'
+import { PRICE_QUOTE_SERVICES, LEADERS_ABOUT_TEXT, LEGAL_TERMS, PAYMENT_TERMS, CLIENT_DECLARATION } from '@/lib/constants/price-quote-services'
+import type {
+  PriceQuoteData,
+  BudgetItem,
+  ContentMixItem,
+  CustomSection,
+  CustomSectionStyle,
+  CustomSectionType,
+  SectionToggles,
+  QuoteService,
+  PageIndex,
+} from '@/types/price-quote'
 import { SendForSignatureDialog } from '@/components/price-quote/SendForSignatureDialog'
 import CustomerPicker from '@/components/customer-picker/CustomerPicker'
 
@@ -15,6 +25,25 @@ const defaultBudgetItems: BudgetItem[] = [
 const defaultContentMix: ContentMixItem[] = [
   { detail: '', monthlyPerInfluencer: '', total: '' },
 ]
+
+const defaultToggles: SectionToggles = {
+  aboutLeaders: true,
+  services: true,
+  budget: true,
+  contentMix: true,
+  kpi: true,
+  deliverables: true,
+  paymentTerms: true,
+  declaration: true,
+  signature: true,
+}
+
+const defaultServices: QuoteService[] = PRICE_QUOTE_SERVICES.map(s => ({
+  id: s.id,
+  title: s.title,
+  description: s.description,
+  selected: s.defaultSelected,
+}))
 
 const defaultData: PriceQuoteData = {
   clientName: '',
@@ -29,6 +58,20 @@ const defaultData: PriceQuoteData = {
   platform: 'אינסטגרם / טיקטוק',
   contractPeriod: '',
   additionalNotes: [],
+  enabledSections: { ...defaultToggles },
+  enabledPages: { 1: true, 2: true, 3: true, 4: true },
+  aboutLeadersText: LEADERS_ABOUT_TEXT,
+  servicesTitle: 'ניהול שוטף',
+  deliverablesTitle: 'תוצרים ושירותים',
+  legalTerms: [...LEGAL_TERMS],
+  paymentTerms: { ...PAYMENT_TERMS },
+  clientDeclarationText: CLIENT_DECLARATION,
+  customSections: [],
+  services: defaultServices,
+}
+
+function genId(): string {
+  return `cs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 }
 
 export default function PriceQuotePage() {
@@ -43,6 +86,22 @@ export default function PriceQuotePage() {
   const updateField = useCallback(<K extends keyof PriceQuoteData>(key: K, value: PriceQuoteData[K]) => {
     setData(prev => ({ ...prev, [key]: value }))
   }, [])
+
+  const toggleSection = useCallback((key: keyof SectionToggles) => {
+    setData(prev => {
+      const current = prev.enabledSections ?? defaultToggles
+      const currentValue = current[key] ?? defaultToggles[key]
+      return {
+        ...prev,
+        enabledSections: { ...current, [key]: !currentValue },
+      }
+    })
+  }, [])
+
+  const isSectionOn = useCallback(
+    (key: keyof SectionToggles) => data.enabledSections?.[key] ?? defaultToggles[key],
+    [data.enabledSections],
+  )
 
   // ─── Customer picker handler ───
   // When the user picks a client that has a completed brief, we pull
@@ -71,15 +130,50 @@ export default function PriceQuotePage() {
     } catch { /* non-fatal */ }
   }, [])
 
-  // ─── Service toggle ───
-  const toggleService = useCallback((serviceId: string) => {
-    setData(prev => ({
-      ...prev,
-      selectedServiceIds: prev.selectedServiceIds.includes(serviceId)
-        ? prev.selectedServiceIds.filter(id => id !== serviceId)
-        : [...prev.selectedServiceIds, serviceId],
-    }))
+  // ─── Service list (editable) ───
+  const updateServiceField = useCallback(<K extends keyof QuoteService>(id: string, field: K, value: QuoteService[K]) => {
+    setData(prev => {
+      const services = (prev.services ?? defaultServices).map(s =>
+        s.id === id ? { ...s, [field]: value } : s,
+      )
+      // Keep legacy `selectedServiceIds` in sync for any back-compat consumers.
+      const selectedServiceIds = services.filter(s => s.selected).map(s => s.id)
+      return { ...prev, services, selectedServiceIds }
+    })
   }, [])
+
+  const addService = useCallback(() => {
+    setData(prev => {
+      const services = [
+        ...(prev.services ?? defaultServices),
+        { id: `svc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, title: '', description: '', selected: true },
+      ]
+      const selectedServiceIds = services.filter(s => s.selected).map(s => s.id)
+      return { ...prev, services, selectedServiceIds }
+    })
+  }, [])
+
+  const removeService = useCallback((id: string) => {
+    setData(prev => {
+      const services = (prev.services ?? defaultServices).filter(s => s.id !== id)
+      const selectedServiceIds = services.filter(s => s.selected).map(s => s.id)
+      return { ...prev, services, selectedServiceIds }
+    })
+  }, [])
+
+  // ─── Page-level enable/disable ───
+  const togglePage = useCallback((page: PageIndex) => {
+    setData(prev => {
+      const current = prev.enabledPages ?? { 1: true, 2: true, 3: true, 4: true }
+      const currentValue = current[page] ?? true
+      return { ...prev, enabledPages: { ...current, [page]: !currentValue } }
+    })
+  }, [])
+
+  const isPageOn = useCallback(
+    (page: PageIndex) => data.enabledPages?.[page] ?? true,
+    [data.enabledPages],
+  )
 
   // ─── Budget items ───
   const updateBudgetItem = useCallback((index: number, field: keyof BudgetItem, value: string) => {
@@ -127,6 +221,29 @@ export default function PriceQuotePage() {
     }))
   }, [])
 
+  // ─── Legal terms ───
+  const updateLegalTerm = useCallback((index: number, value: string) => {
+    setData(prev => {
+      const arr = [...(prev.legalTerms ?? LEGAL_TERMS)]
+      arr[index] = value
+      return { ...prev, legalTerms: arr }
+    })
+  }, [])
+
+  const addLegalTerm = useCallback(() => {
+    setData(prev => ({
+      ...prev,
+      legalTerms: [...(prev.legalTerms ?? LEGAL_TERMS), ''],
+    }))
+  }, [])
+
+  const removeLegalTerm = useCallback((index: number) => {
+    setData(prev => ({
+      ...prev,
+      legalTerms: (prev.legalTerms ?? LEGAL_TERMS).filter((_, i) => i !== index),
+    }))
+  }, [])
+
   // ─── Additional notes ───
   const addNote = useCallback(() => {
     setData(prev => ({ ...prev, additionalNotes: [...prev.additionalNotes, ''] }))
@@ -144,6 +261,71 @@ export default function PriceQuotePage() {
     setData(prev => ({
       ...prev,
       additionalNotes: prev.additionalNotes.filter((_, i) => i !== index),
+    }))
+  }, [])
+
+  // ─── Custom sections ───
+  const addCustomSection = useCallback((page: 1 | 2 | 3 | 4) => {
+    setData(prev => ({
+      ...prev,
+      customSections: [
+        ...(prev.customSections ?? []),
+        {
+          id: genId(),
+          page,
+          style: 'orange',
+          type: 'bullets',
+          title: 'קטע חדש',
+          items: [''],
+          enabled: true,
+        } satisfies CustomSection,
+      ],
+    }))
+  }, [])
+
+  const updateCustomSection = useCallback(<K extends keyof CustomSection>(id: string, field: K, value: CustomSection[K]) => {
+    setData(prev => ({
+      ...prev,
+      customSections: (prev.customSections ?? []).map(s =>
+        s.id === id ? { ...s, [field]: value } : s,
+      ),
+    }))
+  }, [])
+
+  const removeCustomSection = useCallback((id: string) => {
+    setData(prev => ({
+      ...prev,
+      customSections: (prev.customSections ?? []).filter(s => s.id !== id),
+    }))
+  }, [])
+
+  const updateCustomSectionItem = useCallback((id: string, index: number, value: string) => {
+    setData(prev => ({
+      ...prev,
+      customSections: (prev.customSections ?? []).map(s => {
+        if (s.id !== id) return s
+        const items = [...s.items]
+        items[index] = value
+        return { ...s, items }
+      }),
+    }))
+  }, [])
+
+  const addCustomSectionItem = useCallback((id: string) => {
+    setData(prev => ({
+      ...prev,
+      customSections: (prev.customSections ?? []).map(s =>
+        s.id === id ? { ...s, items: [...s.items, ''] } : s,
+      ),
+    }))
+  }, [])
+
+  const removeCustomSectionItem = useCallback((id: string, index: number) => {
+    setData(prev => ({
+      ...prev,
+      customSections: (prev.customSections ?? []).map(s =>
+        s.id === id ? { ...s, items: s.items.filter((_, i) => i !== index) } : s,
+      ),
     }))
   }, [])
 
@@ -206,6 +388,10 @@ export default function PriceQuotePage() {
       setIsGenerating(false)
     }
   }, [data])
+
+  // Lookup which custom sections belong to which page
+  const customSectionsByPage = (page: 1 | 2 | 3 | 4) =>
+    (data.customSections ?? []).filter(s => s.page === page)
 
   return (
     <div dir="rtl" className="min-h-screen bg-gray-50">
@@ -297,33 +483,132 @@ export default function PriceQuotePage() {
             </div>
           </Section>
 
-          {/* Services checkboxes */}
-          <Section title="שירותים (ניהול שוטף)">
-            <div className="space-y-2">
-              {PRICE_QUOTE_SERVICES.map(service => (
-                <label
-                  key={service.id}
-                  className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-orange-300 cursor-pointer transition"
-                >
-                  <input
-                    type="checkbox"
-                    checked={data.selectedServiceIds.includes(service.id)}
-                    onChange={() => toggleService(service.id)}
-                    className="mt-1 w-4 h-4 accent-orange-500"
-                  />
-                  <div>
-                    <div className="font-semibold text-sm text-gray-800">{service.title}</div>
-                    {service.description && (
-                      <div className="text-xs text-gray-500 mt-0.5 line-clamp-2">{service.description}</div>
-                    )}
-                  </div>
-                </label>
-              ))}
+          {/* Page-level toggles — entirely remove a page from the PDF */}
+          <Section title="הכללת עמודים ב-PDF">
+            <div className="text-xs text-gray-500 mb-3">
+              עמוד שמכובה לא יופיע ב-PDF הסופי. בתצוגה המקדימה משמאל הוא עדיין גלוי כדי שתוכלי להמשיך לערוך לפני שמחזירים.
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {([1, 2, 3, 4] as PageIndex[]).map(p => {
+                const on = isPageOn(p)
+                return (
+                  <button
+                    key={p}
+                    onClick={() => togglePage(p)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition border ${
+                      on
+                        ? 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
+                        : 'bg-gray-100 border-gray-300 text-gray-500 hover:bg-gray-200'
+                    }`}
+                    title={on ? 'לחיצה כדי להסיר עמוד מה-PDF' : 'לחיצה כדי להחזיר עמוד ל-PDF'}
+                  >
+                    {on ? '● ' : '○ '}עמוד {p}
+                  </button>
+                )
+              })}
             </div>
           </Section>
 
+          {/* ═══ PAGE 1 ═══ */}
+          <PageDivider page={1} />
+
+          {/* About Leaders — editable */}
+          <Section
+            title='פסקת "לידרס" (תיאור החברה)'
+            page={1}
+            on={isSectionOn('aboutLeaders')}
+            onToggle={() => toggleSection('aboutLeaders')}
+          >
+            <Textarea
+              label="טקסט (פסקאות מופרדות בשורה ריקה)"
+              value={data.aboutLeadersText ?? ''}
+              onChange={v => updateField('aboutLeadersText', v)}
+              rows={8}
+            />
+          </Section>
+
+          {/* Services checkboxes */}
+          <Section
+            title="שירותים (ניהול שוטף)"
+            page={1}
+            on={isSectionOn('services')}
+            onToggle={() => toggleSection('services')}
+          >
+            <Input
+              label="כותרת הקטע"
+              value={data.servicesTitle ?? ''}
+              onChange={v => updateField('servicesTitle', v)}
+              placeholder="ניהול שוטף"
+            />
+            <div className="space-y-3 mt-3">
+              {(data.services ?? defaultServices).map(service => (
+                <div
+                  key={service.id}
+                  className={`rounded-lg border p-3 transition ${
+                    service.selected ? 'border-orange-300 bg-orange-50/30' : 'border-gray-200 bg-gray-50/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      type="checkbox"
+                      checked={service.selected}
+                      onChange={e => updateServiceField(service.id, 'selected', e.target.checked)}
+                      className="w-4 h-4 accent-orange-500"
+                      title={service.selected ? 'יוצג בהצעה' : 'לא יוצג'}
+                    />
+                    <input
+                      value={service.title}
+                      onChange={e => updateServiceField(service.id, 'title', e.target.value)}
+                      placeholder="כותרת שירות"
+                      className="flex-1 border border-gray-300 rounded-md px-2 py-1.5 text-sm font-semibold focus:border-orange-400 outline-none"
+                    />
+                    <button
+                      onClick={() => removeService(service.id)}
+                      className="text-red-400 hover:text-red-600 text-lg px-1"
+                      title="הסר שירות"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <textarea
+                    value={service.description}
+                    onChange={e => updateServiceField(service.id, 'description', e.target.value)}
+                    placeholder="תיאור (יוצג אחרי המקף)"
+                    rows={2}
+                    className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:border-orange-400 outline-none"
+                  />
+                </div>
+              ))}
+              <button
+                onClick={addService}
+                className="text-sm text-orange-600 hover:text-orange-700 font-medium"
+              >
+                + הוסף שירות
+              </button>
+            </div>
+          </Section>
+
+          <CustomSectionsPanel
+            page={1}
+            sections={customSectionsByPage(1)}
+            onAdd={() => addCustomSection(1)}
+            onUpdate={updateCustomSection}
+            onRemove={removeCustomSection}
+            onUpdateItem={updateCustomSectionItem}
+            onAddItem={addCustomSectionItem}
+            onRemoveItem={removeCustomSectionItem}
+          />
+
+          {/* ═══ PAGE 2 ═══ */}
+          <PageDivider page={2} />
+
           {/* Budget table */}
-          <Section title="תקציב">
+          <Section
+            title="תקציב"
+            page={2}
+            on={isSectionOn('budget')}
+            onToggle={() => toggleSection('budget')}
+          >
             {data.budgetItems.map((item, i) => (
               <div key={i} className="flex gap-2 mb-2 items-end">
                 <Input label="שירות" value={item.service} onChange={v => updateBudgetItem(i, 'service', v)} className="flex-1" />
@@ -341,7 +626,12 @@ export default function PriceQuotePage() {
           </Section>
 
           {/* Content mix */}
-          <Section title="תמהיל תוכן">
+          <Section
+            title="תמהיל תוכן"
+            page={2}
+            on={isSectionOn('contentMix')}
+            onToggle={() => toggleSection('contentMix')}
+          >
             {data.contentMix.map((item, i) => (
               <div key={i} className="flex gap-2 mb-2 items-end">
                 <Input label="פירוט" value={item.detail} onChange={v => updateContentMix(i, 'detail', v)} className="flex-1" />
@@ -356,28 +646,149 @@ export default function PriceQuotePage() {
           </Section>
 
           {/* KPI */}
-          <Section title="KPI">
+          <Section
+            title="KPI"
+            page={2}
+            on={isSectionOn('kpi')}
+            onToggle={() => toggleSection('kpi')}
+          >
             <div className="grid grid-cols-2 gap-4">
               <Input label="CPV" value={data.kpi.cpv} onChange={v => updateField('kpi', { ...data.kpi, cpv: v })} placeholder="0.18" />
               <Input label="כמות חשיפות משוערת" value={data.kpi.estimatedImpressions} onChange={v => updateField('kpi', { ...data.kpi, estimatedImpressions: v })} placeholder="700,000" />
             </div>
           </Section>
 
-          {/* Additional notes */}
-          <Section title="הערות נוספות (עמוד תוצרים)">
-            {data.additionalNotes.map((note, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <input
-                  value={note}
-                  onChange={e => updateNote(i, e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  placeholder="הערה נוספת..."
-                />
-                <button onClick={() => removeNote(i)} className="text-red-400 hover:text-red-600 text-lg">✕</button>
-              </div>
-            ))}
-            <button onClick={addNote} className="text-sm text-orange-600 hover:text-orange-700 font-medium">+ הערה</button>
+          <CustomSectionsPanel
+            page={2}
+            sections={customSectionsByPage(2)}
+            onAdd={() => addCustomSection(2)}
+            onUpdate={updateCustomSection}
+            onRemove={removeCustomSection}
+            onUpdateItem={updateCustomSectionItem}
+            onAddItem={addCustomSectionItem}
+            onRemoveItem={removeCustomSectionItem}
+          />
+
+          {/* ═══ PAGE 3 ═══ */}
+          <PageDivider page={3} />
+
+          {/* Deliverables block — title + per-deliverable notes + legal terms */}
+          <Section
+            title="תוצרים, תנאים וסעיפים משפטיים"
+            page={3}
+            on={isSectionOn('deliverables')}
+            onToggle={() => toggleSection('deliverables')}
+          >
+            <Input
+              label="כותרת הקטע"
+              value={data.deliverablesTitle ?? ''}
+              onChange={v => updateField('deliverablesTitle', v)}
+              placeholder="תוצרים ושירותים"
+            />
+
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-600 mb-2">הערות נוספות לתוצרים</div>
+              {data.additionalNotes.map((note, i) => (
+                <div key={i} className="flex gap-2 mb-2">
+                  <input
+                    value={note}
+                    onChange={e => updateNote(i, e.target.value)}
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="הערה נוספת..."
+                  />
+                  <button onClick={() => removeNote(i)} className="text-red-400 hover:text-red-600 text-lg">✕</button>
+                </div>
+              ))}
+              <button onClick={addNote} className="text-sm text-orange-600 hover:text-orange-700 font-medium">+ הערה</button>
+            </div>
+
+            <div className="mt-5">
+              <div className="text-xs font-semibold text-gray-600 mb-2">סעיפים משפטיים (ניתן לערוך/למחוק/להוסיף)</div>
+              {(data.legalTerms ?? LEGAL_TERMS).map((term, i) => (
+                <div key={i} className="flex gap-2 mb-2 items-start">
+                  <textarea
+                    value={term}
+                    onChange={e => updateLegalTerm(i, e.target.value)}
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    rows={2}
+                  />
+                  <button onClick={() => removeLegalTerm(i)} className="text-red-400 hover:text-red-600 text-lg pt-2">✕</button>
+                </div>
+              ))}
+              <button onClick={addLegalTerm} className="text-sm text-orange-600 hover:text-orange-700 font-medium">+ סעיף משפטי</button>
+            </div>
           </Section>
+
+          <CustomSectionsPanel
+            page={3}
+            sections={customSectionsByPage(3)}
+            onAdd={() => addCustomSection(3)}
+            onUpdate={updateCustomSection}
+            onRemove={removeCustomSection}
+            onUpdateItem={updateCustomSectionItem}
+            onAddItem={addCustomSectionItem}
+            onRemoveItem={removeCustomSectionItem}
+          />
+
+          {/* ═══ PAGE 4 ═══ */}
+          <PageDivider page={4} />
+
+          <Section
+            title="תוקף ותנאי תשלום"
+            page={4}
+            on={isSectionOn('paymentTerms')}
+            onToggle={() => toggleSection('paymentTerms')}
+          >
+            <Textarea
+              label="תנאי הפעלה"
+              value={data.paymentTerms?.activation ?? ''}
+              onChange={v => updateField('paymentTerms', { ...(data.paymentTerms ?? PAYMENT_TERMS), activation: v })}
+              rows={2}
+            />
+            <div className="h-2" />
+            <Textarea
+              label="תנאי תשלום"
+              value={data.paymentTerms?.payment ?? ''}
+              onChange={v => updateField('paymentTerms', { ...(data.paymentTerms ?? PAYMENT_TERMS), payment: v })}
+              rows={2}
+            />
+          </Section>
+
+          <Section
+            title="הצהרה ואישור הלקוח"
+            page={4}
+            on={isSectionOn('declaration')}
+            onToggle={() => toggleSection('declaration')}
+          >
+            <Textarea
+              label="טקסט ההצהרה"
+              value={data.clientDeclarationText ?? ''}
+              onChange={v => updateField('clientDeclarationText', v)}
+              rows={3}
+            />
+          </Section>
+
+          <Section
+            title="בלוק חתימה"
+            page={4}
+            on={isSectionOn('signature')}
+            onToggle={() => toggleSection('signature')}
+          >
+            <div className="text-xs text-gray-500">
+              שדות החתימה מתמלאים אוטומטית כשהלקוח חותם דרך הקישור. בכיבוי הקטע — בלוק החתימה לא יופיע בהצעה.
+            </div>
+          </Section>
+
+          <CustomSectionsPanel
+            page={4}
+            sections={customSectionsByPage(4)}
+            onAdd={() => addCustomSection(4)}
+            onUpdate={updateCustomSection}
+            onRemove={removeCustomSection}
+            onUpdateItem={updateCustomSectionItem}
+            onAddItem={addCustomSectionItem}
+            onRemoveItem={removeCustomSectionItem}
+          />
 
           <div className="h-10" />
         </div>
@@ -386,19 +797,27 @@ export default function PriceQuotePage() {
         <div className="w-1/2 bg-gray-200 border-r flex flex-col">
           {/* Page tabs */}
           <div className="flex gap-1 p-3 bg-gray-100 border-b">
-            {[1, 2, 3, 4].map(p => (
-              <button
-                key={p}
-                onClick={() => setPreviewPage(p)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
-                  previewPage === p
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                עמוד {p}
-              </button>
-            ))}
+            {([1, 2, 3, 4] as PageIndex[]).map(p => {
+              const active = previewPage === p
+              const inPdf = isPageOn(p)
+              return (
+                <button
+                  key={p}
+                  onClick={() => setPreviewPage(p)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition flex items-center gap-1.5 ${
+                    active
+                      ? 'bg-orange-500 text-white'
+                      : inPdf
+                        ? 'bg-white text-gray-600 hover:bg-gray-50'
+                        : 'bg-gray-200 text-gray-400 hover:bg-gray-100 line-through'
+                  }`}
+                  title={inPdf ? 'יופיע ב-PDF' : 'לא יופיע ב-PDF (מבוטל)'}
+                >
+                  עמוד {p}
+                  {!inPdf && <span className="text-[10px] no-underline">⊘</span>}
+                </button>
+              )
+            })}
           </div>
 
           {/* Preview iframe */}
@@ -421,11 +840,53 @@ export default function PriceQuotePage() {
 
 // ─── Reusable Components ───
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function PageDivider({ page }: { page: number }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <h2 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b border-gray-100">{title}</h2>
-      {children}
+    <div className="flex items-center gap-3 pt-2">
+      <div className="h-px flex-1 bg-gray-300" />
+      <span className="text-xs font-bold text-gray-500 px-3 py-1 rounded-full bg-gray-200">עמוד {page}</span>
+      <div className="h-px flex-1 bg-gray-300" />
+    </div>
+  )
+}
+
+function Section({
+  title,
+  children,
+  page,
+  on = true,
+  onToggle,
+}: {
+  title: string
+  children: React.ReactNode
+  page?: number
+  on?: boolean
+  onToggle?: () => void
+}) {
+  return (
+    <div className={`bg-white rounded-xl border ${on ? 'border-gray-200' : 'border-gray-200 opacity-60'} p-5`}>
+      <div className="flex items-center justify-between mb-4 pb-2 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-bold text-gray-800">{title}</h2>
+          {page !== undefined && (
+            <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">עמ' {page}</span>
+          )}
+        </div>
+        {onToggle && (
+          <button
+            onClick={onToggle}
+            className={`text-xs px-3 py-1 rounded-full font-medium transition ${
+              on
+                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+            }`}
+            title={on ? 'הסר קטע מההצעה' : 'הפעל קטע בחזרה'}
+          >
+            {on ? '● פעיל' : '○ מבוטל'}
+          </button>
+        )}
+      </div>
+      <div className={on ? '' : 'pointer-events-none select-none'}>{children}</div>
     </div>
   )
 }
@@ -456,6 +917,146 @@ function Input({
         placeholder={placeholder}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-400 outline-none transition"
       />
+    </div>
+  )
+}
+
+function Textarea({
+  label,
+  value,
+  onChange,
+  rows = 4,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  rows?: number
+  placeholder?: string
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-orange-400 focus:ring-1 focus:ring-orange-400 outline-none transition resize-y"
+      />
+    </div>
+  )
+}
+
+function CustomSectionsPanel({
+  page,
+  sections,
+  onAdd,
+  onUpdate,
+  onRemove,
+  onUpdateItem,
+  onAddItem,
+  onRemoveItem,
+}: {
+  page: 1 | 2 | 3 | 4
+  sections: CustomSection[]
+  onAdd: () => void
+  onUpdate: <K extends keyof CustomSection>(id: string, field: K, value: CustomSection[K]) => void
+  onRemove: (id: string) => void
+  onUpdateItem: (id: string, index: number, value: string) => void
+  onAddItem: (id: string) => void
+  onRemoveItem: (id: string, index: number) => void
+}) {
+  return (
+    <div className="bg-orange-50/50 rounded-xl border border-dashed border-orange-300 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-semibold text-orange-700">קטעים מותאמים בעמוד {page}</div>
+        <button
+          onClick={onAdd}
+          className="text-xs px-3 py-1.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-medium"
+        >
+          + הוסף קטע
+        </button>
+      </div>
+      {sections.length === 0 && (
+        <div className="text-xs text-gray-500 italic">אין קטעים מותאמים. לחצי על "+ הוסף קטע" כדי להוסיף בלוק חדש לעמוד {page}.</div>
+      )}
+      {sections.map(s => (
+        <div key={s.id} className="bg-white rounded-lg border border-orange-200 p-4 mb-3">
+          <div className="flex items-center justify-between mb-3">
+            <Input
+              label="כותרת"
+              value={s.title}
+              onChange={v => onUpdate(s.id, 'title', v)}
+              className="flex-1"
+            />
+            <div className="flex items-center gap-2 mr-3 pt-5">
+              <button
+                onClick={() => onUpdate(s.id, 'enabled', !s.enabled)}
+                className={`text-xs px-3 py-1 rounded-full font-medium transition ${
+                  s.enabled
+                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                    : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
+                }`}
+              >
+                {s.enabled ? '● פעיל' : '○ מבוטל'}
+              </button>
+              <button
+                onClick={() => onRemove(s.id)}
+                className="text-red-400 hover:text-red-600 text-lg"
+                title="מחק קטע"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">סגנון כותרת</label>
+              <select
+                value={s.style}
+                onChange={e => onUpdate(s.id, 'style', e.target.value as CustomSectionStyle)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="orange">כתום</option>
+                <option value="dark">כהה</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">סוג תוכן</label>
+              <select
+                value={s.type}
+                onChange={e => onUpdate(s.id, 'type', e.target.value as CustomSectionType)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="bullets">רשימת בולטים</option>
+                <option value="paragraphs">פסקאות</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {s.items.map((item, i) => (
+              <div key={i} className="flex gap-2 items-start">
+                <textarea
+                  value={item}
+                  onChange={e => onUpdateItem(s.id, i, e.target.value)}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  rows={s.type === 'paragraphs' ? 3 : 2}
+                  placeholder={s.type === 'paragraphs' ? 'תוכן הפסקה...' : 'פריט ברשימה...'}
+                />
+                {s.items.length > 1 && (
+                  <button onClick={() => onRemoveItem(s.id, i)} className="text-red-400 hover:text-red-600 text-lg pt-2">✕</button>
+                )}
+              </div>
+            ))}
+            <button onClick={() => onAddItem(s.id)} className="text-xs text-orange-600 hover:text-orange-700 font-medium">
+              + {s.type === 'paragraphs' ? 'פסקה' : 'בולט'}
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

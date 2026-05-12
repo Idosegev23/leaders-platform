@@ -4,7 +4,13 @@
  * Each page is a separate HTML string for multi-page PDF rendering.
  */
 
-import type { PriceQuoteData } from '@/types/price-quote'
+import type {
+  PriceQuoteData,
+  CustomSection,
+  SectionToggles,
+  QuoteService,
+  PageIndex,
+} from '@/types/price-quote'
 import {
   PRICE_QUOTE_SERVICES,
   COMPANY_INFO,
@@ -15,6 +21,39 @@ import {
 } from '@/lib/constants/price-quote-services'
 
 const LOGO_PATH = '/logoblack.png'
+
+const DEFAULT_TOGGLES: SectionToggles = {
+  aboutLeaders: true,
+  services: true,
+  budget: true,
+  contentMix: true,
+  kpi: true,
+  deliverables: true,
+  paymentTerms: true,
+  declaration: true,
+  signature: true,
+}
+
+function isOn(data: PriceQuoteData, key: keyof SectionToggles): boolean {
+  return data.enabledSections?.[key] ?? DEFAULT_TOGGLES[key]
+}
+
+function isPageOn(data: PriceQuoteData, page: PageIndex): boolean {
+  return data.enabledPages?.[page] ?? true
+}
+
+/** Resolve the page-1 services list — prefers the editable `data.services` over the canned constant. */
+function resolveServices(data: PriceQuoteData): QuoteService[] {
+  if (data.services && data.services.length > 0) {
+    return data.services
+  }
+  return PRICE_QUOTE_SERVICES.map(s => ({
+    id: s.id,
+    title: s.title,
+    description: s.description,
+    selected: data.selectedServiceIds.includes(s.id),
+  }))
+}
 
 /** Base CSS shared across all pages */
 function baseStyles(): string {
@@ -330,34 +369,69 @@ function wrapPage(bodyContent: string): string {
 </html>`
 }
 
+/** Render an editable custom section. */
+function renderCustomSection(s: CustomSection): string {
+  if (!s.enabled) return ''
+  const items = s.items.filter(item => item.trim() !== '')
+  if (items.length === 0 && !s.title.trim()) return ''
+
+  const headerClass = s.style === 'dark' ? 'section-header-dark' : 'section-header'
+  const titleHtml = s.title.trim() ? `<div class="${headerClass}">${escape(s.title)}</div>` : ''
+
+  if (s.type === 'paragraphs') {
+    const paras = items.map(p => `<p class="about-text">${escape(p)}</p>`).join('')
+    return `${titleHtml}${paras}`
+  }
+  // bullets
+  const lis = items.map(it => `<li>${escape(it)}</li>`).join('')
+  return `${titleHtml}<ul class="service-list">${lis}</ul>`
+}
+
+function renderCustomSectionsForPage(data: PriceQuoteData, page: 1 | 2 | 3 | 4): string {
+  const sections = (data.customSections ?? []).filter(s => s.page === page)
+  return sections.map(renderCustomSection).join('')
+}
+
 // ============ PAGE 1: About + Services ============
 
 export function generatePage1(data: PriceQuoteData, logoUrl: string): string {
-  const selectedServices = PRICE_QUOTE_SERVICES.filter(s =>
-    data.selectedServiceIds.includes(s.id)
-  )
+  const selectedServices = resolveServices(data).filter(s => s.selected)
 
   const serviceItems = selectedServices.map(s => {
-    if (s.description) {
-      return `<li><strong>${s.title}</strong> - ${s.description}</li>`
+    const title = escape(s.title.trim())
+    const description = s.description.trim()
+    if (description) {
+      return `<li><strong>${title}</strong> - ${escape(description)}</li>`
     }
-    return `<li><strong>${s.title}</strong></li>`
+    return `<li><strong>${title}</strong></li>`
   }).join('')
 
-  const aboutParagraphs = LEADERS_ABOUT_TEXT.split('\n\n').map(p =>
-    `<p class="about-text">${p.trim()}</p>`
+  const aboutSource = (data.aboutLeadersText && data.aboutLeadersText.trim())
+    ? data.aboutLeadersText
+    : LEADERS_ABOUT_TEXT
+  const aboutParagraphs = aboutSource.split('\n\n').map(p =>
+    `<p class="about-text">${escape(p.trim())}</p>`
   ).join('')
+
+  const showAbout = isOn(data, 'aboutLeaders')
+  const showServices = isOn(data, 'services')
+  const servicesTitle = data.servicesTitle?.trim() || 'ניהול שוטף'
+
+  const aboutBlock = showAbout
+    ? `<div class="section-header">לידרס</div>${aboutParagraphs}`
+    : ''
+
+  const servicesBlock = (showServices && serviceItems)
+    ? `<div class="section-header">${escape(servicesTitle)}</div>
+       <ul class="service-list">${serviceItems}</ul>`
+    : ''
 
   return wrapPage(`
     ${headerHtml(data, logoUrl)}
     <div class="content">
-      <div class="section-header">לידרס</div>
-      ${aboutParagraphs}
-
-      <div class="section-header">ניהול שוטף</div>
-      <ul class="service-list">
-        ${serviceItems}
-      </ul>
+      ${aboutBlock}
+      ${servicesBlock}
+      ${renderCustomSectionsForPage(data, 1)}
     </div>
     ${footerHtml()}
   `)
@@ -366,25 +440,27 @@ export function generatePage1(data: PriceQuoteData, logoUrl: string): string {
 // ============ PAGE 2: Budget + Content Mix + KPI ============
 
 export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
+  const showBudget = isOn(data, 'budget')
+  const showContentMix = isOn(data, 'contentMix')
+  const showKpi = isOn(data, 'kpi')
+
   const budgetRows = data.budgetItems.map(item => `
     <tr>
-      <td>${item.service}</td>
-      <td>${item.detail}</td>
-      <td>${item.price || ''}</td>
+      <td>${escape(item.service)}</td>
+      <td>${escape(item.detail)}</td>
+      <td>${escape(item.price || '')}</td>
     </tr>
   `).join('')
 
   const contentRows = data.contentMix.map(item => `
     <tr>
-      <td>${item.detail}</td>
-      <td>${item.monthlyPerInfluencer}</td>
-      <td>${item.total}</td>
+      <td>${escape(item.detail)}</td>
+      <td>${escape(item.monthlyPerInfluencer)}</td>
+      <td>${escape(item.total)}</td>
     </tr>
   `).join('')
 
-  return wrapPage(`
-    ${headerHtml(data, logoUrl)}
-    <div class="content">
+  const budgetBlock = showBudget ? `
       <div class="section-header">תקציב</div>
       <table class="quote-table">
         <thead>
@@ -398,12 +474,13 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
           ${budgetRows}
           <tr class="total-row">
             <td colspan="2">סה"כ תקציב (לפני מע"מ)</td>
-            <td>${data.totalBudget}</td>
+            <td>${escape(data.totalBudget)}</td>
           </tr>
         </tbody>
       </table>
+    ` : ''
 
-      ${contentRows ? `
+  const contentMixBlock = (showContentMix && contentRows) ? `
       <div class="section-header">תמהיל תוכן</div>
       <table class="quote-table">
         <thead>
@@ -417,9 +494,9 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
           ${contentRows}
         </tbody>
       </table>
-      ` : ''}
+    ` : ''
 
-      ${(data.kpi.cpv || data.kpi.estimatedImpressions) ? `
+  const kpiBlock = (showKpi && (data.kpi.cpv || data.kpi.estimatedImpressions)) ? `
       <div style="text-align:center; margin-top: 10px;">
         <span class="section-header" style="font-size: 20px; padding: 10px 40px; background: #333;">KPI</span>
       </div>
@@ -432,12 +509,20 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
         </thead>
         <tbody>
           <tr>
-            <td>${data.kpi.cpv}</td>
-            <td>${data.kpi.estimatedImpressions}</td>
+            <td>${escape(data.kpi.cpv)}</td>
+            <td>${escape(data.kpi.estimatedImpressions)}</td>
           </tr>
         </tbody>
       </table>
-      ` : ''}
+    ` : ''
+
+  return wrapPage(`
+    ${headerHtml(data, logoUrl)}
+    <div class="content">
+      ${budgetBlock}
+      ${contentMixBlock}
+      ${kpiBlock}
+      ${renderCustomSectionsForPage(data, 2)}
     </div>
     ${footerHtml()}
   `)
@@ -446,24 +531,35 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
 // ============ PAGE 3: Deliverables & Terms ============
 
 export function generatePage3(data: PriceQuoteData, logoUrl: string): string {
+  const showDeliverables = isOn(data, 'deliverables')
+
+  const legalSource = data.legalTerms && data.legalTerms.length > 0
+    ? data.legalTerms.filter(t => t.trim() !== '')
+    : LEGAL_TERMS
+
   const dynamicNotes = [
-    `פלטפורמת הפעילות- ${data.platform}`,
-    `תקופת ההסכם - ${data.contractPeriod}`,
+    data.platform.trim() ? `פלטפורמת הפעילות- ${data.platform}` : '',
+    data.contractPeriod.trim() ? `תקופת ההסכם - ${data.contractPeriod}` : '',
     'התוצרים יעלו על בסיס גאנט מאושר מראש',
     ...data.additionalNotes,
-  ]
+  ].filter(t => t.trim() !== '')
 
-  const allNotes = [...dynamicNotes, ...LEGAL_TERMS]
+  const allNotes = [...dynamicNotes, ...legalSource]
+  const noteItems = allNotes.map(n => `<li>${escape(n)}</li>`).join('')
+  const deliverablesTitle = data.deliverablesTitle?.trim() || 'תוצרים ושירותים'
 
-  const noteItems = allNotes.map(n => `<li>${n}</li>`).join('')
+  const deliverablesBlock = (showDeliverables && noteItems) ? `
+      <div class="section-header-dark">${escape(deliverablesTitle)}</div>
+      <ul class="service-list">
+        ${noteItems}
+      </ul>
+    ` : ''
 
   return wrapPage(`
     ${headerHtml(data, logoUrl)}
     <div class="content">
-      <div class="section-header-dark">תוצרים ושירותים</div>
-      <ul class="service-list">
-        ${noteItems}
-      </ul>
+      ${deliverablesBlock}
+      ${renderCustomSectionsForPage(data, 3)}
     </div>
     ${footerHtml()}
   `)
@@ -472,21 +568,37 @@ export function generatePage3(data: PriceQuoteData, logoUrl: string): string {
 // ============ PAGE 4: Payment & Signature ============
 
 export function generatePage4(data: PriceQuoteData, logoUrl: string): string {
+  const showPayment = isOn(data, 'paymentTerms')
+  const showDeclaration = isOn(data, 'declaration')
+  const showSignature = isOn(data, 'signature')
+
+  const pt = data.paymentTerms ?? PAYMENT_TERMS
+  const declaration = data.clientDeclarationText?.trim() || CLIENT_DECLARATION
+
+  const paymentBlock = showPayment ? `
+      <div class="section-header-dark">תוקף ותנאי תשלום</div>
+      <ul class="service-list">
+        ${pt.activation.trim() ? `<li>${escape(pt.activation)}</li>` : ''}
+        ${pt.payment.trim() ? `<li>${escape(pt.payment)}</li>` : ''}
+      </ul>
+    ` : ''
+
+  const declarationBlock = showDeclaration ? `
+      <div class="section-header-dark" style="margin-top: 30px;">הצהרה ואישור הלקוח</div>
+      <p class="about-text" style="margin-top: 10px; font-size: 14px;">
+        ${escape(declaration)}
+      </p>
+    ` : ''
+
+  const signatureBlock = showSignature ? signatureBlockHtml(data) : ''
+
   return wrapPage(`
     ${headerHtml(data, logoUrl)}
     <div class="content">
-      <div class="section-header-dark">תוקף ותנאי תשלום</div>
-      <ul class="service-list">
-        <li>${PAYMENT_TERMS.activation}</li>
-        <li>${PAYMENT_TERMS.payment}</li>
-      </ul>
-
-      <div class="section-header-dark" style="margin-top: 30px;">הצהרה ואישור הלקוח</div>
-      <p class="about-text" style="margin-top: 10px; font-size: 14px;">
-        ${CLIENT_DECLARATION}
-      </p>
-
-      ${signatureBlockHtml(data)}
+      ${paymentBlock}
+      ${declarationBlock}
+      ${signatureBlock}
+      ${renderCustomSectionsForPage(data, 4)}
     </div>
     ${footerHtml()}
   `)
@@ -531,8 +643,26 @@ function escape(s: string): string {
     .replace(/'/g, '&#039;')
 }
 
-/** Generate all 4 pages as HTML strings */
+/**
+ * Generate the pages that go into the final PDF — disabled pages are filtered out.
+ * Used by the PDF generation endpoints.
+ */
 export function generatePriceQuotePages(data: PriceQuoteData, logoBaseUrl: string): string[] {
+  const logoUrl = `${logoBaseUrl}${LOGO_PATH}`
+  const all: Array<[PageIndex, string]> = [
+    [1, generatePage1(data, logoUrl)],
+    [2, generatePage2(data, logoUrl)],
+    [3, generatePage3(data, logoUrl)],
+    [4, generatePage4(data, logoUrl)],
+  ]
+  return all.filter(([p]) => isPageOn(data, p)).map(([, html]) => html)
+}
+
+/**
+ * Generate ALL 4 pages regardless of enabled/disabled state.
+ * Used by the live preview so disabled pages remain visible/editable in the UI.
+ */
+export function generateAllQuotePages(data: PriceQuoteData, logoBaseUrl: string): string[] {
   const logoUrl = `${logoBaseUrl}${LOGO_PATH}`
   return [
     generatePage1(data, logoUrl),
