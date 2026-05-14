@@ -22,7 +22,7 @@ export default function HomePage() {
           href="/login"
           className="group mt-20 inline-flex items-center gap-3 rounded-full bg-white text-black px-10 py-4 text-[14px] md:text-[15px] font-medium tracking-[0.04em] transition-all duration-300 hover:bg-brand-accent hover:text-white"
         >
-          <span>התחברות עם Google</span>
+          <span>כניסה</span>
           <span aria-hidden className="inline-block transition-transform duration-300 group-hover:-translate-x-1">←</span>
         </Link>
       </main>
