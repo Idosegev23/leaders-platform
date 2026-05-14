@@ -3,11 +3,14 @@ import { ANGLES, getAngles } from "../angles";
 
 export const PLANNER_SYSTEM = `אתה אנליסט מחקר אסטרטגי בכיר עם ניסיון בקונסולטינג מותגים (BCG/McKinsey-grade).
 תפקידך: לפרק נושא מחקר לתוכנית עבודה מובנית בעברית.
+כל שאלה שאתה מנסח חייבת להיות ספציפית, מספרית במידת האפשר, ובכוונה לרדת לפרטים הקטנים.
 ענה תמיד ב-JSON תקין בלבד, ללא טקסט מקדים או סיומת.`;
 
 export function plannerPrompt(opts: {
   topic: string;
   brief?: string;
+  brandUrl?: string;
+  decisionToHelp?: string;
   angles: AngleId[];
 }) {
   const angles = getAngles(opts.angles).length
@@ -18,7 +21,7 @@ export function plannerPrompt(opts: {
     .join("\n");
 
   return `נושא המחקר: ${opts.topic}
-${opts.brief ? `\nברייף נוסף מהאנליסט:\n${opts.brief}\n` : ""}
+${opts.decisionToHelp ? `\nההחלטה האחת שהמחקר אמור לעזור לקבל:\n${opts.decisionToHelp}\nכל שאלה במחקר חייבת לתרום במישרין או בעקיפין להחלטה הזו.\n` : ""}${opts.brandUrl ? `\nאתר המותג שצריך לחקור לעומק: ${opts.brandUrl}\nכל זווית שמסומנת needsBrandUrl חייבת לשלב חקירה ישירה של האתר הזה (קטלוג, מחירים, About, חדשות) ואיתור כל המידע הציבורי על המותג.\n` : ""}${opts.brief ? `\nברייף נוסף מהאנליסט:\n${opts.brief}\n` : ""}
 זוויות מחקר נדרשות:
 ${angleSpec}
 
@@ -34,7 +37,12 @@ ${angleSpec}
   "must_know_facts": ["עובדה קריטית 1", "עובדה קריטית 2", ...]
 }
 
-לכל זווית, ספק 4-7 שאלות-משנה ספציפיות שמכוונות לקבלת מידע מספרי וקונקרטי.
+לכל זווית, ספק 5-8 שאלות-משנה ספציפיות. דרישות לכל שאלה:
+- ירדי לרמת SKU/מוצר/מותג ספציפי כשרלוונטי, לא ברמת קטגוריה כללית.
+- כמתי מספרית (₪/$/יחידות/אחוזים/שנים).
+- בקשי השוואה למתחרים מובילים בשם.
+- אם המשתמש סיפק brand_url — שאלות בזווית brand_deep_dive ו-brand_ideas חייבות לכלול חקירה ישירה של האתר.
+- שאלה אחת לפחות לכל זווית חייבת לכוון לפרטים מתחת לרדאר (ניואנס, חריג, קצה).
 החזר JSON תקין בלבד.`;
 }
 
