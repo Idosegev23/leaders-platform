@@ -593,7 +593,7 @@ export default function ResearchPage() {
       <header className="sticky top-0 z-50 w-full border-b border-[#dfdfdf] bg-white/80 backdrop-blur-md">
         <div className="flex items-center justify-between px-6 py-4 max-w-[1200px] mx-auto">
           <div className="flex items-center gap-3">
-            <Image src="/logoblack.png" alt="Leaders" width={120} height={36} className="h-8 w-auto hover:opacity-80 transition-opacity" />
+            <Image src="/new_logo.svg" alt="Leaders" width={120} height={36} className="h-8 w-auto hover:opacity-80 transition-opacity" />
           </div>
           <div className="hidden sm:block">
             <FlowStepper currentStep="research" compact />
@@ -631,7 +631,7 @@ export default function ResearchPage() {
                 <div className="flex items-start justify-between mb-10">
                   <div className="flex items-center gap-5">
                     <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-md border border-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]">
-                      <Image src="/logoblack.png" alt="Leaders" width={100} height={30} className="h-6 w-auto brightness-0 invert" />
+                      <Image src="/new_logo2.svg" alt="Leaders" width={100} height={28} className="h-6 w-auto" />
                     </div>
                     <div>
                       <h2 className="text-2xl font-extrabold tracking-tight">

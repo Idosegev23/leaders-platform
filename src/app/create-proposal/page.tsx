@@ -445,7 +445,7 @@ export default function CreateProposalPage() {
           {/* Logo */}
           <div className="flex items-center gap-3">
             <Image
-              src="/logoblack.png"
+              src="/new_logo.svg"
               alt="Leaders"
               width={120}
               height={36}
@@ -798,11 +798,11 @@ export default function CreateProposalPage() {
                   <div className="flex items-center gap-5">
                     <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-md border border-white/10 shadow-[0_0_20px_rgba(255,255,255,0.1)]">
                        <Image
-                        src="/logoblack.png"
+                        src="/new_logo2.svg"
                         alt="Leaders"
                         width={100}
-                        height={30}
-                        className="h-6 w-auto brightness-0 invert"
+                        height={28}
+                        className="h-6 w-auto"
                       />
                     </div>
                     <div>

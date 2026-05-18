@@ -620,7 +620,7 @@ export default function GeneratePage() {
       <header className="sticky top-0 z-50 w-full border-b border-[#dfdfdf] bg-white/80 backdrop-blur-md">
         <div className="flex items-center justify-between px-6 py-4 max-w-[1200px] mx-auto">
           <div className="flex items-center gap-3">
-            <Image src="/logoblack.png" alt="Leaders" width={120} height={36} className="h-8 w-auto hover:opacity-80 transition-opacity" />
+            <Image src="/new_logo.svg" alt="Leaders" width={120} height={36} className="h-8 w-auto hover:opacity-80 transition-opacity" />
           </div>
           <div className="hidden sm:block">
             <FlowStepper currentStep="generate" compact />

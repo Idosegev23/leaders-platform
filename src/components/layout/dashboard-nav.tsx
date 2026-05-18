@@ -53,10 +53,10 @@ export function DashboardNav({ user }: DashboardNavProps) {
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-3 group">
             <Image
-              src="/logoblack.png"
+              src="/new_logo.svg"
               alt="Leaders"
               width={90}
-              height={30}
+              height={27}
               className="h-auto w-[70px] md:w-[80px] opacity-90 group-hover:opacity-100 transition-opacity"
             />
             <span className="hidden md:inline text-[10px] tracking-[0.4em] uppercase text-brand-primary/45 font-rubik">

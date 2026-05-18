@@ -15,9 +15,13 @@ function extractDominantColor(bg: Slide['background']): string {
 }
 
 export function injectLeadersLogo(slides: Slide[]): Slide[] {
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '')
-  const whiteLogoUrl = `${supabaseUrl}/storage/v1/object/public/assets/logos/leaders-logo-white.png`
-  const blackLogoUrl = `${supabaseUrl}/storage/v1/object/public/assets/logos/leaders-logo-black.png`
+  // Serve the new SVG wordmarks from /public via the app's own origin.
+  // Vercel/Puppeteer fetches the file directly; no Supabase round-trip needed.
+  const baseUrl =
+    (process.env.NEXT_PUBLIC_APP_URL ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')).replace(/\/$/, '')
+  const whiteLogoUrl = `${baseUrl}/new_logo2.svg`
+  const blackLogoUrl = `${baseUrl}/new_logo.svg`
 
   return slides.map(slide => {
     const bgColor = extractDominantColor(slide.background)

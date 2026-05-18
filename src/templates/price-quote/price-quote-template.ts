@@ -20,7 +20,7 @@ import {
   CLIENT_DECLARATION,
 } from '@/lib/constants/price-quote-services'
 
-const LOGO_PATH = '/logoblack.png'
+const LOGO_PATH = '/new_logo.svg'
 
 const DEFAULT_TOGGLES: SectionToggles = {
   aboutLeaders: true,

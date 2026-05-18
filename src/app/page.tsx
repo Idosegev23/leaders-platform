@@ -6,10 +6,10 @@ export default function HomePage() {
     <div dir="rtl" className="relative min-h-screen bg-[#0a0a0f] text-white font-heebo overflow-hidden flex flex-col">
       <main className="flex-1 flex flex-col items-center justify-center px-6">
         <Image
-          src="/logo.png"
+          src="/new_logo2.svg"
           alt="Leaders"
           width={280}
-          height={94}
+          height={76}
           priority
           className="h-auto w-[200px] md:w-[260px] opacity-95"
         />

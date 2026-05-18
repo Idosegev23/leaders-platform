@@ -14,28 +14,33 @@ export async function GET() {
     const supabase = await createClient()
     
     const publicDir = path.join(process.cwd(), 'public')
+    // Push BOTH the legacy PNGs and the new SVG wordmarks into Supabase
+    // Storage. The PNGs remain as a fallback for anything still reading
+    // the old paths; the SVGs are the canonical brand mark going forward.
     const logos = [
-      { file: 'logoblack.png', name: 'leaders-logo-black.png' },
-      { file: 'logo.png', name: 'leaders-logo-white.png' },
+      { file: 'logoblack.png',  name: 'leaders-logo-black.png',  contentType: 'image/png' },
+      { file: 'logo.png',       name: 'leaders-logo-white.png',  contentType: 'image/png' },
+      { file: 'new_logo.svg',   name: 'leaders-logo-black.svg',  contentType: 'image/svg+xml' },
+      { file: 'new_logo2.svg',  name: 'leaders-logo-white.svg',  contentType: 'image/svg+xml' },
     ]
-    
+
     const results = []
-    
+
     for (const logo of logos) {
       const filePath = path.join(publicDir, logo.file)
-      
+
       if (!fs.existsSync(filePath)) {
         results.push({ name: logo.name, error: 'File not found' })
         continue
       }
-      
+
       const fileBuffer = fs.readFileSync(filePath)
-      
+
       // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('assets')
         .upload(`logos/${logo.name}`, fileBuffer, {
-          contentType: 'image/png',
+          contentType: logo.contentType,
           upsert: true,
         })
       

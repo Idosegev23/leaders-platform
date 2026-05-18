@@ -214,11 +214,11 @@ function BriefContent() {
         <div className="bg-white rounded-lg md:rounded-xl shadow-md p-4 md:p-6 text-center">
           <div className="flex justify-center mb-3 md:mb-4">
             <Image
-              src="/logo.png"
+              src="/new_logo.svg"
               alt="Leaders Logo"
               width={150}
-              height={60}
-              className="object-contain md:w-[180px] md:h-[72px]"
+              height={45}
+              className="object-contain md:w-[180px] md:h-[54px]"
               priority
             />
           </div>

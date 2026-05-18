@@ -45,10 +45,10 @@ function LoginContent() {
       <div className="text-center mb-12">
         <Link href="/" className="inline-block">
           <Image
-            src="/logo.png"
+            src="/new_logo2.svg"
             alt="Leaders"
             width={140}
-            height={47}
+            height={38}
             className="mx-auto mb-4"
           />
           <h1 className="text-4xl font-heebo font-black text-white tracking-tight">

@@ -42,7 +42,7 @@ export default async function PdfPage({
         <div className="absolute top-0 end-0 w-[40mm] h-[40mm] bg-brand-gold-light/40 rounded-bl-full" />
 
         <header className="flex items-center justify-between relative z-10">
-          <Image src="/logoblack.png" alt="Leaders" width={140} height={48} />
+          <Image src="/new_logo.svg" alt="Leaders" width={140} height={42} />
           <span className="text-[10px] tracking-[0.5em] uppercase font-rubik text-brand-secondary">
             Research Report
           </span>

@@ -110,9 +110,10 @@ export function renderProposalToHtml(data: ProposalData, config: TemplateConfig 
   const goals = clean(data.goals)
   const deliverables = clean(data.deliverables)
   
-  // Logo URLs
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-  const defaultLeadersLogo = `${supabaseUrl}/storage/v1/object/public/assets/logos/leaders-logo-black.png`
+  // Logo URLs — new SVG wordmark served from /public via the app origin.
+  const appBaseUrl = (process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')).replace(/\/$/, '')
+  const defaultLeadersLogo = `${appBaseUrl}/new_logo.svg`
   const leadersLogo = config.leadersLogoUrl || defaultLeadersLogo
   
   // Generated images (from Gemini or data)

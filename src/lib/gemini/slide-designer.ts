@@ -1347,8 +1347,9 @@ export async function pipelineFoundation(
   _proUnavailable = false
 
   const d = data as PremiumProposalData
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-  const leadersLogo = config.leadersLogoUrl || `${supabaseUrl}/storage/v1/object/public/assets/logos/leaders-logo-black.png`
+  const appBase = (process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')).replace(/\/$/, '')
+  const leadersLogo = config.leadersLogoUrl || `${appBase}/new_logo.svg`
   const clientLogo = config.clientLogoUrl || (typeof d._scraped?.logoUrl === 'string' ? d._scraped.logoUrl : '') || config.brandLogoUrl || ''
 
   const brandColors = d._brandColors || { primary: config.accentColor || '#E94560', secondary: '#1A1A2E', accent: config.accentColor || '#E94560', style: 'corporate', mood: 'מקצועי' }
@@ -2176,9 +2177,11 @@ export async function pipelineFinalizeHtml(
   const requestId = `html-final-${Date.now()}`
   console.log(`[SlideDesigner][${requestId}] Finalizing HTML presentation: ${allHtmlSlides.length} slides`)
 
-  // Inject logos into each HTML slide
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '')
-  const leadersLogoUrl = foundation.leadersLogo || `${supabaseUrl}/storage/v1/object/public/assets/logos/leaders-logo-white.png`
+  // Inject logos into each HTML slide — slide bodies here are dark-themed,
+  // so use the white wordmark variant (new_logo2.svg) by default.
+  const appBaseHtml = (process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')).replace(/\/$/, '')
+  const leadersLogoUrl = foundation.leadersLogo || `${appBaseHtml}/new_logo2.svg`
   const clientLogoUrl = foundation.clientLogo
 
   const finalSlides = allHtmlSlides.map(html => {

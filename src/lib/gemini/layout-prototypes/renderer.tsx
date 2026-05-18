@@ -512,13 +512,19 @@ export interface RenderOptions {
  * srcDoc (about:blank origin) and inside Playwright PDF generation, where
  * relative paths like "/logo.png" don't resolve.
  */
-const LEADERS_LOGO_URL = 'https://fhgggqnaplshwbrzgima.supabase.co/storage/v1/object/public/assets/branding/leaders-logo.png'
+// Layout overlays sit on top of dark slide backgrounds — use the white
+// wordmark variant directly instead of the older "invert filter on a black
+// logo" hack. The SVG is served from /public on the app origin so the iframe
+// srcDoc + Playwright PDF context can both fetch it.
+const APP_BASE_URL = (process.env.NEXT_PUBLIC_APP_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')).replace(/\/$/, '')
+const LEADERS_LOGO_URL = `${APP_BASE_URL}/new_logo2.svg`
 
 function renderLogoOverlay(layout: string, brandLogoUrl?: string): string {
   if (layout === 'hero-cover' || layout === 'closing-cta') return ''
   const leadersMark = `
     <div data-role="leaders-mark" style="position:absolute; top:32px; left:32px; z-index:30; display:flex; align-items:center; gap:8px; pointer-events:none; opacity:0.85;">
-      <img src="${LEADERS_LOGO_URL}" alt="Leaders" style="height:24px; width:auto; filter:brightness(0) invert(1);" />
+      <img src="${LEADERS_LOGO_URL}" alt="Leaders" style="height:24px; width:auto;" />
       <span style="font-size:10px; font-weight:500; color:rgba(255,255,255,0.6); letter-spacing:1.5px; text-transform:uppercase;">Leaders</span>
     </div>`
   const brandMark = brandLogoUrl

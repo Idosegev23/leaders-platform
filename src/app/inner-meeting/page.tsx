@@ -37,11 +37,11 @@ export default function InnerMeetingPage() {
 
           <div className="flex justify-center mb-3 md:mb-4">
             <Image
-              src="/logo.png"
+              src="/new_logo.svg"
               alt="Leaders"
               width={150}
-              height={60}
-              className="object-contain md:w-[180px] md:h-[72px]"
+              height={45}
+              className="object-contain md:w-[180px] md:h-[54px]"
               priority
             />
           </div>

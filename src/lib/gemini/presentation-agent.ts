@@ -617,7 +617,11 @@ ${imagesContext}
   }
 
   // ── Inject logos ──
-  const leadersLogo = input.leadersLogoUrl || `${process.env.NEXT_PUBLIC_SUPABASE_URL || ''}/storage/v1/object/public/assets/logos/leaders-logo-black.png`
+  // Default to the dark wordmark served from /public on the app origin.
+  // Callers can still override via input.leadersLogoUrl.
+  const appBase = (process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')).replace(/\/$/, '')
+  const leadersLogo = input.leadersLogoUrl || `${appBase}/new_logo.svg`
   const clientLogo = input.clientLogoUrl || ''
 
   const finalHtml = htmlSlides.map(html => {

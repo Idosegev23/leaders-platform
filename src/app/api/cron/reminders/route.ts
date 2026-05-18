@@ -64,7 +64,7 @@ function buildReminderEmailHtml(params: {
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(26,26,46,0.08)">
 <tr><td align="center" style="padding:50px 40px 20px">
-<img src="${appBaseUrl()}/logo.png" width="160" alt="Leaders" style="display:block" />
+<img src="${appBaseUrl()}/new_logo.svg" width="160" height="48" alt="Leaders" style="display:block" />
 </td></tr>
 <tr><td align="center" style="padding:10px 40px 5px">
 <div style="font-size:28px;font-weight:bold;color:#1a1a2e;margin:0">Follow-Up Reminder</div>
@@ -108,7 +108,7 @@ function buildReminderEmailHtml(params: {
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(26,26,46,0.08)">
 <tr><td align="center" style="padding:50px 40px 20px">
-<img src="${appBaseUrl()}/logo.png" width="160" alt="Leaders" style="display:block" />
+<img src="${appBaseUrl()}/new_logo.svg" width="160" height="48" alt="Leaders" style="display:block" />
 </td></tr>
 <tr><td align="center" style="padding:10px 40px 5px">
 <div style="font-size:28px;font-weight:bold;color:#1a1a2e;margin:0">תזכורת מעקב</div>
