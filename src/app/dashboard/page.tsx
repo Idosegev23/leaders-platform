@@ -22,8 +22,8 @@ const RUBRICS: Rubric[] = [
     slug: 'client-brief',
     name: 'בריף לקוח',
     english: 'Client Brief',
-    description: 'שליחת טופס בריף ללקוח',
-    targetUrl: '/send/client-brief',
+    description: 'שליחה וניהול בריפים — נסגר/נפל',
+    targetUrl: '/briefs',
     flowType: 'send_link',
   },
   {

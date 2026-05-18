@@ -24,13 +24,15 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { slug, client_email, client_name, metadata, lead_id } = body as {
+  const { slug, client_email, client_name, metadata, lead_id, personal_note } = body as {
     slug?: string
     client_email?: string | null
     client_name?: string | null
     metadata?: Record<string, unknown>
     lead_id?: string | null
+    personal_note?: string | null
   }
+  const personalNote = (personal_note || '').trim().slice(0, 2000) || null
   if (!slug) {
     return NextResponse.json({ error: 'slug is required' }, { status: 400 })
   }
@@ -73,6 +75,7 @@ export async function POST(request: Request) {
       metadata: {
         created_by_avatar: user.user_metadata?.avatar_url ?? null,
         ...(metadata ?? {}),
+        ...(personalNote ? { personal_note: personalNote } : {}),
       },
     })
     .select('*, document_types(slug, name, target_url, flow_type)')
@@ -154,6 +157,7 @@ export async function POST(request: Request) {
           senderRefreshToken: tokenRow.refresh_token,
           leadId: resolvedLeadId,
           language: (metadata as { language?: string } | undefined)?.language === 'en' ? 'en' : 'he',
+          personalNote,
           existingLink: { id: data.id, token: data.token },
           callerTag: '[/api/links]',
         })

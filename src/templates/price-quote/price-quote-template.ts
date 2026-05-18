@@ -58,7 +58,23 @@ function resolveServices(data: PriceQuoteData): QuoteService[] {
 /** Base CSS shared across all pages */
 function baseStyles(): string {
   return `
-    @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
+
+    /* Editorial design tokens — aligned with ldrs Webflow site:
+       navy primary, ivory canvas, gold accent, generous whitespace,
+       uppercase tracked labels, hairline rules. */
+    :root {
+      --ink: #1a1a2e;
+      --ink-65: rgba(26, 26, 46, 0.65);
+      --ink-45: rgba(26, 26, 46, 0.45);
+      --ink-15: rgba(26, 26, 46, 0.15);
+      --ink-08: rgba(26, 26, 46, 0.08);
+      --canvas: #ffffff;
+      --canvas-soft: #faf8f4;
+      --canvas-warm: #f5f3ef;
+      --gold: #C9A227;
+      --gold-soft: #e6d49a;
+    }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -67,8 +83,9 @@ function baseStyles(): string {
       height: 1123px;
       font-family: 'Heebo', 'Arial Hebrew', sans-serif;
       direction: rtl;
-      color: #333;
-      background: #fff;
+      color: var(--ink);
+      background: var(--canvas);
+      font-weight: 400;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
@@ -81,175 +98,224 @@ function baseStyles(): string {
       padding: 0;
     }
 
-    /* Header */
+    /* ── Header ── */
     .header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      padding: 40px 50px 20px 50px;
+      padding: 48px 56px 24px 56px;
+      border-bottom: 1px solid var(--ink-08);
     }
 
-    .header-right {
+    .header-right { text-align: right; flex: 1; }
+
+    .header-eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.5em;
+      text-transform: uppercase;
+      color: var(--ink-45);
+      font-weight: 500;
+      margin-bottom: 14px;
+      direction: ltr;
       text-align: right;
-      flex: 1;
     }
 
     .header-title {
-      font-size: 36px;
-      font-weight: 900;
-      color: #C67A3C;
-      line-height: 1.2;
+      font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+      font-size: 44px;
+      font-weight: 500;
+      color: var(--ink);
+      line-height: 1.05;
+      letter-spacing: -0.01em;
       margin-bottom: 8px;
     }
 
+    .header-title .ink-mark {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: var(--gold);
+      border-radius: 50%;
+      margin: 0 8px 0 0;
+      vertical-align: middle;
+      transform: translateY(-4px);
+    }
+
     .header-subtitle {
-      font-size: 20px;
-      font-weight: 700;
-      color: #555;
-      line-height: 1.4;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink);
+      line-height: 1.55;
+      margin-top: 6px;
     }
 
     .header-contact {
-      font-size: 18px;
+      font-size: 12px;
       font-weight: 500;
-      color: #555;
+      color: var(--ink-65);
+      letter-spacing: 0.04em;
+      margin-top: 4px;
+    }
+
+    .header-meta {
+      font-size: 10px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--ink-45);
+      font-weight: 500;
+      margin-top: 12px;
     }
 
     .header-left {
       flex-shrink: 0;
-      margin-right: 30px;
+      margin-right: 32px;
+      text-align: left;
     }
 
     .logo {
-      width: 140px;
+      width: 120px;
       height: auto;
+      display: block;
     }
 
-    /* Content area */
+    /* ── Content area ── */
     .content {
-      padding: 10px 50px 0 50px;
+      padding: 24px 56px 0 56px;
     }
 
-    /* Section headers */
-    .section-header {
-      background: #C67A3C;
-      color: #fff;
-      font-size: 18px;
-      font-weight: 700;
-      padding: 10px 24px;
-      border-radius: 20px;
-      display: inline-block;
-      margin-bottom: 16px;
-      margin-top: 20px;
-    }
-
+    /* ── Section labels — editorial, NOT pills ── */
+    .section-header,
     .section-header-dark {
-      background: #6B5B50;
-      color: #fff;
-      font-size: 18px;
-      font-weight: 700;
-      padding: 10px 24px;
-      border-radius: 20px;
-      display: inline-block;
-      margin-bottom: 16px;
-      margin-top: 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin: 32px 0 18px;
+      padding: 0;
+      background: transparent;
+      border-radius: 0;
     }
+    .section-header::after,
+    .section-header-dark::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--ink-15);
+    }
+    .section-header-dark { color: var(--ink-65); }
+    .section-header-dark::after { background: var(--ink-08); }
 
-    /* Text blocks */
+    /* ── Body text ── */
     .about-text {
       font-size: 13px;
-      line-height: 1.8;
-      color: #444;
+      line-height: 1.85;
+      color: var(--ink);
       text-align: right;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
+      font-weight: 400;
     }
 
-    /* Bullet lists */
+    /* ── Lists — hairline tick instead of bullet ── */
     .service-list {
       list-style: none;
       padding: 0;
+      margin-bottom: 18px;
     }
-
     .service-list li {
       font-size: 12.5px;
-      line-height: 1.6;
-      color: #444;
-      margin-bottom: 6px;
-      padding-right: 12px;
+      line-height: 1.7;
+      color: var(--ink);
+      margin-bottom: 10px;
+      padding-right: 18px;
       position: relative;
     }
-
     .service-list li::before {
-      content: '•';
+      content: '';
       position: absolute;
       right: 0;
-      color: #C67A3C;
-      font-weight: bold;
+      top: 11px;
+      width: 8px;
+      height: 1px;
+      background: var(--gold);
     }
-
     .service-list li strong {
-      color: #333;
-      font-weight: 700;
+      color: var(--ink);
+      font-weight: 600;
     }
 
-    /* Tables */
+    /* ── Tables — editorial cream + hairline rules ── */
     .quote-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 20px;
+      margin: 4px 0 24px;
       direction: rtl;
+      border-top: 1px solid var(--ink-15);
+      border-bottom: 1px solid var(--ink-15);
     }
-
     .quote-table th {
-      background: #C67A3C;
-      color: #fff;
-      font-size: 14px;
-      font-weight: 700;
-      padding: 10px 16px;
+      background: transparent;
+      color: var(--ink-65);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      padding: 12px 14px;
       text-align: right;
+      border-bottom: 1px solid var(--ink-15);
     }
-
     .quote-table td {
-      background: #D6E8F0;
-      font-size: 13px;
-      padding: 12px 16px;
+      background: transparent;
+      font-size: 12.5px;
+      color: var(--ink);
+      padding: 12px 14px;
       text-align: right;
-      border-bottom: 2px solid #fff;
+      border-bottom: 1px solid var(--ink-08);
       vertical-align: middle;
     }
-
+    .quote-table tr:last-child td { border-bottom: none; }
     .quote-table .total-row td {
-      background: #B8D4E3;
-      font-weight: 700;
-      font-size: 14px;
+      background: var(--canvas-soft);
+      font-weight: 600;
+      font-size: 13px;
+      letter-spacing: 0.02em;
     }
 
-    /* KPI table */
+    /* ── KPI block — sparse, two large numbers ── */
     .kpi-table {
       width: 100%;
       border-collapse: collapse;
-      margin-bottom: 20px;
+      margin: 4px 0 20px;
+      border-top: 1px solid var(--ink-15);
+      border-bottom: 1px solid var(--ink-15);
     }
-
     .kpi-table th {
-      background: #333;
-      color: #fff;
-      font-size: 16px;
-      font-weight: 700;
-      padding: 12px 20px;
+      background: transparent;
+      color: var(--ink-45);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      padding: 14px 20px 6px;
       text-align: center;
     }
-
     .kpi-table td {
-      background: #D6E8F0;
-      font-size: 18px;
-      font-weight: 700;
-      padding: 14px 20px;
+      background: transparent;
+      font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+      font-size: 28px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      padding: 4px 20px 20px;
       text-align: center;
-      color: #333;
+      color: var(--ink);
+      border-right: 1px solid var(--ink-08);
     }
+    .kpi-table td:first-child { border-right: none; }
 
-    /* Footer */
+    /* ── Footer — discreet ── */
     .footer {
       position: absolute;
       bottom: 0;
@@ -257,61 +323,54 @@ function baseStyles(): string {
       right: 0;
       display: flex;
       justify-content: space-between;
-      padding: 16px 50px;
-      font-size: 10px;
-      color: #666;
-      border-top: 1px solid #eee;
+      padding: 18px 56px;
+      font-size: 9px;
+      line-height: 1.7;
+      color: var(--ink-45);
+      letter-spacing: 0.04em;
+      border-top: 1px solid var(--ink-08);
     }
+    .footer-right { text-align: right; }
+    .footer-left { text-align: left; }
 
-    .footer-right {
-      text-align: right;
-    }
-
-    .footer-left {
-      text-align: left;
-    }
-
-    /* Signature section */
+    /* ── Signature block ── */
     .signature-fields {
-      margin-top: 24px;
-      font-size: 14px;
-      line-height: 2.4;
-      color: #333;
+      margin-top: 28px;
+      font-size: 13px;
+      line-height: 2.6;
+      color: var(--ink);
+      font-weight: 400;
     }
-
     .signature-line {
       display: inline-block;
-      border-bottom: 1px solid #999;
+      border-bottom: 1px solid var(--ink-45);
       width: 140px;
       margin: 0 6px;
       vertical-align: bottom;
     }
-
     .signature-line.filled {
-      border-bottom: 1px solid #1a1a2e;
-      color: #111;
+      border-bottom: 1px solid var(--ink);
+      color: var(--ink);
       font-weight: 500;
       padding: 0 6px 1px;
       min-height: 18px;
     }
-
     .signature-image {
       display: inline-block;
       max-height: 56px;
       max-width: 240px;
-      border-bottom: 1px solid #1a1a2e;
+      border-bottom: 1px solid var(--ink);
       padding-bottom: 2px;
       vertical-align: bottom;
     }
-
     .signature-typed {
       display: inline-block;
       min-width: 180px;
-      border-bottom: 1px solid #1a1a2e;
+      border-bottom: 1px solid var(--ink);
       font-family: 'Cormorant Garamond', 'Times New Roman', serif;
       font-style: italic;
       font-size: 26px;
-      color: #111;
+      color: var(--ink);
       padding: 0 8px 2px;
     }
   `
@@ -337,13 +396,19 @@ function footerHtml(): string {
 
 /** Header HTML */
 function headerHtml(data: PriceQuoteData, logoUrl: string): string {
+  const clientLine = data.clientName ? `<div class="header-subtitle">${escape(data.clientName)}</div>` : ''
+  const campaignLine = data.campaignName ? `<div class="header-subtitle">${escape(data.campaignName)}</div>` : ''
+  const contactLine = data.contactName ? `<div class="header-contact">${escape(data.contactName)}</div>` : ''
+  const dateLine = data.date ? `<div class="header-meta">${escape(data.date)}</div>` : ''
   return `
     <div class="header">
       <div class="header-right">
-        <div class="header-title">הצעת מחיר - ${data.clientName}</div>
-        <div class="header-subtitle">${data.campaignName}</div>
-        <div class="header-subtitle">${data.date}</div>
-        <div class="header-contact">${data.contactName}</div>
+        <div class="header-eyebrow">Leaders <span style="margin:0 4px;">×</span> Proposal</div>
+        <div class="header-title"><span class="ink-mark"></span>הצעת מחיר</div>
+        ${clientLine}
+        ${campaignLine}
+        ${contactLine}
+        ${dateLine}
       </div>
       <div class="header-left">
         <img src="${logoUrl}" class="logo" alt="Leaders" />
@@ -497,10 +562,8 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
     ` : ''
 
   const kpiBlock = (showKpi && (data.kpi.cpv || data.kpi.estimatedImpressions)) ? `
-      <div style="text-align:center; margin-top: 10px;">
-        <span class="section-header" style="font-size: 20px; padding: 10px 40px; background: #333;">KPI</span>
-      </div>
-      <table class="kpi-table" style="margin-top: 16px;">
+      <div class="section-header">KPI</div>
+      <table class="kpi-table">
         <thead>
           <tr>
             <th>CPV</th>
@@ -509,8 +572,8 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
         </thead>
         <tbody>
           <tr>
-            <td>${escape(data.kpi.cpv)}</td>
-            <td>${escape(data.kpi.estimatedImpressions)}</td>
+            <td>${escape(data.kpi.cpv) || '—'}</td>
+            <td>${escape(data.kpi.estimatedImpressions) || '—'}</td>
           </tr>
         </tbody>
       </table>

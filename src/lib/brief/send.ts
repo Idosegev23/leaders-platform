@@ -30,6 +30,13 @@ export interface SendClientBriefInput {
   /** Caller-id prefix for logging. */
   callerTag?: string
   /**
+   * Free-text "personal note" the BD-person typed in /send/client-brief.
+   * If set, rendered as a block inside the email between the greeting and
+   * the CTA. Caller is responsible for any AI-polishing — this helper
+   * does not refine the text.
+   */
+  personalNote?: string | null
+  /**
    * When set, reuse this existing document_link instead of inserting a
    * new one. Used by /api/links which already created the link with its
    * own user-scoped insert (so the row has the right RLS attribution).
@@ -135,9 +142,10 @@ export async function sendClientBrief(
     const subject = isEnglish
       ? `Brief — ${input.clientName} × Leaders`
       : `בריף ל-${input.clientName} × Leaders`
+    const personalNote = (input.personalNote || '').trim() || null
     const html = isEnglish
-      ? buildBriefEmailEn({ clientName: input.clientName, link: fullLink, senderName: input.senderName })
-      : buildBriefEmailHe({ clientName: input.clientName, link: fullLink, senderName: input.senderName })
+      ? buildBriefEmailEn({ clientName: input.clientName, link: fullLink, senderName: input.senderName, personalNote })
+      : buildBriefEmailHe({ clientName: input.clientName, link: fullLink, senderName: input.senderName, personalNote })
     await sendGmailEmail({
       refreshToken: input.senderRefreshToken,
       from: input.senderEmail,
@@ -190,30 +198,79 @@ export async function sendClientBrief(
 
 /* ───────────────── Email templates ───────────────── */
 
-function buildBriefEmailHe(opts: { clientName: string; link: string; senderName: string }): string {
-  return `<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:'Heebo','Helvetica Neue',sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;">
-    <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;">
-      <p style="font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:#888;margin:0 0 16px;">Leaders × OS</p>
-      <h1 style="font-size:22px;font-weight:700;margin:0 0 16px;line-height:1.3;">היי ${escapeHtml(opts.clientName)},</h1>
-      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">תודה שאתם איתנו. כדי להתחיל, יש למלא את הבריף הראשוני בקישור:</p>
-      <p style="margin:24px 0;"><a href="${opts.link}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:12px 28px;border-radius:9999px;font-weight:600;display:inline-block;">פתח את הבריף</a></p>
-      <p style="font-size:13px;color:#666;line-height:1.6;margin:0 0 0;">זה לוקח כ-15 דקות. אפשר לחזור ולהמשיך מאותה הנקודה — מה שמילאת נשמר אוטומטית.</p>
-      <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0;">
-      <p style="font-size:13px;color:#666;margin:0;">${escapeHtml(opts.senderName)} • Leaders</p>
-    </div></body></html>`
+/**
+ * Render a free-text note as a series of paragraphs. Empty lines split
+ * paragraphs; single newlines become <br>. Inline links are NOT auto-
+ * linked — clients should paste real URLs into the textarea if they
+ * want a link.
+ */
+function renderNoteParagraphs(note: string): string {
+  const blocks = note
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter((b) => b.length > 0)
+  return blocks
+    .map(
+      (b) =>
+        `<p style="font-size:15px;line-height:1.75;margin:0 0 12px;color:#1a1a2e;">${escapeHtml(b).replace(/\n/g, '<br>')}</p>`,
+    )
+    .join('')
 }
 
-function buildBriefEmailEn(opts: { clientName: string; link: string; senderName: string }): string {
-  return `<!DOCTYPE html><html dir="ltr" lang="en"><body style="font-family:'Helvetica Neue',Arial,sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;">
-    <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;">
+function buildBriefEmailHe(opts: {
+  clientName: string
+  link: string
+  senderName: string
+  personalNote?: string | null
+}): string {
+  const noteHtml = opts.personalNote
+    ? `<div style="background:#faf8f4;border-inline-start:3px solid #c9b27a;padding:14px 16px;margin:0 0 22px;border-radius:4px;">${renderNoteParagraphs(opts.personalNote)}</div>`
+    : ''
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body dir="rtl" style="margin:0;padding:0;background:#f5f3ef;font-family:'Heebo','Helvetica Neue',Arial,sans-serif;color:#1a1a2e;">
+  <div dir="rtl" style="padding:32px 16px;">
+    <div dir="rtl" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;text-align:right;">
+      <p style="font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:#888;margin:0 0 16px;direction:ltr;text-align:right;unicode-bidi:plaintext;">Leaders × OS</p>
+      <h1 style="font-size:22px;font-weight:700;margin:0 0 14px;line-height:1.35;color:#1a1a2e;">היי ${escapeHtml(opts.clientName)},</h1>
+      <p style="font-size:15px;line-height:1.75;margin:0 0 18px;color:#1a1a2e;">תודה שאתם איתנו. כדי שנוכל להתחיל לעבוד, נשמח שתמלאו את הבריף הראשוני — זה הבסיס שעליו נבנה את כל המהלך.</p>
+      ${noteHtml}
+      <div style="text-align:center;margin:28px 0 24px;">
+        <a href="${opts.link}" style="background:#1a1a2e;color:#ffffff;text-decoration:none;padding:13px 30px;border-radius:9999px;font-weight:600;display:inline-block;font-size:15px;">פתח את הבריף ←</a>
+      </div>
+      <p style="font-size:13px;color:#777;line-height:1.65;margin:0;">המילוי לוקח כ‑15 דקות. אפשר לחזור ולהמשיך — מה שמילאתם נשמר אוטומטית.</p>
+      <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0 16px;">
+      <p style="font-size:13px;color:#777;margin:0;">${escapeHtml(opts.senderName)} • Leaders</p>
+    </div>
+  </div>
+</body></html>`
+}
+
+function buildBriefEmailEn(opts: {
+  clientName: string
+  link: string
+  senderName: string
+  personalNote?: string | null
+}): string {
+  const noteHtml = opts.personalNote
+    ? `<div style="background:#faf8f4;border-inline-start:3px solid #c9b27a;padding:14px 16px;margin:0 0 22px;border-radius:4px;">${renderNoteParagraphs(opts.personalNote)}</div>`
+    : ''
+  return `<!DOCTYPE html><html dir="ltr" lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body dir="ltr" style="margin:0;padding:0;background:#f5f3ef;font-family:'Helvetica Neue',Arial,sans-serif;color:#1a1a2e;">
+  <div dir="ltr" style="padding:32px 16px;">
+    <div dir="ltr" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;text-align:left;">
       <p style="font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:#888;margin:0 0 16px;">Leaders × OS</p>
-      <h1 style="font-size:22px;font-weight:700;margin:0 0 16px;line-height:1.3;">Hi ${escapeHtml(opts.clientName)},</h1>
-      <p style="font-size:15px;line-height:1.7;margin:0 0 12px;">Thanks for being with us. To get started, please fill out the brief at this link:</p>
-      <p style="margin:24px 0;"><a href="${opts.link}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:12px 28px;border-radius:9999px;font-weight:600;display:inline-block;">Open the brief</a></p>
-      <p style="font-size:13px;color:#666;line-height:1.6;margin:0 0 0;">It takes about 15 minutes. You can come back and continue where you left off — your answers save automatically.</p>
-      <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0;">
-      <p style="font-size:13px;color:#666;margin:0;">${escapeHtml(opts.senderName)} • Leaders</p>
-    </div></body></html>`
+      <h1 style="font-size:22px;font-weight:700;margin:0 0 14px;line-height:1.35;color:#1a1a2e;">Hi ${escapeHtml(opts.clientName)},</h1>
+      <p style="font-size:15px;line-height:1.75;margin:0 0 18px;color:#1a1a2e;">Thanks for being with us. To get started, please fill out the initial brief — it's the foundation we'll build everything else on.</p>
+      ${noteHtml}
+      <div style="text-align:center;margin:28px 0 24px;">
+        <a href="${opts.link}" style="background:#1a1a2e;color:#ffffff;text-decoration:none;padding:13px 30px;border-radius:9999px;font-weight:600;display:inline-block;font-size:15px;">Open the brief →</a>
+      </div>
+      <p style="font-size:13px;color:#777;line-height:1.65;margin:0;">It takes about 15 minutes. You can come back any time — your answers save automatically.</p>
+      <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0 16px;">
+      <p style="font-size:13px;color:#777;margin:0;">${escapeHtml(opts.senderName)} • Leaders</p>
+    </div>
+  </div>
+</body></html>`
 }
 
 function escapeHtml(s: string): string {

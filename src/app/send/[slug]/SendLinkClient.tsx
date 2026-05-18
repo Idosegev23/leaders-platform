@@ -55,12 +55,47 @@ export default function SendLinkClient({
   const [clientName, setClientName] = useState('')
   const [clientEmail, setClientEmail] = useState('')
   const [language, setLanguage] = useState<'he' | 'en'>('he')
+  const [personalNote, setPersonalNote] = useState('')
+  const [isRefining, setIsRefining] = useState(false)
+  const [refineError, setRefineError] = useState<string | null>(null)
   const [generatedLink, setGeneratedLink] = useState<string | null>(null)
   const [mailStatus, setMailStatus] = useState<'sent' | 'skipped' | 'failed' | null>(null)
   const [driveLink, setDriveLink] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [copied, setCopied] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  const refineNote = async () => {
+    setRefineError(null)
+    const note = personalNote.trim()
+    if (!note) {
+      setRefineError('כתוב משהו לפני שמדייקים')
+      return
+    }
+    setIsRefining(true)
+    try {
+      const res = await fetch('/api/brief-note/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          note,
+          clientName: clientName.trim() || undefined,
+          language,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Refine failed')
+      if (typeof data.refined === 'string' && data.refined.trim()) {
+        setPersonalNote(data.refined.trim())
+      } else {
+        throw new Error('Empty refinement')
+      }
+    } catch (e) {
+      setRefineError(e instanceof Error ? e.message : 'הדיוק נכשל')
+    } finally {
+      setIsRefining(false)
+    }
+  }
 
   const createLink = async () => {
     setErrorMsg(null)
@@ -77,6 +112,7 @@ export default function SendLinkClient({
           slug: docType.slug,
           client_name: clientName.trim(),
           client_email: clientEmail.trim() || null,
+          personal_note: personalNote.trim() || null,
           metadata: { language },
         }),
       })
@@ -108,6 +144,8 @@ export default function SendLinkClient({
     setDriveLink(null)
     setClientName('')
     setClientEmail('')
+    setPersonalNote('')
+    setRefineError(null)
     setCopied(false)
   }
 
@@ -171,6 +209,54 @@ export default function SendLinkClient({
                   {l === 'he' ? 'עברית' : 'English'}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-gray-700">
+                הערה אישית ללקוח
+                <span className="text-xs text-gray-500 font-normal mr-2">(אופציונלי, נכנס לגוף המייל)</span>
+              </label>
+              <button
+                type="button"
+                onClick={refineNote}
+                disabled={isRefining || !personalNote.trim()}
+                className="text-xs font-semibold text-primary hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                title="דיוק לשוני עם AI"
+              >
+                {isRefining ? (
+                  <>
+                    <span className="inline-block w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    מדייק…
+                  </>
+                ) : (
+                  <>✨ דיוק עם AI</>
+                )}
+              </button>
+            </div>
+            <textarea
+              value={personalNote}
+              onChange={(e) => setPersonalNote(e.target.value)}
+              placeholder={language === 'he'
+                ? 'למשל: היה תענוג להכיר בפגישה השבוע. השארתי לך את הבריף — נשמח לחזור אליך עם הצעת מחיר תוך 48 שעות אחרי שתמלא.'
+                : 'e.g. Great meeting you this week. I\'ve left the brief for you — once you fill it in we\'ll come back with a proposal within 48 hours.'}
+              rows={4}
+              maxLength={2000}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-primary resize-y text-[14px] leading-relaxed"
+              dir={language === 'he' ? 'rtl' : 'ltr'}
+            />
+            <div className="flex items-center justify-between mt-1.5">
+              {refineError ? (
+                <span className="text-xs text-red-600">{refineError}</span>
+              ) : (
+                <span className="text-xs text-gray-400">
+                  כתוב טקסט חופשי וגע ב״דיוק עם AI״ כדי לעדן לפני שליחה.
+                </span>
+              )}
+              <span className="text-[11px] text-gray-400 tabular-nums">
+                {personalNote.length}/2000
+              </span>
             </div>
           </div>
 
@@ -264,7 +350,17 @@ export default function SendLinkClient({
 
       {/* Recent links */}
       <div className="bg-white border rounded-xl p-6">
-        <h2 className="text-lg font-bold mb-4">לינקים שיצרת</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold">לינקים שיצרת</h2>
+          {docType.slug === 'client-brief' && (
+            <Link
+              href="/briefs"
+              className="text-xs font-semibold text-primary hover:opacity-80"
+            >
+              כל הבריפים ←
+            </Link>
+          )}
+        </div>
         {recentLinks.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">עדיין לא יצרת לינקים</p>
         ) : (
