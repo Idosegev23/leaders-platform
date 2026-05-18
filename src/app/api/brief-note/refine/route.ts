@@ -1,22 +1,23 @@
 /**
  * POST /api/brief-note/refine
  * Polish the BD-team's free-text "personal note" that ships with a client
- * brief email. Runs Claude Haiku — fast, cheap, keeps Hebrew tone steady,
- * does NOT invent facts and does NOT change the sender's intent.
+ * brief email. Runs Gemini Flash (matches the rest of /api/ai-assist) —
+ * fast, cheap, keeps Hebrew tone steady, does NOT invent facts and does
+ * NOT change the sender's intent.
  *
  * Input:  { note: string, clientName?: string, senderName?: string, language?: 'he' | 'en' }
  * Output: { refined: string }
  */
 
 import { NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenAI, ThinkingLevel } from '@google/genai'
 import { createClient } from '@/lib/supabase/server'
 import { isDevMode } from '@/lib/auth/dev-mode'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const MODEL = 'claude-haiku-4-5-20251001'
+const MODEL = 'gemini-3-flash-preview'
 
 export async function POST(request: Request) {
   if (!isDevMode) {
@@ -27,9 +28,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY missing' }, { status: 500 })
+    return NextResponse.json({ error: 'GEMINI_API_KEY missing' }, { status: 500 })
   }
 
   const body = await request.json().catch(() => ({}))
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
   const senderName = String((body as { senderName?: unknown }).senderName || '').trim()
   const language = (body as { language?: 'he' | 'en' }).language === 'en' ? 'en' : 'he'
 
-  const system = language === 'he'
+  const instructions = language === 'he'
     ? `אתה עורך לשוני מקצועי בעברית עבור סוכנות Leaders.
 המשימה: לעדן הודעה אישית קצרה שאיש BD כתב, שעומדת להישלח ללקוח יחד עם לינק לבריף.
 
@@ -58,7 +59,17 @@ export async function POST(request: Request) {
 - אל תחזור על שם השולח או על המילה Leaders אם הם כבר נכתבו במקור.
 - ההודעה היא פסקה אחת או שתיים, ללא רשימות ובלי מספור.
 - אל תשתמש בסימני ציטוט כפולים (").
-- החזר רק את הטקסט המעודן — בלי הקדמות, בלי הסברים, בלי markdown.`
+- החזר רק את הטקסט המעודן — בלי הקדמות, בלי הסברים, בלי markdown.
+
+שם הלקוח: ${clientName || '—'}
+שם השולח: ${senderName || '—'}
+
+טקסט מקורי לעידון:
+---
+${note}
+---
+
+הטקסט המעודן:`
     : `You are a professional English copy editor for Leaders agency.
 Task: polish a short personal note that a BD person wrote, which will be sent to a client alongside a brief link.
 
@@ -71,38 +82,33 @@ Rules:
 - Do not repeat the sender name or "Leaders" if already present in the source.
 - The note is one or two short paragraphs. No bullets, no numbering.
 - Do not use double quotes (").
-- Return only the polished text — no preface, no explanation, no markdown.`
+- Return only the polished text — no preface, no explanation, no markdown.
 
-  const userPrompt = language === 'he'
-    ? `שם הלקוח: ${clientName || '—'}
-שם השולח: ${senderName || '—'}
-
-טקסט מקורי לעידון:
-"""
-${note}
-"""`
-    : `Client name: ${clientName || '—'}
+Client name: ${clientName || '—'}
 Sender name: ${senderName || '—'}
 
 Original text to polish:
-"""
+---
 ${note}
-"""`
+---
+
+Polished text:`
 
   try {
-    const client = new Anthropic({ apiKey })
-    const resp = await client.messages.create({
+    const ai = new GoogleGenAI({ apiKey })
+    const response = await ai.models.generateContent({
       model: MODEL,
-      max_tokens: 600,
-      system,
-      messages: [{ role: 'user', content: userPrompt }],
+      contents: instructions,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      },
     })
 
-    let text = ''
-    for (const block of resp.content) {
-      if (block.type === 'text') text += block.text
-    }
-    text = text.trim().replace(/^"+|"+$/g, '').replace(/"/g, "'")
+    let text = (response.text || '').trim()
+    text = text.replace(/^"+|"+$/g, '').replace(/"/g, "'")
+    // Strip an accidental leading "Polished text:" / "הטקסט המעודן:" if the
+    // model echoed it. Conservative — only strip when at the very start.
+    text = text.replace(/^(הטקסט המעודן:|Polished text:)\s*/i, '').trim()
 
     if (!text) {
       return NextResponse.json({ error: 'empty refinement' }, { status: 500 })
@@ -111,7 +117,7 @@ ${note}
     return NextResponse.json({ refined: text })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    console.error('[brief-note/refine] claude failed:', msg)
+    console.error('[brief-note/refine] gemini failed:', msg)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
