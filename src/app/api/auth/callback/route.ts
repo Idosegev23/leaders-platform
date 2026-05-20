@@ -101,6 +101,60 @@ export async function GET(request: Request) {
             return NextResponse.redirect(`${origin}/login?error=not_authorized`)
           }
 
+          // Auto-register the signed-in user into `contacts` so they show up
+          // in the inner-meeting participant picker without any manual
+          // seeding. Google is the source of truth for the team list; this
+          // table is just the cache it warms on first login. Idempotent —
+          // existing rows are left alone (no upsert) so a manually-edited
+          // Hebrew name doesn't get clobbered next time the same user
+          // signs in.
+          try {
+            const serviceClient = createClient(
+              process.env.NEXT_PUBLIC_SUPABASE_URL!,
+              process.env.SUPABASE_SERVICE_ROLE_KEY!,
+            )
+            const meta = (user.user_metadata ?? {}) as Record<string, unknown>
+            const fullName =
+              (typeof meta.full_name === 'string' && meta.full_name) ||
+              (typeof meta.name === 'string' && meta.name) ||
+              ''
+            const givenName =
+              (typeof meta.given_name === 'string' && meta.given_name) ||
+              (typeof meta.first_name === 'string' && meta.first_name) ||
+              ''
+            const familyName =
+              (typeof meta.family_name === 'string' && meta.family_name) ||
+              (typeof meta.last_name === 'string' && meta.last_name) ||
+              ''
+
+            // Resolve first/last from whichever Google sent us — prefer
+            // explicit given/family, otherwise split the full name on the
+            // first space. Last resort: derive from the email prefix.
+            const fallbackName = emailLower.split('@')[0] || 'User'
+            const splitFromFull = fullName ? fullName.trim().split(/\s+/) : []
+            const firstName = givenName || splitFromFull[0] || fallbackName
+            const lastName =
+              familyName ||
+              (splitFromFull.length > 1 ? splitFromFull.slice(1).join(' ') : '')
+
+            // INSERT … ON CONFLICT DO NOTHING. Postgres handles the dedupe
+            // by email — we only auto-create the row the first time.
+            await serviceClient
+              .from('contacts')
+              .upsert(
+                {
+                  email: emailLower,
+                  first_name: firstName,
+                  last_name: lastName,
+                  hebrew_first_name: firstName,
+                  hebrew_last_name: lastName,
+                },
+                { onConflict: 'email', ignoreDuplicates: true },
+              )
+          } catch (e) {
+            console.warn(`[Auth] contacts auto-register failed (non-fatal):`, e instanceof Error ? e.message : e)
+          }
+
           // Auto-assign admin role for matching emails
           if (ADMIN_EMAILS.includes(emailLower)) {
             const serviceClient = createClient(
