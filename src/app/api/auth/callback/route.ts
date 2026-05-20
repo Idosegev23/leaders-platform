@@ -12,6 +12,25 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .map(e => e.trim().toLowerCase())
   .filter(Boolean)
 
+// Whitelist policy: anyone whose Google account is on the Leaders Workspace
+// domain is automatically admitted. Google validates domain ownership during
+// Workspace setup, so a successful OAuth login with @ldrsgroup.com proves
+// the user is a real Leaders employee — no `contacts` table lookup needed.
+// ALLOWED_DOMAINS lets us extend this later (e.g. ldrs.co.il) without code.
+const ALLOWED_DOMAINS = (process.env.ALLOWED_EMAIL_DOMAINS || 'ldrsgroup.com')
+  .split(',')
+  .map(d => d.trim().toLowerCase().replace(/^@/, ''))
+  .filter(Boolean)
+
+function isLeadersEmail(email: string): boolean {
+  const lower = email.toLowerCase()
+  if (ADMIN_EMAILS.includes(lower)) return true
+  const at = lower.lastIndexOf('@')
+  if (at === -1) return false
+  const domain = lower.slice(at + 1)
+  return ALLOWED_DOMAINS.includes(domain)
+}
+
 type CookieToSet = { name: string; value: string; options?: CookieOptions }
 
 export async function GET(request: Request) {
@@ -70,25 +89,16 @@ export async function GET(request: Request) {
               )
           }
 
-          // Leaders whitelist check — email must exist in `contacts`.
-          // Bypassed in dev mode so local development doesn't require seeded data.
+          // Leaders whitelist — domain-based. Anyone signing in with a
+          // Google account on an allowed Workspace domain is in. The
+          // `contacts` table is no longer consulted here (it remains the
+          // source of truth for participant pickers etc., not for auth).
+          // Dev mode still bypasses everything so local dev needs no setup.
           const skipWhitelist = process.env.NEXT_PUBLIC_DEV_MODE === 'true'
-          if (!skipWhitelist) {
-            const serviceClient = createClient(
-              process.env.NEXT_PUBLIC_SUPABASE_URL!,
-              process.env.SUPABASE_SERVICE_ROLE_KEY!,
-            )
-            const { data: contact } = await serviceClient
-              .from('contacts')
-              .select('id')
-              .eq('email', emailLower)
-              .maybeSingle()
-
-            if (!contact) {
-              console.warn(`[Auth] Rejected non-Leaders email: ${user.email}`)
-              await supabase.auth.signOut()
-              return NextResponse.redirect(`${origin}/login?error=not_authorized`)
-            }
+          if (!skipWhitelist && !isLeadersEmail(user.email || '')) {
+            console.warn(`[Auth] Rejected — email not on allowed domain: ${user.email}`)
+            await supabase.auth.signOut()
+            return NextResponse.redirect(`${origin}/login?error=not_authorized`)
           }
 
           // Auto-assign admin role for matching emails
