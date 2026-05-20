@@ -12,7 +12,6 @@
 
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { sendGmailEmail } from '@/lib/gmail'
-import { ensureClientBriefSentFolder } from '@/lib/google-drive/client-folders'
 
 export interface SendClientBriefInput {
   clientName: string
@@ -113,26 +112,15 @@ export async function sendClientBrief(
 
   const fullLink = `${appBaseUrl()}${docType.target_url}?token=${linkRow.token}`
 
-  // 2. Drive folder. Best-effort — Gmail still goes out even if Drive fails.
-  let driveFolderId: string | null = null
-  let driveFolderLink: string | null = null
-  try {
-    const folder = await ensureClientBriefSentFolder({ clientName: input.clientName })
-    driveFolderId = folder.id
-    driveFolderLink = folder.webViewLink
-    await service
-      .from('document_links')
-      .update({
-        metadata: {
-          brief_drive_folder_id: folder.id,
-          brief_drive_folder_link: folder.webViewLink,
-        },
-      })
-      .eq('id', linkRow.id)
-    console.log(`${tag} drive folder ready: ${folder.id}`)
-  } catch (e) {
-    console.warn(`${tag} drive folder failed (non-fatal):`, e instanceof Error ? e.message : e)
-  }
+  // No Drive folder is created at send time. Per-client folders for every
+  // outgoing link generated clutter inside "בריפים ראשוניים" with empty
+  // shells for clients who never end up filling the form. Instead, the
+  // brief's Google Doc lands directly under BRIEFS_SENT on submission
+  // (see runClientBriefCascade in /api/links/[token]/route.ts) and only
+  // gets a real on-disk presence once the client actually has data to
+  // hand back.
+  const driveFolderId: string | null = null
+  const driveFolderLink: string | null = null
 
   // 3. Gmail. If this fails the whole "send" failed from the user's POV —
   //    return mailDelivery=failed and let the caller decide what to do.

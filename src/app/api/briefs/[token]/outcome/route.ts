@@ -24,7 +24,9 @@ import { createClient } from '@/lib/supabase/server'
 import { isDevMode, DEV_USER } from '@/lib/auth/dev-mode'
 import {
   moveClientBriefFolder,
+  moveItem,
   ensureClientWorkspace,
+  DRIVE_ANCHORS,
 } from '@/lib/google-drive/client-folders'
 
 export const dynamic = 'force-dynamic'
@@ -87,20 +89,33 @@ export async function POST(
 
   const meta = (link.metadata as Record<string, unknown> | null) ?? {}
   const driveFolderId = (meta.brief_drive_folder_id as string | undefined) || null
+  const driveDocId    = (meta.brief_drive_doc_id    as string | undefined) || null
   const clientName = (link.client_name as string | null) || 'לקוח'
+  const targetParentId =
+    typedOutcome === 'won' ? DRIVE_ANCHORS.BRIEFS_COMPLETED : DRIVE_ANCHORS.BRIEFS_FAILED
 
-  // 1. Move the per-client brief folder in Drive. Best-effort: even if Drive
-  //    fails (folder was deleted, permissions, etc.) we still record the
-  //    outcome in Supabase so the operator's intent isn't lost.
+  // 1. Move the brief in Drive. New-format briefs are individual Google
+  //    Docs sitting in BRIEFS_SENT — we move the Doc itself. Legacy briefs
+  //    still carry a per-client folder; for those we move the folder so
+  //    nothing in older records breaks. Best-effort: even if Drive fails,
+  //    we still record the outcome so the operator's intent isn't lost.
+  let docMoved = false
   let folderMoved = false
-  if (driveFolderId) {
+  if (driveDocId) {
+    try {
+      await moveItem({ fileId: driveDocId, newParentId: targetParentId })
+      docMoved = true
+    } catch (e) {
+      console.warn('[/api/briefs/outcome] doc move failed:', e instanceof Error ? e.message : e)
+    }
+  } else if (driveFolderId) {
     try {
       folderMoved = await moveClientBriefFolder({
         folderId: driveFolderId,
         to: typedOutcome === 'won' ? 'completed' : 'failed',
       })
     } catch (e) {
-      console.warn('[/api/briefs/outcome] move failed:', e instanceof Error ? e.message : e)
+      console.warn('[/api/briefs/outcome] folder move failed:', e instanceof Error ? e.message : e)
     }
   }
 
@@ -127,6 +142,7 @@ export async function POST(
     outcome_by_email: actorEmail,
     outcome_by_name: actorName,
     folder_moved: folderMoved,
+    doc_moved: docMoved,
     ...(workspaceLink ? { workspace_drive_folder_link: workspaceLink } : {}),
   }
   await service
@@ -160,6 +176,7 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     outcome: typedOutcome,
+    doc_moved: docMoved,
     folder_moved: folderMoved,
     workspace_link: workspaceLink,
     workspace_created: workspaceCreated,

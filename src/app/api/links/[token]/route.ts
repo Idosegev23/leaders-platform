@@ -219,22 +219,26 @@ async function runClientBriefCascade(params: {
   // doesn't promise a workspace link yet.
   const workspaceLink: string | null = null
 
-  // 0. Write the brief content as a Google Doc into the brief folder so
-  //    the team has something to read in Drive (replaces the Make.com
-  //    "create doc" step). Best-effort; mgmt mail still goes out if this
-  //    fails. Only on completion — failed/abandoned briefs have no useful
-  //    payload to write.
+  // 0. Write the brief content as a Google Doc directly into the main
+  //    "בריפים ראשוניים" folder. We no longer pre-create a per-client
+  //    sub-folder at send time, so the Doc lands at BRIEFS_SENT root and
+  //    is named "בריף — {client} — {YYYY-MM-DD}" (unique per client/day).
+  //    Legacy links still carry a per-client folder_id in metadata — for
+  //    those we write into the original folder to preserve continuity.
+  //    Best-effort; mgmt mail still goes out if this fails. Only fires on
+  //    completion — failed/abandoned briefs have no useful payload to write.
   let briefDocLink: string | null = null
   if (
     params.transition === 'completed' &&
-    params.driveFolderId &&
     params.submissionData &&
     Object.keys(params.submissionData).length > 0
   ) {
     try {
       const { uploadBriefDocToFolder } = await import('@/lib/brief/upload-doc')
+      const { DRIVE_ANCHORS } = await import('@/lib/google-drive/client-folders')
+      const targetFolderId = params.driveFolderId || DRIVE_ANCHORS.BRIEFS_SENT
       const result = await uploadBriefDocToFolder({
-        folderId: params.driveFolderId,
+        folderId: targetFolderId,
         clientName: params.clientName,
         senderName: params.senderName,
         senderEmail: params.senderEmail,
@@ -243,14 +247,14 @@ async function runClientBriefCascade(params: {
         submittedAt: new Date().toISOString(),
       })
       briefDocLink = result.viewLink
-      // Persist the doc link on the link's metadata so /briefs/[token] +
-      // the dashboard can show it.
+      // Persist the doc id+link on the link's metadata so /briefs/[token],
+      // the dashboard, and the outcome handler can find the file.
       const meta = await readLinkMeta(service, params.linkId)
       await service
         .from('document_links')
         .update({ metadata: { ...meta, brief_drive_doc_id: result.fileId, brief_drive_doc_link: result.viewLink } })
         .eq('id', params.linkId)
-      console.log(`${tag} brief doc ${result.reused ? 'reused' : 'created'}: ${result.viewLink}`)
+      console.log(`${tag} brief doc ${result.reused ? 'reused' : 'created'} in ${targetFolderId === DRIVE_ANCHORS.BRIEFS_SENT ? 'BRIEFS_SENT' : 'legacy-folder'}: ${result.viewLink}`)
     } catch (e) {
       console.warn(`${tag} brief doc upload failed (non-fatal):`, e instanceof Error ? e.message : e)
     }

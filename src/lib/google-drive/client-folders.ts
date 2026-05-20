@@ -219,6 +219,12 @@ export async function ensureClientWorkspace(params: {
  * "ניהול לקוח" (with the 7 standard subfolders). Idempotent — re-running
  * is safe; existing workspaces are reused.
  *
+ * Briefs land in BRIEFS_COMPLETED in one of two shapes:
+ *   - Legacy: a per-client folder (name = client name) — pre-2026-05-20.
+ *   - Current: an individual Google Doc named "בריף — {client} — {date}"
+ *     that the operator dragged in from "בריפים ראשוניים".
+ * We handle both so historical records keep working.
+ *
  * Returns a per-client breakdown so callers can email management about
  * the *newly* created workspaces only.
  */
@@ -233,34 +239,63 @@ export async function scanClosedBriefsAndCreateWorkspaces(): Promise<{
   const reused: Array<{ clientName: string; workspaceId: string; webViewLink: string }> = []
   const failed: Array<{ clientName: string; error: string }> = []
 
-  // List all folders directly under "נסגר".
-  const closedFolderListing = await drive.files.list({
-    q: `'${DRIVE_ANCHORS.BRIEFS_COMPLETED}' in parents and trashed=false and mimeType='${FOLDER_MIME}'`,
-    fields: 'files(id, name)',
-    pageSize: 200,
+  // List every direct child under "נסגר" — folders (legacy) and Google
+  // Docs (current). Excluding only trashed items.
+  const closedListing = await drive.files.list({
+    q: `'${DRIVE_ANCHORS.BRIEFS_COMPLETED}' in parents and trashed=false and (mimeType='${FOLDER_MIME}' or mimeType='${GOOGLE_DOC_MIME}')`,
+    fields: 'files(id, name, mimeType)',
+    pageSize: 400,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   })
-  const closedFolders = closedFolderListing.data.files || []
+  const items = closedListing.data.files || []
 
-  for (const f of closedFolders) {
-    if (!f.name) continue
+  // De-duplicate by client name so a Doc + legacy folder pair for the same
+  // client don't produce two workspace creates.
+  const seen: Record<string, true> = {}
+  const clientNames: string[] = []
+  for (const item of items) {
+    if (!item.name) continue
+    const clientName = item.mimeType === GOOGLE_DOC_MIME
+      ? extractClientNameFromDocTitle(item.name)
+      : item.name
+    if (clientName && !seen[clientName]) {
+      seen[clientName] = true
+      clientNames.push(clientName)
+    }
+  }
+
+  for (const clientName of clientNames) {
     try {
-      const ws = await ensureClientWorkspace({ clientName: f.name })
+      const ws = await ensureClientWorkspace({ clientName })
       const entry = {
-        clientName: f.name,
+        clientName,
         workspaceId: ws.workspaceId,
         webViewLink: ws.webViewLink,
       }
       if (ws.created) created.push(entry)
       else reused.push(entry)
     } catch (e) {
-      failed.push({ clientName: f.name, error: e instanceof Error ? e.message : String(e) })
+      failed.push({ clientName, error: e instanceof Error ? e.message : String(e) })
     }
   }
 
-  return { scanned: closedFolders.length, created, reused, failed }
+  return { scanned: items.length, created, reused, failed }
 }
+
+/**
+ * Parse the client name out of a brief Doc title. Both Hebrew and English
+ * naming patterns are supported:
+ *   "בריף — Acme Corp — 2026-05-20"
+ *   "Brief — Acme Corp — 2026-05-20"
+ * Returns null if the title doesn't match — those files are ignored.
+ */
+function extractClientNameFromDocTitle(title: string): string | null {
+  const m = title.match(/^(?:בריף|Brief)\s+[—–-]\s+(.+?)\s+[—–-]\s+\d{4}-\d{2}-\d{2}\s*$/)
+  return m ? m[1].trim() : null
+}
+
+const GOOGLE_DOC_MIME = 'application/vnd.google-apps.document'
 
 async function listSubfolders(
   parentId: string,

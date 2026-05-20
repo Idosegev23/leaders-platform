@@ -206,14 +206,14 @@ export default function BriefsList({ initialRows }: { initialRows: BriefRow[] })
                           Google Doc ↗
                         </a>
                       )}
-                      {r.driveFolderLink && (
+                      {!r.briefDocLink && r.driveFolderLink && (
                         <a
                           href={r.driveFolderLink}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-brand-primary/60 hover:text-brand-accent transition-colors"
                         >
-                          תיקיית בריף ↗
+                          תיקיית בריף (legacy) ↗
                         </a>
                       )}
                       {r.workspaceLink && (

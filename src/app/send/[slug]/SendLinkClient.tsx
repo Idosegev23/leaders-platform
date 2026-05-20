@@ -60,7 +60,6 @@ export default function SendLinkClient({
   const [refineError, setRefineError] = useState<string | null>(null)
   const [generatedLink, setGeneratedLink] = useState<string | null>(null)
   const [mailStatus, setMailStatus] = useState<'sent' | 'skipped' | 'failed' | null>(null)
-  const [driveLink, setDriveLink] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [copied, setCopied] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -120,10 +119,6 @@ export default function SendLinkClient({
       if (!res.ok) throw new Error(data.error || 'Failed')
       setGeneratedLink(data.full_link)
       setMailStatus((data.mail_delivery as 'sent' | 'skipped' | 'failed' | undefined) ?? null)
-      setDriveLink(
-        (data.metadata?.brief_drive_folder_link as string | undefined) ||
-          (data.drive_folder_id ? `https://drive.google.com/drive/folders/${data.drive_folder_id}` : null),
-      )
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : 'שגיאה ביצירת הלינק')
     } finally {
@@ -141,7 +136,6 @@ export default function SendLinkClient({
   const reset = () => {
     setGeneratedLink(null)
     setMailStatus(null)
-    setDriveLink(null)
     setClientName('')
     setClientEmail('')
     setPersonalNote('')
@@ -295,22 +289,11 @@ export default function SendLinkClient({
             </p>
           </div>
 
-          {/* Native pipeline status — Drive folder + email delivery */}
-          {(driveLink || mailStatus) && (
+          {/* Native pipeline status — email delivery only. The Doc itself is
+              created only after the client submits, so we don't promise a
+              Drive link here. */}
+          {mailStatus && (
             <div className="bg-white/60 border border-green-200 rounded-lg p-3 mb-3 text-xs space-y-1.5">
-              {driveLink && (
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-green-900">📁 תיקיית בריף ב-Drive נוצרה</span>
-                  <a
-                    href={driveLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-green-700 underline font-semibold whitespace-nowrap"
-                  >
-                    פתח תיקייה
-                  </a>
-                </div>
-              )}
               {mailStatus === 'sent' && (
                 <div className="text-green-900">✉️ מייל נשלח ללקוח מתיבת הדוא״ל שלך</div>
               )}
@@ -324,6 +307,9 @@ export default function SendLinkClient({
                   ✗ שליחת המייל נכשלה. הלינק זמין למטה — שלח ידנית.
                 </div>
               )}
+              <div className="text-green-900/70">
+                📄 ה‑Google Doc ייווצר אוטומטית ב‑"בריפים ראשוניים" ברגע שהלקוח יגיש.
+              </div>
             </div>
           )}
 
