@@ -60,6 +60,9 @@ export default async function BriefsHubPage() {
         driveFolderLink: (meta.brief_drive_folder_link as string | undefined) ?? null,
         briefDocLink: (meta.brief_drive_doc_link as string | undefined) ?? null,
         workspaceLink: (meta.workspace_drive_folder_link as string | undefined) ?? null,
+        language: ((meta.language as string | undefined) === 'en' ? 'en' : 'he') as 'he' | 'en',
+        reminderSentAt: (meta.reminder_sent_at as string | undefined) ?? null,
+        reminderCount: Number(meta.reminder_count || 0),
       }
     })
   }

@@ -92,13 +92,14 @@ export default async function DashboardPage() {
     { auth: { persistSession: false } },
   )
   const events = await fetchHubFeed(serviceClient, 30)
+  const briefStats = await computeBriefStats(serviceClient)
 
   return (
     <div dir="rtl" className="max-w-7xl mx-auto px-4 md:px-8 py-12 md:py-16 text-brand-primary">
       <HubRealtimeSync />
 
       {/* Greeting */}
-      <header className="mb-16 md:mb-24">
+      <header className="mb-10 md:mb-14">
         <p className="text-[10px] tracking-[0.5em] uppercase text-brand-primary/55 font-rubik mb-5 font-medium">
           Leaders <span className="mx-1 text-brand-primary/75">x</span> OS
         </p>
@@ -109,6 +110,42 @@ export default async function DashboardPage() {
           בחר רובריקה כדי להתחיל, או המשך עבודה מפיד הפעילות החי למטה.
         </p>
       </header>
+
+      {/* Quick stats — BD attention metrics */}
+      <section className="mb-12 md:mb-16">
+        <div className="flex items-center gap-4 mb-4">
+          <span className="text-[10px] tracking-[0.32em] uppercase text-brand-primary/65 font-rubik font-medium">
+            פיתוח עסקי
+          </span>
+          <div className="h-px flex-1 bg-brand-primary/10" />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+          <StatTile
+            label="בריפים בטיפול"
+            value={briefStats.inProgress}
+            href="/briefs?filter=pending"
+            tone="neutral"
+          />
+          <StatTile
+            label="צריכים תזכורת"
+            value={briefStats.needsAttention}
+            href="/briefs?filter=needs_attention"
+            tone={briefStats.needsAttention > 0 ? 'alert' : 'neutral'}
+          />
+          <StatTile
+            label="ממתינים להחלטה"
+            value={briefStats.awaitingOutcome}
+            href="/briefs?filter=awaiting_outcome"
+            tone={briefStats.awaitingOutcome > 0 ? 'warn' : 'neutral'}
+          />
+          <StatTile
+            label="נסגרו השבוע"
+            value={briefStats.wonThisWeek}
+            href="/briefs?filter=won"
+            tone="good"
+          />
+        </div>
+      </section>
 
       {/* Rubrics */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-20 md:mb-28">
@@ -284,4 +321,111 @@ function relativeTime(iso: string): string {
   if (hours < 24) return `לפני ${hours} ש'`
   if (days < 7) return `לפני ${days} ימ'`
   return new Date(iso).toLocaleDateString('he-IL')
+}
+
+/* --------------------------------------------------------- */
+/* Brief stats — feeds the BD attention strip                */
+/* --------------------------------------------------------- */
+
+type BriefStats = {
+  inProgress: number
+  needsAttention: number
+  awaitingOutcome: number
+  wonThisWeek: number
+}
+
+const ATTENTION_PENDING_DAYS = 5
+const ATTENTION_AWAITING_DAYS = 3
+const REMINDER_COOLDOWN_HOURS = 72
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function computeBriefStats(service: any): Promise<BriefStats> {
+  const empty: BriefStats = { inProgress: 0, needsAttention: 0, awaitingOutcome: 0, wonThisWeek: 0 }
+  try {
+    const { data: docType } = await service
+      .from('document_types')
+      .select('id')
+      .eq('slug', 'client-brief')
+      .maybeSingle()
+    if (!docType?.id) return empty
+
+    const { data } = await service
+      .from('document_links')
+      .select('status, created_at, completed_at, metadata')
+      .eq('document_type_id', docType.id)
+      .limit(500)
+
+    if (!data) return empty
+
+    const now = Date.now()
+    const stats = { ...empty }
+    for (const r of data) {
+      const meta = (r.metadata as Record<string, unknown> | null) ?? {}
+      const outcome = meta.outcome as 'won' | 'lost' | undefined
+      const ageDays = (now - new Date(r.created_at).getTime()) / 86_400_000
+      const reminderAt = meta.reminder_sent_at as string | undefined
+      const reminderHoursAgo = reminderAt ? (now - new Date(reminderAt).getTime()) / 3_600_000 : Infinity
+
+      if (!outcome && (r.status === 'pending' || r.status === 'opened')) {
+        stats.inProgress++
+        if (ageDays >= ATTENTION_PENDING_DAYS && reminderHoursAgo >= REMINDER_COOLDOWN_HOURS) {
+          stats.needsAttention++
+        }
+      } else if (!outcome && r.status === 'completed') {
+        const completedDays = r.completed_at
+          ? (now - new Date(r.completed_at).getTime()) / 86_400_000
+          : 0
+        stats.awaitingOutcome++
+        if (completedDays >= ATTENTION_AWAITING_DAYS) {
+          stats.needsAttention++
+        }
+      }
+
+      if (outcome === 'won') {
+        const outcomeAt = meta.outcome_at as string | undefined
+        if (outcomeAt && now - new Date(outcomeAt).getTime() <= 7 * 86_400_000) {
+          stats.wonThisWeek++
+        }
+      }
+    }
+    return stats
+  } catch (e) {
+    console.warn('[dashboard] computeBriefStats failed:', e instanceof Error ? e.message : e)
+    return empty
+  }
+}
+
+function StatTile({
+  label,
+  value,
+  href,
+  tone,
+}: {
+  label: string
+  value: number
+  href: string
+  tone: 'neutral' | 'warn' | 'alert' | 'good'
+}) {
+  const accent = {
+    neutral: 'text-brand-primary',
+    warn: 'text-amber-700',
+    alert: 'text-red-600',
+    good: 'text-emerald-700',
+  }[tone]
+  return (
+    <Link
+      href={href}
+      className="group block p-5 ring-1 ring-brand-primary/10 rounded-sm bg-brand-ivory hover:ring-brand-primary/25 hover:-translate-y-[1px] transition-all duration-200"
+    >
+      <p className="text-[10px] tracking-[0.24em] uppercase text-brand-primary/55 font-rubik font-medium">
+        {label}
+      </p>
+      <p className={`mt-2 text-[28px] md:text-[32px] font-medium leading-none tracking-tight tabular-nums ${accent}`}>
+        {value}
+      </p>
+      <p className="mt-2 text-[11px] tracking-[0.04em] text-brand-primary/45 group-hover:text-brand-accent transition-colors">
+        פתח רשימה ←
+      </p>
+    </Link>
+  )
 }
