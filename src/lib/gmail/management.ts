@@ -29,14 +29,13 @@ const HARD_BLOCKLIST = new Set<string>([
   'erann@ldrsgroup.com',
 ])
 
-export function getManagementRecipients(): string[] {
+export function getManagementRecipients(extra: Array<string | null | undefined> = []): string[] {
   const raw =
     process.env.MANAGEMENT_EMAILS ||
     process.env.ADMIN_EMAILS ||
     APPROVED_FALLBACK.join(',')
-  const parsed = raw
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
+  const parsed = [...raw.split(','), ...extra]
+    .map((s) => (s ?? '').toString().trim().toLowerCase())
     .filter((s) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s))
     .filter((s) => !HARD_BLOCKLIST.has(s))
   return Array.from(new Set(parsed))

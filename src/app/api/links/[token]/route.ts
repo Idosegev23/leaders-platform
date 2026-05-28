@@ -260,9 +260,9 @@ async function runClientBriefCascade(params: {
     }
   }
 
-  // 1. Email management.
+  // 1. Email management + the BD-person who originally sent the brief.
   try {
-    const { sendToManagement } = await import('@/lib/gmail/management')
+    const { sendToManagement, getManagementRecipients } = await import('@/lib/gmail/management')
     // AI summary of the brief (Gemini 3.1 Pro). Best-effort — if it fails the
     // mail still goes out with the legacy hand-picked field preview as fallback.
     let aiSummary: import('@/lib/brief/ai-summary').BriefMgmtSummary | null = null
@@ -293,13 +293,17 @@ async function runClientBriefCascade(params: {
     const subject = params.transition === 'completed'
       ? `✅ בריף התקבל מ-${params.clientName}`
       : `⚠ בריף נטוש — ${params.clientName}`
+    // Include the BD-person who sent the brief so they know their client filled
+    // it out. Dedupe + blocklist applied inside getManagementRecipients.
+    const recipients = getManagementRecipients([params.senderEmail])
     const result = await sendToManagement({
       senderEmail: params.senderEmail || undefined,
       senderName: params.senderName || undefined,
       subject,
       html,
+      to: recipients,
     })
-    console.log(`${tag} mgmt mail: sent=${result.sent} failed=${result.failed.length}`)
+    console.log(`${tag} mgmt+sender mail: recipients=${recipients.length} sent=${result.sent} failed=${result.failed.length}`)
   } catch (e) {
     console.warn(`${tag} mgmt mail error:`, e instanceof Error ? e.message : e)
   }

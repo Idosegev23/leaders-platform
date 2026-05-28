@@ -74,6 +74,9 @@ function pickOne<T>(x: T | T[] | null | undefined): T | null {
 
 function briefHref(row: LinkRow): string {
   const dt = pickOne(row.document_types)
+  // client-brief: employee clicking an activity event wants the dedicated
+  // viewer (parsed brief + outcome controls), not the client-facing form.
+  if (dt?.slug === 'client-brief') return `/briefs/${row.token}`
   return dt?.target_url ? `${dt.target_url}?token=${row.token}` : '/dashboard'
 }
 

@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import { formSteps } from '@/lib/client-brief/formSteps'
 import { formStepsEn } from '@/lib/client-brief/formSteps.en'
 import type { FormData, StepConfig } from '@/types/client-brief'
+import OutcomeActions from './OutcomeActions'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,6 +87,15 @@ export default async function BriefViewPage({
   const activeSteps: StepConfig[] = isEnglish ? formStepsEn : formSteps
   const isClientBrief = docSlug === 'client-brief'
 
+  // Outcome state for the in-page נסגר/נפל buttons. Outcome lives on the link
+  // metadata (set by /api/briefs/[token]/outcome); the Drive side-effects are
+  // handled inside that API call so we only need to surface the decision UI.
+  const outcome = (meta.outcome as 'won' | 'lost' | undefined) ?? null
+  const outcomeAt = (meta.outcome_at as string | undefined) ?? null
+  const outcomeBy = (meta.outcome_by_name as string | undefined) ?? null
+  const workspaceLink = (meta.workspace_drive_folder_link as string | undefined) ?? null
+  const briefIsSubmitted = link.status === 'completed' || link.status === 'failed' || !!submission
+
   return (
     <div dir={isEnglish ? 'ltr' : 'rtl'} className="max-w-4xl mx-auto px-4 md:px-8 py-10 md:py-14 text-brand-primary">
       {/* Back row */}
@@ -155,7 +165,7 @@ export default async function BriefViewPage({
       </header>
 
       {/* Timestamp grid */}
-      <section className="mb-12 grid grid-cols-2 md:grid-cols-3 gap-3">
+      <section className="mb-8 grid grid-cols-2 md:grid-cols-3 gap-3">
         <MetaCell
           label={isEnglish ? 'Sent' : 'נשלח'}
           value={formatFull(link.created_at, isEnglish)}
@@ -169,6 +179,20 @@ export default async function BriefViewPage({
           value={submittedAt ? formatFull(submittedAt, isEnglish) : '—'}
         />
       </section>
+
+      {/* Outcome decision — only meaningful once the brief is actually in. */}
+      {isClientBrief && briefIsSubmitted && (
+        <section className="mb-12">
+          <OutcomeActions
+            token={link.token}
+            initialOutcome={outcome}
+            initialOutcomeAt={outcomeAt}
+            initialOutcomeBy={outcomeBy}
+            initialWorkspaceLink={workspaceLink}
+            isEnglish={isEnglish}
+          />
+        </section>
+      )}
 
       {/* Submission body */}
       {!isClientBrief ? (

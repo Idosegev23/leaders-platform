@@ -353,13 +353,20 @@ export default function BriefsList({ initialRows }: { initialRows: BriefRow[] })
                 <div className="flex items-start gap-4 flex-wrap">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-3 flex-wrap">
+                      <Link
+                        href={`/briefs/${r.token}`}
+                        className="text-[16px] font-semibold hover:text-brand-accent transition-colors truncate text-right"
+                        title="פתח את הבריף"
+                      >
+                        {r.clientName || '(ללא שם)'}
+                      </Link>
                       <button
                         type="button"
                         onClick={() => toggleExpand(r)}
-                        className="text-[16px] font-semibold hover:text-brand-accent transition-colors truncate text-right"
+                        className="text-[10px] tracking-[0.16em] uppercase font-rubik font-medium text-brand-primary/55 hover:text-brand-accent transition-colors"
                         title="הצג timeline"
                       >
-                        {r.clientName || '(ללא שם)'}
+                        {isOpen ? 'סגור timeline' : 'timeline'}
                       </button>
                       <BriefStatusBadge row={r} />
                       <AgeBadge createdAt={r.createdAt} outcome={r.outcome} />
