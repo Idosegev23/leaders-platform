@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai'
 import type { ParsedDocument } from '@/types/brief'
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
-const MODEL = 'gemini-3-flash-preview' // Fast OCR — no need for Pro reasoning
+const MODEL = 'gemini-3.5-flash' // Fast OCR — no need for Pro reasoning
 
 /**
  * Parse document images (screenshots, photos of docs) using Gemini Vision OCR

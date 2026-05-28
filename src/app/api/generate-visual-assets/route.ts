@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
       try {
         const { callAI: callAILogo } = await import('@/lib/ai-provider')
         const urlResult = await callAILogo({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.5-flash',
           prompt: `Visit ${siteUrl} and find the logo image URL. Look for:
 1. <img> tags with alt containing "logo" or the brand name
 2. <link rel="icon"> or <link rel="apple-touch-icon">
@@ -310,7 +310,7 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
     } : undefined
 
     try {
-      console.log(`[Visual Assets][${requestId}] Calling generateSmartImages | Model: gemini-3-pro-image-preview | brand=${brandName}, hasLogo=${!!logoUrl}, hasBrandColors=${!!brandColors}`)
+      console.log(`[Visual Assets][${requestId}] Calling generateSmartImages | Model: gemini-3-pro-image | brand=${brandName}, hasLogo=${!!logoUrl}, hasBrandColors=${!!brandColors}`)
       // Pass logoUrl so Gemini integrates client logo natively into generated images
       // Extract design hints from brand personality for image alignment
       const personality = researchForImages.brandPersonality || []

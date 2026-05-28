@@ -350,7 +350,7 @@ export async function generateStructuredPresentation(
   const userPrompt = await buildUserPrompt(input)
 
   const result = await callAI({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3.1-pro-preview',
     prompt: userPrompt,
     callerId: 'gamma-proto',
     maxOutputTokens: 32000,

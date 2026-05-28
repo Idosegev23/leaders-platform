@@ -231,7 +231,7 @@ ${criticalRules}
           const recAny = rec as unknown as Record<string, unknown>
           try {
             const verifyResult = await callAI({
-              model: 'gemini-3-flash-preview',
+              model: 'gemini-3.5-flash',
               prompt: `חפש את המשפיענ/ית "${rec.name}" ${rec.handle ? `(@${rec.handle})` : ''} בישראל. האם זה אדם אמיתי עם נוכחות ברשתות חברתיות? החזר JSON: { "verified": true/false, "confidence": "high/medium/low", "notes": "הערה קצרה" }`,
               geminiConfig: { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'LOW' as any }, maxOutputTokens: 500 },
               thinkingLevel: 'LOW',

@@ -19,7 +19,7 @@ import { generateSmartPrompts, smartPromptToText, type SmartImagePrompt, type Ge
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
 // Nano Banana Pro - Gemini 3 Pro Image model
-const IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const IMAGE_MODEL = 'gemini-3-pro-image'
 
 // Retry configuration
 const MAX_RETRIES = 3
@@ -45,7 +45,7 @@ export interface ImageGenerationConfig {
 
 /**
  * Generate image with retry logic using generateContent with imageConfig
- * This is the correct API for Nano Banana Pro (gemini-3-pro-image-preview)
+ * This is the correct API for Nano Banana Pro (gemini-3-pro-image)
  */
 async function generateWithRetry(
   prompt: string,

@@ -1,6 +1,6 @@
 /**
  * Gemini Image Generation Service
- * Uses Nano Banana Pro (gemini-3-pro-image-preview) for high-fidelity image generation,
+ * Uses Nano Banana Pro (gemini-3-pro-image) for high-fidelity image generation,
  * with optional Gemini 3.1 Pro Search Grounding for real-time data visualization.
  */
 
@@ -13,8 +13,8 @@ const ai = new GoogleGenAI({
 })
 
 // Models setup
-const IMAGE_MODEL = 'gemini-3-pro-image-preview' // The multimodal image generation model
-const FLASH_TEXT_MODEL = 'gemini-3-flash-preview' // Primary for text/grounding — fast + cheap
+const IMAGE_MODEL = 'gemini-3-pro-image' // The multimodal image generation model
+const FLASH_TEXT_MODEL = 'gemini-3.5-flash' // Primary for text/grounding — fast + cheap
 const PRO_TEXT_MODEL = 'gemini-3.1-pro-preview'   // Fallback when Flash fails
 
 export interface GeneratedImage {

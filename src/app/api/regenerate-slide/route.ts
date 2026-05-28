@@ -86,7 +86,7 @@ Return JSON: { "html": "<!DOCTYPE html>..." }`
       // Per skill matrix: single slide regeneration → Flash + MEDIUM (fast, focused)
       console.log(`[${requestId}] 🟢 Calling Gemini Flash for single-slide regen...`)
       const result = await callAI({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash',
         prompt: prompt + '\n\nReturn JSON: { "html": "<!DOCTYPE html>..." } only. No markdown.',
         systemPrompt: 'You are a legendary web designer. Return ONLY valid JSON with an "html" field containing a complete HTML document.',
         geminiConfig: {

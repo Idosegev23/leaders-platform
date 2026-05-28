@@ -10,7 +10,7 @@ import type { BrandColors } from './color-extractor'
 import type { ProposalContent } from '../openai/proposal-writer'
 import { parseGeminiJson } from '../utils/json-cleanup'
 const PRO_MODEL = 'gemini-3.1-pro-preview'     // Primary — best reasoning quality
-const FLASH_MODEL = 'gemini-3-flash-preview'   // Fallback when Pro fails/overloaded
+const FLASH_MODEL = 'gemini-3.5-flash'   // Fallback when Pro fails/overloaded
 
 export interface ImagePlan {
   id: string

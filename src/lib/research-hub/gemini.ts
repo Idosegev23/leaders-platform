@@ -19,7 +19,7 @@ export const MODELS = {
   deepResearch:
     process.env.GEMINI_DEEP_RESEARCH_MODEL ?? "deep-research-preview-04-2026",
   reasoning: process.env.GEMINI_REASONING_MODEL ?? "gemini-3.1-pro-preview",
-  fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.1-flash-lite-preview",
+  fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.1-flash-lite",
 } as const;
 
 /** Plain non-grounded reasoning — used for planning + synthesis + section drafting. */

@@ -8,7 +8,7 @@ const ai = new GoogleGenAI({
   httpOptions: { timeout: 600_000 },
 })
 
-const FLASH_MODEL = 'gemini-3-flash-preview'
+const FLASH_MODEL = 'gemini-3.5-flash'
 const FALLBACK_MODEL = 'gemini-3.1-pro-preview'
 
 export async function POST(request: NextRequest) {

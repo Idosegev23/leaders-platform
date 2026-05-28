@@ -13,7 +13,7 @@ const visionClient = new GoogleGenAI({
   httpOptions: { timeout: 600_000 },
 })
 
-const MODEL = 'gemini-3-flash-preview' // Color extraction doesn't need Pro reasoning
+const MODEL = 'gemini-3.5-flash' // Color extraction doesn't need Pro reasoning
 const FALLBACK_MODEL = 'gemini-3.1-pro-preview'
 
 export interface BrandColors {
@@ -291,7 +291,7 @@ export async function extractColorsByBrandName(brandName: string, websiteUrl?: s
     try {
       console.log(`[Gemini Colors] 🌐 Scraping website for real CSS colors: ${websiteUrl}`)
       const websiteResult = await callAI({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash',
         prompt: `Visit this website and extract the REAL brand colors from its CSS/design:
 
 Website: ${websiteUrl}

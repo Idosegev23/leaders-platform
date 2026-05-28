@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     const prompt = `${MODE_PROMPTS[mode]}\n\nשדה: ${ctx?.field || ''} | סוג שקף: ${ctx?.slideType || ''}\n\nהטקסט המקורי:\n"""\n${text}\n"""\n\nהטקסט החדש:`
 
     const result = await callAI({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.5-flash',
       prompt,
       callerId: 'gamma-rewrite',
       maxOutputTokens: 1000,

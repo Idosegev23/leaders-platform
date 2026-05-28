@@ -1,6 +1,6 @@
 /**
  * Generate images for proposal slides using Gemini 3 Pro Image (Nano Banana Pro)
- * Model: gemini-3-pro-image-preview
+ * Model: gemini-3-pro-image
  * Features: True 4K resolution native rendering, highly art-directed prompts
  */
 
@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
 // Using the newest multimodal image generation model
-const IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const IMAGE_MODEL = 'gemini-3-pro-image'
 
 interface ProposalData {
   brandName?: string

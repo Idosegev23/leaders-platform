@@ -1,6 +1,6 @@
 /**
  * Gemini 3 Pro Image Generation
- * Creates premium lifestyle images for proposals using the gemini-3-pro-image-preview model
+ * Creates premium lifestyle images for proposals using the gemini-3-pro-image model
  */
 
 import { GoogleGenAI } from '@google/genai'
@@ -10,7 +10,7 @@ import type { BrandColors } from './color-extractor'
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
 // The multimodal Gemini 3 Pro Image Preview model
-const IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const IMAGE_MODEL = 'gemini-3-pro-image'
 
 export interface GeneratedImage {
   base64: string

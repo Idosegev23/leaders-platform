@@ -661,7 +661,7 @@ export const MODEL_DEFAULTS = {
   // Per skill matrix: Brief extraction = Flash + LOW thinking (cheap, fast).
   // Full proposal building = Pro + MEDIUM (strategy writing requires reasoning).
   'proposal_agent.primary_model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל ראשי — חילוץ בריף (Flash + LOW + Files API)',
     value_type: 'text' as const,
     group: 'סוכן הצעות',
@@ -692,7 +692,7 @@ export const MODEL_DEFAULTS = {
     group: 'מעצב שקפים',
   },
   'slide_designer.fallback_model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל גיבוי — Design System (foundation)',
     value_type: 'text' as const,
     group: 'מעצב שקפים',
@@ -704,7 +704,7 @@ export const MODEL_DEFAULTS = {
     group: 'מעצב שקפים',
   },
   'slide_designer.batch_fallback_model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל גיבוי — יצירת שקפים (batches)',
     value_type: 'text' as const,
     group: 'מעצב שקפים',
@@ -735,7 +735,7 @@ export const MODEL_DEFAULTS = {
   },
 
   'brand_research.primary_model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל ראשי — מחקר מותג (Flash + HIGH thinking + Google Search)',
     value_type: 'text' as const,
     group: 'מחקר מותג',
@@ -754,7 +754,7 @@ export const MODEL_DEFAULTS = {
   },
 
   'influencer_research.primary_model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל ראשי — מחקר משפיענים (Flash + HIGH thinking + Google Search)',
     value_type: 'text' as const,
     group: 'מחקר משפיענים',
@@ -773,7 +773,7 @@ export const MODEL_DEFAULTS = {
   },
 
   'ai_assist.model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל — AI Assist (משימות מהירות)',
     value_type: 'text' as const,
     group: 'AI Assist',
@@ -786,14 +786,14 @@ export const MODEL_DEFAULTS = {
     group: 'משפר קריאייטיב',
   },
   'creative_enhancer.fallback_model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל גיבוי — משפר קריאייטיב',
     value_type: 'text' as const,
     group: 'משפר קריאייטיב',
   },
 
   'content_curator.model': {
-    value: 'gemini-3-flash-preview',
+    value: 'gemini-3.5-flash',
     description: 'מודל — Content Curator (Flash מומלץ למהירות)',
     value_type: 'text' as const,
     group: 'Content Curator',

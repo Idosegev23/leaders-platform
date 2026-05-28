@@ -113,7 +113,7 @@ ${kickoffText ? `## מסמך התנעה (טקסט נוסף):\n${kickoffText}\n` 
       const t0 = Date.now()
       const client = getDirectGemini()
       const response = await client.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash',
         contents: [{
           role: 'user',
           parts: [

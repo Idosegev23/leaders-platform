@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     ].filter(Boolean).join('\n')
 
     const result = await callAI({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       prompt,
       callerId: 'gamma-regen-slide',
       maxOutputTokens: 8000,

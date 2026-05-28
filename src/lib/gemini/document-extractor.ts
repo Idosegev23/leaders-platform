@@ -6,7 +6,7 @@
 import { callAI } from '@/lib/ai-provider'
 import { parseGeminiJson } from '../utils/json-cleanup'
 import type { ExtractedBriefData } from '@/types/brief'
-const FLASH_MODEL = 'gemini-3-flash-preview' // Primary — fast + cheap for extraction
+const FLASH_MODEL = 'gemini-3.5-flash' // Primary — fast + cheap for extraction
 const PRO_MODEL = 'gemini-3.1-pro-preview'   // Fallback when Flash fails
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Nano Banana Pro — Advanced image generation with Hebrew text support
  *
- * Wraps gemini-3-pro-image-preview with capabilities the basic imagen.ts wrapper lacks:
+ * Wraps gemini-3-pro-image with capabilities the basic imagen.ts wrapper lacks:
  * - Up to 14 reference images (logo + brand assets)
  * - Hebrew text rendering inside generated images
  * - Image editing (text-and-image-to-image)
@@ -15,7 +15,7 @@
 
 import { GoogleGenAI } from '@google/genai'
 
-const MODEL = 'gemini-3-pro-image-preview'
+const MODEL = 'gemini-3-pro-image'
 
 let _client: GoogleGenAI | null = null
 function getClient(): GoogleGenAI {

@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai'
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
-const CHAT_MODEL = 'gemini-2.0-flash'
+const CHAT_MODEL = 'gemini-3.5-flash'
 const CHAT_CONFIG = {
   temperature: 0.7,
   topP: 0.8,

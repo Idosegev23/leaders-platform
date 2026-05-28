@@ -5,7 +5,7 @@ import { parseGeminiJson } from '@/lib/utils/json-cleanup'
 export const maxDuration = 30
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
-const FAST_MODEL = 'gemini-3-flash-preview'
+const FAST_MODEL = 'gemini-3.5-flash'
 
 export async function POST(request: NextRequest) {
   const requestId = `copilot-rewrite-${Date.now()}`

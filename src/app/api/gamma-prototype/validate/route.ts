@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
         console.log(`[validate] Checking source: "${source}" for "${dataPoint} ${dataLabel}"`)
         try {
           const ai = await callAI({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             prompt: `תובנה: ${title}\nנתון: ${dataPoint}\nהקשר: ${dataLabel}\nמקור מצוטט: ${source}\n\nאמת את המקור. החזר JSON בלבד.`,
             callerId: 'validate-source',
             maxOutputTokens: 1500,
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
         console.log(`[validate] Checking creative reference in body: "${body.slice(0, 80)}..."`)
         try {
           const ai = await callAI({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             prompt: `טקסט: "${body}"\n\nאם הטקסט מזכיר קמפיין/מותג/יצירה עם שם ושנה — אמת שהוא קיים. אם אין רפרנס מוצהר — החזר status "verified" עם reasoning "לא מוזכר רפרנס ספציפי".`,
             callerId: 'validate-reference',
             maxOutputTokens: 1000,

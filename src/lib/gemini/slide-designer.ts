@@ -679,7 +679,7 @@ ${hasCompetitorIntel ? '   ✅ יש לך מתחרים ב-data — הכלל את 
   // No Claude/GPT fallback — Gemini Pro → Gemini Flash retry only.
   const plannerAttempts = [
     { provider: 'gemini', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
-    { provider: 'gemini', model: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (retry)' },
+    { provider: 'gemini', model: 'gemini-3.5-flash', label: 'Gemini 3 Flash (retry)' },
   ]
 
   for (let attempt = 0; attempt < plannerAttempts.length; attempt++) {
@@ -1477,7 +1477,7 @@ This system instruction is cached. Per-batch user prompts will only contain the 
     if (cacheableSystem.length > 4000) {
       const { createGeminiCache } = await import('@/lib/ai-provider')
       geminiCacheName = await createGeminiCache({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.5-flash',
         systemInstruction: cacheableSystem,
         ttlSeconds: 3600,
         callerId: requestId,
@@ -2001,7 +2001,7 @@ Each item is a COMPLETE, self-contained HTML document for one slide. Make them B
       const flashOutputTokens = batchPlans.length * 6000 + 4000
       try {
         const retryResult = await callAI({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-3.5-flash',
           prompt,
           geminiConfig: {
             responseMimeType: 'application/json',
@@ -2103,7 +2103,7 @@ Each item is a COMPLETE, self-contained HTML document for one slide. Make them B
 
             // Gemini Flash for quick revisions (per skill matrix: single slide regen → Flash + MEDIUM)
             const revisionResult = await callAI({
-              model: 'gemini-3-flash-preview',
+              model: 'gemini-3.5-flash',
               prompt: `Original slide HTML:\n${finalSlides[report.slideIndex]}\n\nDefects found:\n${report.issues.join('\n')}\n\nFix: ${report.revisionHint}\n\nReturn the FIXED complete HTML document only. No explanation.`,
               systemPrompt: 'Fix the HTML slide based on the defect report. Return ONLY the fixed complete HTML document. No explanation, no markdown fences.',
               geminiConfig: {

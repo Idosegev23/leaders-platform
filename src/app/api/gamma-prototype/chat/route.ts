@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     ].join('\n')
 
     const result = await callAI({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       prompt,
       callerId: 'gamma-chat',
       maxOutputTokens: 32000,

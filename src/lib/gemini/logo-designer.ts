@@ -11,9 +11,9 @@ const ai = new GoogleGenAI({
 })
 
 // Model for image generation - Nano Banana Pro
-const IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const IMAGE_MODEL = 'gemini-3-pro-image'
 // Model for analysis — Flash primary, Pro fallback
-const FLASH_ANALYSIS_MODEL = 'gemini-3-flash-preview'
+const FLASH_ANALYSIS_MODEL = 'gemini-3.5-flash'
 const PRO_ANALYSIS_MODEL = 'gemini-3.1-pro-preview'
 
 export interface LogoDesign {
