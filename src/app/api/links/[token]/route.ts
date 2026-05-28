@@ -263,6 +263,18 @@ async function runClientBriefCascade(params: {
   // 1. Email management.
   try {
     const { sendToManagement } = await import('@/lib/gmail/management')
+    // AI summary of the brief (Gemini 3.1 Pro). Best-effort — if it fails the
+    // mail still goes out with the legacy hand-picked field preview as fallback.
+    let aiSummary: import('@/lib/brief/ai-summary').BriefMgmtSummary | null = null
+    if (params.transition === 'completed' && params.submissionData) {
+      try {
+        const { summariseBriefForMgmt } = await import('@/lib/brief/ai-summary')
+        aiSummary = await summariseBriefForMgmt(params.submissionData, params.language || 'he')
+        console.log(`${tag} ai-summary: ${aiSummary ? `${aiSummary.bullets.length} bullets, ${aiSummary.attention.length} attention items` : 'null (fallback)'}`)
+      } catch (e) {
+        console.warn(`${tag} ai-summary error (non-fatal):`, e instanceof Error ? e.message : e)
+      }
+    }
     const html = params.transition === 'completed'
       ? buildMgmtBriefCompletedHtml({
           clientName: params.clientName,
@@ -270,7 +282,8 @@ async function runClientBriefCascade(params: {
           senderName: params.senderName,
           workspaceLink,
           briefDocLink,
-          submissionPreview: summariseSubmission(params.submissionData),
+          aiSummary,
+          fallbackPreview: summariseSubmission(params.submissionData),
         })
       : buildMgmtBriefFailedHtml({
           clientName: params.clientName,
@@ -381,22 +394,58 @@ function buildMgmtBriefCompletedHtml(opts: {
   senderName: string | null
   workspaceLink: string | null
   briefDocLink: string | null
-  submissionPreview: string
+  aiSummary: import('@/lib/brief/ai-summary').BriefMgmtSummary | null
+  fallbackPreview: string
 }): string {
-  return `<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:'Heebo',sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;">
-    <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;">
-      <p style="font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:#888;margin:0 0 16px;">Leaders × OS</p>
-      <h1 style="font-size:22px;font-weight:700;margin:0 0 12px;line-height:1.3;">בריף חדש התקבל</h1>
-      <p style="font-size:15px;line-height:1.7;margin:0 0 16px;"><strong>${escapeHtml(opts.clientName)}</strong>${opts.clientEmail ? ` (${escapeHtml(opts.clientEmail)})` : ''} השלים את הבריף.${opts.senderName ? ` הופנה ע״י ${escapeHtml(opts.senderName)}.` : ''}</p>
-      ${opts.submissionPreview ? `<div style="background:#f9f7f2;border:1px solid #e8e5dc;border-radius:6px;padding:14px 16px;font-size:13px;line-height:1.8;margin-bottom:16px;">${opts.submissionPreview}</div>` : ''}
-      ${opts.briefDocLink ? `<p style="margin:18px 0;"><a href="${opts.briefDocLink}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:10px 22px;border-radius:9999px;font-weight:600;display:inline-block;">פתח את הבריף ב-Google Doc ↗</a></p>` : ''}
-      <div style="background:#fff8e1;border-right:3px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:20px 0;font-size:13px;line-height:1.7;">
-        <strong>הצעד הבא:</strong> לעבור לתיקיית "בריפים ראשוניים" ב-Drive,
-        לקרוא את הבריף, ואם הוא תקין — להעביר ידנית את התיקייה ל-"נסגר".
-        ברגע שזה קורה, נפתח אוטומטית workspace מלא ללקוח עם 7 תת-תיקיות
-        תחת "ניהול לקוח", ויהיה אפשר לפתוח טופס התנעה.
-      </div>
+  const summaryBlock = renderSummaryBlock(opts.aiSummary, opts.fallbackPreview)
+  const attentionBlock = opts.aiSummary && opts.aiSummary.attention.length > 0
+    ? `<div dir="rtl" style="background:#fef2f2;border-right:3px solid #dc2626;padding:14px 16px;border-radius:6px;margin:0 0 18px;font-size:14px;line-height:1.7;color:#1a1a2e;text-align:right;">
+        <strong style="display:block;margin-bottom:6px;color:#991b1b;">לתשומת לב</strong>
+        <ul style="margin:0;padding:0;list-style-position:inside;">
+          ${opts.aiSummary.attention.map((a) => `<li style="margin-bottom:4px;">${escapeHtml(a)}</li>`).join('')}
+        </ul>
+      </div>`
+    : ''
+  // Gmail strips <html> tags — every container needs dir="rtl" + text-align:right
+  // explicitly to render correctly.
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><body dir="rtl" style="font-family:'Heebo',Arial,sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;direction:rtl;text-align:right;">
+    <div dir="rtl" style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;direction:rtl;text-align:right;">
+      <p dir="rtl" style="font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:#888;margin:0 0 16px;text-align:right;direction:ltr;unicode-bidi:plaintext;">Leaders × OS</p>
+      <h1 dir="rtl" style="font-size:22px;font-weight:700;margin:0 0 10px;line-height:1.3;text-align:right;">בריף התקבל — ${escapeHtml(opts.clientName)}</h1>
+      <p dir="rtl" style="font-size:14px;line-height:1.6;margin:0 0 22px;color:#555;text-align:right;">${opts.clientEmail ? `<span dir="ltr">${escapeHtml(opts.clientEmail)}</span> · ` : ''}${opts.senderName ? `הופנה ע״י ${escapeHtml(opts.senderName)}` : ''}</p>
+      ${summaryBlock}
+      ${attentionBlock}
+      ${opts.briefDocLink ? `<p dir="rtl" style="margin:22px 0 8px;text-align:right;"><a href="${opts.briefDocLink}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:11px 24px;border-radius:9999px;font-weight:600;display:inline-block;font-size:14px;">פתח את הבריף המלא ב-Google Doc ↗</a></p>` : ''}
+      <p dir="rtl" style="font-size:12px;color:#888;line-height:1.6;margin:20px 0 0;border-top:1px solid #e8e5dc;padding-top:14px;text-align:right;">הצעד הבא: לקרוא את הבריף ב-Drive. אם הוא תקין — להעביר את התיקייה ל-"נסגר" ידנית. זה פותח workspace ללקוח ומאפשר טופס התנעה.</p>
     </div></body></html>`
+}
+
+function renderSummaryBlock(
+  s: import('@/lib/brief/ai-summary').BriefMgmtSummary | null,
+  fallback: string,
+): string {
+  if (!s) {
+    return fallback
+      ? `<div dir="rtl" style="background:#f9f7f2;border:1px solid #e8e5dc;border-radius:6px;padding:14px 16px;font-size:13px;line-height:1.8;margin:0 0 18px;text-align:right;">${fallback}</div>`
+      : ''
+  }
+  const headlineHtml = s.headline
+    ? `<p dir="rtl" style="font-size:16px;font-weight:600;line-height:1.55;margin:0 0 16px;color:#1a1a2e;text-align:right;">${escapeHtml(s.headline)}</p>`
+    : ''
+  // div-based key/value rows render reliably RTL in every email client.
+  // Each row: bold label on the right, value below on a new line. Cleaner than
+  // a side-by-side table on mobile and bulletproof on Gmail.
+  const bulletsHtml = s.bullets.length === 0
+    ? ''
+    : s.bullets
+        .map(
+          (b) => `<div dir="rtl" style="margin:0 0 12px;text-align:right;">
+            <div style="font-size:12px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;">${escapeHtml(b.label)}</div>
+            <div style="font-size:14px;line-height:1.6;color:#1a1a2e;">${escapeHtml(b.value)}</div>
+          </div>`,
+        )
+        .join('')
+  return `<div dir="rtl" style="background:#f9f7f2;border:1px solid #e8e5dc;border-radius:8px;padding:20px 22px;margin:0 0 18px;text-align:right;direction:rtl;">${headlineHtml}${bulletsHtml}</div>`
 }
 
 function buildMgmtBriefFailedHtml(opts: {
