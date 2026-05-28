@@ -145,7 +145,7 @@ export default function OutcomeActions({
       <p className="text-[13px] text-brand-primary/70 mb-4 leading-relaxed">
         {isEnglish
           ? 'Won moves the brief into BRIEFS_COMPLETED and opens a client workspace. Lost moves it into BRIEFS_FAILED.'
-          : 'נסגר מעביר את התיקייה ל"בריפים נסגרים" ופותח workspace ללקוח. נפל מעביר את התיקייה ל"בריפים נפלו".'}
+          : 'נסגר מעביר את התיקייה ל"נסגר" ב-Drive ופותח workspace ללקוח. נפל מעביר את התיקייה ל"נפל".'}
       </p>
       <div className="flex items-center gap-3 flex-wrap">
         <button
