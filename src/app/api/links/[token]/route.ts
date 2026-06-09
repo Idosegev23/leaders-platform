@@ -355,6 +355,22 @@ async function runClientBriefCascade(params: {
     console.warn(`${tag} activity_log error:`, e instanceof Error ? e.message : e)
   }
 
+  // 4. Salesforce push (Hub → Salesforce). Best-effort, awaited so Vercel
+  //    doesn't kill the function mid-POST. No-ops when SALESFORCE_BRIEF_WEBHOOK_URL
+  //    is unset. The brief doc link was just persisted to metadata above, so
+  //    the envelope this builds carries it. (ADR: see salesforce-hub-integration.md)
+  try {
+    const { notifySalesforceBriefCompleted } = await import('@/lib/salesforce/outbound')
+    const result = await notifySalesforceBriefCompleted(
+      params.token,
+      params.transition === 'failed' ? 'brief.failed' : 'brief.completed',
+    )
+    if (result.delivered) console.log(`${tag} salesforce push delivered`)
+    else if (result.reason !== 'no_url') console.warn(`${tag} salesforce push not delivered: ${result.reason}`)
+  } catch (e) {
+    console.warn(`${tag} salesforce push error:`, e instanceof Error ? e.message : e)
+  }
+
   console.log(`${tag} done`)
 }
 

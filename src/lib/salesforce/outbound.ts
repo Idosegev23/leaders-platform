@@ -1,0 +1,165 @@
+/**
+ * Salesforce outbound sync (Hub → Salesforce).
+ *
+ * One canonical "brief envelope" shape, built from a `document_links` row,
+ * used by BOTH delivery mechanisms so Salesforce sees the exact same payload
+ * either way:
+ *   - PUSH: notifySalesforceBriefCompleted() — fired from the brief-completion
+ *           cascade when a client submits (or abandons) a brief.
+ *   - PULL: fetchBriefEnvelopeByToken() — served by
+ *           GET /api/webhooks/salesforce/brief/{token} for polling.
+ *
+ * Both no-op gracefully when the integration env vars are unset, so this is
+ * safe to ship before the Salesforce side is wired.
+ *
+ * Env vars:
+ *   SALESFORCE_BRIEF_WEBHOOK_URL  — where we POST completed briefs. Unset → push is skipped.
+ *   SALESFORCE_OUTBOUND_SECRET    — sent as `Authorization: Bearer <secret>` if set.
+ */
+
+import { createClient as createServiceClient } from '@supabase/supabase-js'
+
+export interface BriefEnvelope {
+  event: 'brief.completed' | 'brief.failed' | 'brief.opened' | 'brief.pending'
+  salesforce_ref: string | null
+  token: string
+  document_type: string
+  status: string
+  language: 'he' | 'en'
+  client_name: string | null
+  client_email: string | null
+  created_by_email: string | null
+  created_by_name: string | null
+  created_at: string | null
+  opened_at: string | null
+  completed_at: string | null
+  brief_drive_doc_link: string | null
+  submission_data: Record<string, unknown> | null
+}
+
+function service() {
+  return createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  )
+}
+
+function statusToEvent(status: string | null): BriefEnvelope['event'] {
+  switch (status) {
+    case 'completed': return 'brief.completed'
+    case 'failed': return 'brief.failed'
+    case 'opened': return 'brief.opened'
+    default: return 'brief.pending'
+  }
+}
+
+// Shape of the joined row we read. `document_types` comes back as an object
+// (single FK) but Supabase types it loosely, so we keep it permissive.
+interface LinkRow {
+  token: string
+  status: string | null
+  client_name: string | null
+  client_email: string | null
+  created_by_email: string | null
+  created_by_name: string | null
+  created_at: string | null
+  opened_at: string | null
+  completed_at: string | null
+  metadata: Record<string, unknown> | null
+  document_types?: { slug?: string } | { slug?: string }[] | null
+}
+
+function docSlug(row: LinkRow): string {
+  const dt = row.document_types
+  if (Array.isArray(dt)) return dt[0]?.slug ?? 'client-brief'
+  return dt?.slug ?? 'client-brief'
+}
+
+/** Map a document_links row to the canonical envelope Salesforce receives. */
+export function buildBriefEnvelope(row: LinkRow): BriefEnvelope {
+  const meta = (row.metadata ?? {}) as Record<string, unknown>
+  return {
+    event: statusToEvent(row.status),
+    salesforce_ref: (meta.salesforce_ref as string | undefined) ?? null,
+    token: row.token,
+    document_type: docSlug(row),
+    status: row.status ?? 'pending',
+    language: meta.language === 'en' ? 'en' : 'he',
+    client_name: row.client_name,
+    client_email: row.client_email,
+    created_by_email: row.created_by_email,
+    created_by_name: row.created_by_name,
+    created_at: row.created_at,
+    opened_at: row.opened_at,
+    completed_at: row.completed_at,
+    brief_drive_doc_link: (meta.brief_drive_doc_link as string | undefined) ?? null,
+    submission_data: (meta.submission_data as Record<string, unknown> | undefined) ?? null,
+  }
+}
+
+const ENVELOPE_COLUMNS =
+  'token, status, client_name, client_email, created_by_email, created_by_name, created_at, opened_at, completed_at, metadata, document_types(slug)'
+
+/** Read a single brief link by token and return its envelope (or null). */
+export async function fetchBriefEnvelopeByToken(token: string): Promise<BriefEnvelope | null> {
+  const { data } = await service()
+    .from('document_links')
+    .select(ENVELOPE_COLUMNS)
+    .eq('token', token)
+    .maybeSingle()
+  if (!data) return null
+  return buildBriefEnvelope(data as unknown as LinkRow)
+}
+
+export interface OutboundResult {
+  delivered: boolean
+  reason?: string
+  status?: number
+}
+
+/**
+ * Push a brief's current state to Salesforce. Best-effort: never throws.
+ * Called (awaited) from the completion cascade. `eventOverride` lets the
+ * caller force 'brief.failed' on the abandoned-brief path.
+ */
+export async function notifySalesforceBriefCompleted(
+  token: string,
+  eventOverride?: BriefEnvelope['event'],
+): Promise<OutboundResult> {
+  const tag = `[salesforce-push:${token.slice(0, 8)}]`
+  const url = process.env.SALESFORCE_BRIEF_WEBHOOK_URL
+  if (!url) {
+    console.log(`${tag} SALESFORCE_BRIEF_WEBHOOK_URL not set — skipping push`)
+    return { delivered: false, reason: 'no_url' }
+  }
+
+  const envelope = await fetchBriefEnvelopeByToken(token)
+  if (!envelope) {
+    console.warn(`${tag} link not found — nothing to push`)
+    return { delivered: false, reason: 'link_not_found' }
+  }
+  if (eventOverride) envelope.event = eventOverride
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const secret = process.env.SALESFORCE_OUTBOUND_SECRET
+  if (secret) headers['Authorization'] = `Bearer ${secret}`
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(envelope),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      console.warn(`${tag} non-2xx from Salesforce: ${res.status} ${body.slice(0, 300)}`)
+      return { delivered: false, reason: 'non_2xx', status: res.status }
+    }
+    console.log(`${tag} delivered (${envelope.event}) → ${res.status}`)
+    return { delivered: true, status: res.status }
+  } catch (e) {
+    console.warn(`${tag} push failed:`, e instanceof Error ? e.message : e)
+    return { delivered: false, reason: 'fetch_threw' }
+  }
+}

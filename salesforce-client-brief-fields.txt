@@ -1,0 +1,189 @@
+================================================================================
+LEADERS · CLIENT BRIEF — FIELD MAP FOR SALESFORCE INTEGRATION
+================================================================================
+Source form : /forms/client-brief  ("בריף לקוח" / Client Brief Form)
+Generated   : 2026-06-04
+Authority   : src/types/client-brief.ts  +  src/lib/client-brief/formSteps.ts
+
+The form is a 6-step wizard. When the client clicks submit, the full answer set
+is sent as one JSON object to:
+    PATCH /api/links/{token}   body: { status: "completed", submission_data: {…} }
+
+and is stored verbatim (no key renaming, no transformation) at:
+    document_links.metadata.submission_data   (JSONB column)
+
+So the EXACT mapping keys Salesforce should bind to are the `submission_data.*`
+keys listed in SECTION B. The form is bilingual (he / en); FIELD KEYS ARE
+IDENTICAL in both languages — only the displayed labels and the stored option
+VALUES differ. Plan the mapping against the keys, and normalise option values
+using the he/en pairs in SECTION C.
+
+Data types:
+  string   = plain text / textarea / date(YYYY-MM-DD) / single-select value
+  string[] = multi-select (checkbox group) → JSON array of literal option strings
+
+
+================================================================================
+SECTION A · ROW-LEVEL FIELDS  (table: document_links — NOT inside submission_data)
+================================================================================
+These live as real columns on the link row. Useful as record/lead metadata.
+
+  COLUMN              TYPE         MEANING
+  ------------------  -----------  --------------------------------------------
+  id                  uuid         Primary key of the link/record
+  token               uuid         Public token in the brief URL
+  document_type_id    uuid         FK → document_types (slug = 'client-brief')
+  created_by_email    text         Leaders employee who sent the brief
+  created_by_name     text         "
+  client_email        text         Recipient (client) email
+  client_name         text         Recipient (client) name
+  status              text         pending | opened | completed | archived
+  created_at          timestamptz  When the link was created
+  opened_at           timestamptz  First time the client opened the form
+  completed_at        timestamptz  When the client submitted
+  updated_at          timestamptz  Last change
+  metadata            jsonb        Holds submission_data + progress + language
+
+  metadata.language               'he' | 'en' — language the client filled in
+  metadata.progress               { step, total } — last step reached (live)
+  metadata.submission_data        ← the 27 answer fields (SECTION B)
+
+
+================================================================================
+SECTION B · BRIEF ANSWER FIELDS  (path: document_links.metadata.submission_data.*)
+================================================================================
+27 fields, in form order. KEY is the exact JSON property name to map.
+
+--- Step 1 · פרטים כלליים / General Details -----------------------------------
+
+  KEY                  TYPE      REQ   LABEL (he)                         / (en)
+  -------------------  --------  ----  ----------------------------------------
+  date                 string    yes   תאריך                              / Date  (YYYY-MM-DD)
+  submitterName        string    yes   מגיש הבריף                         / Submitted by
+  clientName           string    yes   שם הלקוח                           / Client name
+  productService       string    yes   המוצר/השירות                       / Product / Service
+  services             string[]  yes   אילו שירותים אתה מעוניין?          / Services of interest   (see C1)
+  platforms            string[]  yes   פלטפורמות רלוונטיות                 / Relevant platforms     (see C2)
+  campaignLaunchDate   string    yes   תאריך עליית הקמפיין                 / Campaign launch date   (YYYY-MM-DD)
+
+--- Step 2 · רקע / Background --------------------------------------------------
+
+  marketCategory       string    yes   באיזה שוק ובאיזו קטגוריה אנחנו פועלים?      / Market & category
+  productDescription   string    yes   תיאור המוצר/שירות/מותג. מה הבשורה? מה הUSP?  / Product/brand description & USP
+  competitors          string    yes   מי הם המתחרים ואילו מהלכים הם עושים?         / Competitors & their moves
+  challenge            string    yes   מה הבעיה/האתגר איתם אנחנו צריכים להתמודד?    / Core challenge
+
+--- Step 3 · קהל היעד / Target Audience ----------------------------------------
+
+  targetAudience           string  yes   למי אנחנו פונים?                     / Who are we addressing?
+  audienceCharacteristics  string  yes   מאפיינים רלוונטיים של קהל היעד?      / Audience characteristics
+  audienceInsights         string  yes   מה חשוב שנדע על הקהל?                 / Key audience insights
+
+--- Step 4 · מטרות / Goals -----------------------------------------------------
+
+  campaignGoalTypes          string[]  yes   סוגי מטרות המהלך                          / Campaign goal types  (see C3)
+  campaignGoalsDescription   string    yes   תאר את המטרות בפירוט                       / Goals in detail
+  desiredResponse            string    yes   מה היינו רוצים שהקהל ירגיש/יעשה?           / Desired audience response
+  timingType                 string    yes   טיימינג ספציפי למהלך                       / Timing type          (see C4)
+  timingDetails              string    NO    פרטי טיימינג (עונה / השקה / אירוע)          / Timing details
+
+--- Step 5 · תובנה ומסר / Insight & Message ------------------------------------
+
+  insight        string  yes   המתח/הדיסוננס/משאלת הלב של קהל היעד?        / Tension / insight
+  solution       string  yes   איך המותג/המוצר/השירות פותר את הבעיה?       / How we solve it
+  mainMessage    string  yes   במשפט אחד! מה הכי חשוב להגיד?               / Main message (one sentence)
+  keyTakeaway    string  yes   מה אנחנו רוצים שהצרכן יזכור מהמהלך?         / Key takeaway
+
+--- Step 6 · דרישות ותקציב / Requirements & Budget -----------------------------
+
+  requirements   string  yes   מה נדרש? (big idea, תסריט, רעיונות לשת"פים)  / What is required
+  campaignType   string  yes   איזה סוג מהלך? (סרטון, סדרה, תוכן, שת"פ)     / Campaign type
+  budget         string  yes   תקציב                                       / Budget   (free text, e.g. "8000$")
+  notes          string  NO    הערות, רעיונות והגיגים...                    / Notes
+
+
+================================================================================
+SECTION C · CONTROLLED-VOCABULARY VALUES  (literal strings stored in the array/field)
+================================================================================
+The stored value is the exact option string in the client's chosen language.
+Map he ↔ en pairs to a single Salesforce picklist value.
+
+C1 · services  (string[])
+  he                              | en
+  --------------------------------+------------------------------------------
+  ניהול משפיענים                  | Influencer Management
+  ניהול סושיאל                    | Social Media Management
+  ניהול משפיעני הפצה וUGC          | Distribution Influencer & UGC Management
+  קידום ממומן                     | Paid Advertising
+  אימייל מרקטינג                  | Email Marketing
+  שירותי קריאטיב                  | Creative Services
+  שימוש במערכת IMAI               | IMAI System Usage
+  הפקות                           | Productions
+  ימי צילום                       | Shooting Days
+
+C2 · platforms  (string[])
+  he                | en
+  ------------------+----------------
+  אינסטגרם          | Instagram
+  טיקטוק            | TikTok
+  פייסבוק           | Facebook
+  יוטיוב            | YouTube
+  פינטרסט           | Pinterest
+  לינקדאין          | LinkedIn
+  X (טוויטר)        | X (Twitter)
+  ספוטיפיי          | Spotify
+  אחר               | Other
+
+C3 · campaignGoalTypes  (string[])
+  he            | en
+  --------------+-----------------------------------
+  הנעה למכר     | Sales activation (Drive to purchase)
+  מודעות        | Awareness
+  נחשקות        | Desirability
+  חדירה לשוק    | Market penetration
+
+C4 · timingType  (string, single value)
+  he       | en
+  ---------+-------------
+  שנתי     | Annual
+  חציוני   | Semi-annual
+  רבעוני   | Quarterly
+  חודשי    | Monthly
+
+
+================================================================================
+SECTION D · SAMPLE submission_data PAYLOAD  (Hebrew fill)
+================================================================================
+{
+  "date": "2026-06-04",
+  "submitterName": "ישראל ישראלי",
+  "clientName": "מותג לדוגמה בע\"מ",
+  "productService": "משקה אנרגיה חדש",
+  "services": ["ניהול משפיענים", "קידום ממומן"],
+  "platforms": ["אינסטגרם", "טיקטוק"],
+  "campaignLaunchDate": "2026-07-01",
+  "marketCategory": "...",
+  "productDescription": "...",
+  "competitors": "...",
+  "challenge": "...",
+  "targetAudience": "...",
+  "audienceCharacteristics": "...",
+  "audienceInsights": "...",
+  "campaignGoalTypes": ["מודעות", "הנעה למכר"],
+  "campaignGoalsDescription": "...",
+  "desiredResponse": "...",
+  "timingType": "רבעוני",
+  "timingDetails": "...",
+  "insight": "...",
+  "solution": "...",
+  "mainMessage": "...",
+  "keyTakeaway": "...",
+  "requirements": "...",
+  "campaignType": "...",
+  "budget": "8000$",
+  "notes": ""
+}
+
+NOTE: optional fields (timingDetails, notes) may be "" or absent. Multi-selects
+are always arrays (possibly with one element). Dates are ISO YYYY-MM-DD strings.
+Free-text fields may contain newlines; budget is free text, not a number.
