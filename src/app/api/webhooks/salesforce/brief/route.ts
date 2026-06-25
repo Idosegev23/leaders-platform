@@ -255,7 +255,9 @@ export async function POST(request: Request) {
       mail_delivery: mailDelivery,
       mail_error: mailError,
     },
-    { status: 201 },
+    // 200 (not 201): some Salesforce Apex callouts only read the response body
+    // when statusCode == 200, so 201 made the response look "empty" to them.
+    { status: 200 },
   )
 }
 
