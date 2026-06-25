@@ -86,6 +86,18 @@ interface CreateBriefBody {
 export async function POST(request: Request) {
   const rawBody = await request.text()
 
+  // Inbound diagnostics: log which auth headers arrived (presence only, never
+  // the secret value) + a body preview, so we can see exactly what Salesforce
+  // sends — including requests that fail auth/validation.
+  console.log('[salesforce-brief] inbound POST ' + JSON.stringify({
+    hasAuthorization: !!request.headers.get('authorization'),
+    hasXSignature: !!request.headers.get('x-signature'),
+    hasXSfToken: !!request.headers.get('x-sf-token'),
+    contentType: request.headers.get('content-type'),
+    bodyLength: rawBody.length,
+    bodyPreview: rawBody.slice(0, 2000),
+  }))
+
   if (!authorize(request, rawBody)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
