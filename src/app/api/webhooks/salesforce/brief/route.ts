@@ -142,37 +142,15 @@ export async function POST(request: Request) {
     )
   }
 
-  // Resolve the sending mailbox: payload sender_email → default sender.
-  // We need that user's Gmail refresh_token to send from their mailbox.
-  const candidateSenders = [body.sender_email, process.env.BRIEF_DEFAULT_SENDER_EMAIL]
-    .map((e) => (e || '').trim().toLowerCase())
-    .filter((e) => e.length > 0)
-
-  let senderEmail: string | null = null
-  let senderName: string | null = (body.sender_name || '').trim() || null
-  let senderRefreshToken: string | null = null
-  for (const email of candidateSenders) {
-    const { data: senderUser } = await sb
-      .from('users')
-      .select('id, email, full_name')
-      .eq('email', email)
-      .maybeSingle()
-    if (!senderUser) continue
-    const { data: tokenRow } = await sb
-      .from('user_google_tokens')
-      .select('refresh_token')
-      .eq('user_id', senderUser.id)
-      .maybeSingle()
-    senderEmail = senderUser.email as string
-    senderName = senderName || (senderUser.full_name as string) || (senderUser.email as string)
-    if (tokenRow?.refresh_token) {
-      senderRefreshToken = tokenRow.refresh_token as string
-      break
-    }
-  }
-  // created_by_email is NOT NULL — always have something attributable.
-  const createdByEmail = senderEmail || candidateSenders[0] || 'salesforce-integration@ldrsgroup.com'
-  const createdByName = senderName || 'Salesforce'
+  // Brief emails go out from the shared info@ mailbox via the service account
+  // (domain-wide delegation) — no per-user OAuth needed. Set via
+  // BRIEF_DEFAULT_SENDER_EMAIL (e.g. info@ldrsgroup.com).
+  const serviceSender = (process.env.BRIEF_DEFAULT_SENDER_EMAIL || '').trim()
+  // created_by_email is NOT NULL — attribute to the requested sender, else the
+  // shared service mailbox, else a safe fallback.
+  const createdByEmail =
+    (body.sender_email || '').trim() || serviceSender || 'salesforce-integration@ldrsgroup.com'
+  const createdByName = (body.sender_name || '').trim() || 'Leaders'
 
   // Best-effort: auto-link to an existing lead by email so the completion
   // cascade can sync ClickUp / the lead timeline.
@@ -212,23 +190,23 @@ export async function POST(request: Request) {
 
   const briefUrl = `${appBaseUrl()}${docType.target_url}?token=${created.token}`
 
-  // Send the email from the resolved mailbox (reuses the shared pipeline so
-  // the email + activity_log match the UI/ClickUp send paths exactly).
+  // Send the brief link to the client from the shared info@ mailbox via the
+  // service account. Reuses the shared pipeline (email template + activity_log).
   let mailDelivery: 'sent' | 'skipped' | 'failed' = 'skipped'
   let mailError: string | null = null
   if (!sendEmail) {
     mailError = 'send_email=false'
-  } else if (!senderRefreshToken) {
-    mailError = 'no_sender_mailbox_connected'
-    console.warn(`[salesforce-brief] no connected mailbox for ${candidateSenders.join(', ') || '(none provided)'} — link created, email skipped`)
+  } else if (!serviceSender) {
+    mailError = 'no_default_sender_configured'
+    console.warn('[salesforce-brief] BRIEF_DEFAULT_SENDER_EMAIL not set — link created, email skipped')
   } else {
     try {
       const result = await sendClientBrief({
         clientName,
         clientEmail,
-        senderEmail: senderEmail!,
+        senderEmail: serviceSender,
         senderName: createdByName,
-        senderRefreshToken,
+        useServiceAccount: true,
         leadId,
         language,
         personalNote,

@@ -1,3 +1,5 @@
+import { google } from 'googleapis'
+
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID!
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET!
 
@@ -86,4 +88,47 @@ export async function sendGmailEmail(params: {
 
   const result = await gmailRes.json()
   return { messageId: result.id }
+}
+
+/**
+ * Send a Gmail message from a Workspace mailbox (e.g. info@ldrsgroup.com) using
+ * the service account via domain-wide delegation — no per-user OAuth needed.
+ *
+ * Prerequisite (one-time, Workspace admin): the service account must have
+ * domain-wide delegation enabled AND its client ID authorized for the scope
+ * https://www.googleapis.com/auth/gmail.send in
+ * Admin Console → Security → API controls → Domain-wide delegation.
+ * Without it, Google returns "unauthorized_client".
+ */
+export async function sendGmailViaServiceAccount(params: {
+  from: string // mailbox to impersonate, e.g. info@ldrsgroup.com
+  fromName: string
+  to: string
+  subject: string
+  html: string
+}): Promise<{ messageId: string }> {
+  const credsRaw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY
+  if (!credsRaw) throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY not configured')
+  const creds = JSON.parse(credsRaw)
+
+  const auth = new google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: ['https://www.googleapis.com/auth/gmail.send'],
+    subject: params.from, // impersonate this mailbox
+  })
+
+  const rawEmail = buildRawEmail(params.from, params.fromName, params.to, params.subject, params.html)
+  const encodedEmail = Buffer.from(rawEmail)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+
+  const gmail = google.gmail({ version: 'v1', auth })
+  const res = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: { raw: encodedEmail },
+  })
+  return { messageId: res.data.id || '' }
 }

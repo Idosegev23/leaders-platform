@@ -11,7 +11,7 @@
  */
 
 import { createClient as createServiceClient } from '@supabase/supabase-js'
-import { sendGmailEmail } from '@/lib/gmail'
+import { sendGmailEmail, sendGmailViaServiceAccount } from '@/lib/gmail'
 
 export interface SendClientBriefInput {
   clientName: string
@@ -20,8 +20,17 @@ export interface SendClientBriefInput {
   senderEmail: string
   /** Display name on the email. */
   senderName: string
-  /** OAuth refresh token for the sender (must have gmail.send scope). */
-  senderRefreshToken: string
+  /**
+   * OAuth refresh token for the sender (must have gmail.send scope).
+   * Optional when `useServiceAccount` is true (service-account impersonation).
+   */
+  senderRefreshToken?: string | null
+  /**
+   * Send via the service account impersonating `senderEmail` (domain-wide
+   * delegation) instead of a per-user OAuth refresh token. Used for shared
+   * mailboxes like info@ldrsgroup.com that nobody logs into.
+   */
+  useServiceAccount?: boolean
   /** When set, the new document_link is associated with this lead. */
   leadId?: string | null
   /** Optional language for the email body. Default: 'he'. */
@@ -134,14 +143,27 @@ export async function sendClientBrief(
     const html = isEnglish
       ? buildBriefEmailEn({ clientName: input.clientName, link: fullLink, senderName: input.senderName, personalNote })
       : buildBriefEmailHe({ clientName: input.clientName, link: fullLink, senderName: input.senderName, personalNote })
-    await sendGmailEmail({
-      refreshToken: input.senderRefreshToken,
-      from: input.senderEmail,
-      fromName: input.senderName,
-      to: input.clientEmail,
-      subject,
-      html,
-    })
+    if (input.useServiceAccount) {
+      await sendGmailViaServiceAccount({
+        from: input.senderEmail,
+        fromName: input.senderName,
+        to: input.clientEmail,
+        subject,
+        html,
+      })
+    } else {
+      if (!input.senderRefreshToken) {
+        throw new Error('senderRefreshToken required when useServiceAccount is not set')
+      }
+      await sendGmailEmail({
+        refreshToken: input.senderRefreshToken,
+        from: input.senderEmail,
+        fromName: input.senderName,
+        to: input.clientEmail,
+        subject,
+        html,
+      })
+    }
     mailDelivery = 'sent'
     console.log(`${tag} mail sent to ${input.clientEmail}`)
   } catch (e) {
