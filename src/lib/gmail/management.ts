@@ -12,7 +12,7 @@
  * sender (SYSTEM_SENDER_EMAIL) so cron / unattended flows still go out.
  */
 
-import { sendGmailEmail } from '@/lib/gmail'
+import { sendGmailEmail, sendGmailViaServiceAccount } from '@/lib/gmail'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 
 const APPROVED_FALLBACK = [
@@ -85,31 +85,46 @@ export async function sendToManagement(params: {
     return { sent: 0, failed: [] }
   }
 
-  // Pick a sender. User-triggered flows pass senderEmail; we resolve their
-  // refresh_token. If unavailable, fall back to a system-configured sender.
+  // Pick the sender + send mechanism. User-triggered flows pass senderEmail and
+  // we use their OAuth refresh_token. When there's no token (e.g. Salesforce-
+  // created briefs attributed to info@), fall back to the service account
+  // impersonating the shared mailbox (BRIEF_DEFAULT_SENDER_EMAIL).
   const senderEmail =
     params.senderEmail || process.env.SYSTEM_SENDER_EMAIL || ''
   const refreshToken = senderEmail ? await resolveRefreshToken(senderEmail) : null
-  if (!refreshToken) {
+  const serviceSender = (process.env.BRIEF_DEFAULT_SENDER_EMAIL || '').trim()
+  const useServiceAccount = !refreshToken && !!serviceSender
+  if (!refreshToken && !useServiceAccount) {
     console.warn(
-      `[mgmt-mail] no refresh_token for sender "${senderEmail}" — set SYSTEM_SENDER_EMAIL to a user that has signed in once with Gmail scope`,
+      `[mgmt-mail] no refresh_token for "${senderEmail}" and BRIEF_DEFAULT_SENDER_EMAIL unset — cannot send`,
     )
-    return { sent: 0, failed: recipients.map((to) => ({ to, error: 'no_sender_token' })) }
+    return { sent: 0, failed: recipients.map((to) => ({ to, error: 'no_sender' })) }
   }
 
   const senderName = params.senderName || 'Leaders'
+  const fromEmail = useServiceAccount ? serviceSender : senderEmail
   const failed: Array<{ to: string; error: string }> = []
   let sent = 0
   for (const to of recipients) {
     try {
-      await sendGmailEmail({
-        refreshToken,
-        from: senderEmail,
-        fromName: senderName,
-        to,
-        subject: params.subject,
-        html: params.html,
-      })
+      if (useServiceAccount) {
+        await sendGmailViaServiceAccount({
+          from: fromEmail,
+          fromName: senderName,
+          to,
+          subject: params.subject,
+          html: params.html,
+        })
+      } else {
+        await sendGmailEmail({
+          refreshToken: refreshToken!,
+          from: fromEmail,
+          fromName: senderName,
+          to,
+          subject: params.subject,
+          html: params.html,
+        })
+      }
       sent++
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

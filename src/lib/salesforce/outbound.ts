@@ -119,10 +119,9 @@ export interface OutboundResult {
 }
 
 /**
- * Lean payload Salesforce actually maps (per the Jun-9 spec with Yoav): brief
- * name + services (each separate) + platforms (joined text) + the brief's
- * Google Doc exported to PDF (base64). `projectId` = the salesforce_ref we
- * received on create; `token` is the idempotency key.
+ * Lean payload Salesforce maps: brief name + services (each separate) +
+ * platforms (joined text) + a link to the brief Google Doc. `projectId` =
+ * the salesforce_ref we received on create; `token` is the idempotency key.
  */
 export interface SalesforceBriefPayload {
   projectId: string | null
@@ -132,33 +131,11 @@ export interface SalesforceBriefPayload {
   platforms: string
   /** Link to the brief document (Google Doc). */
   briefDocLink: string | null
-  /** The brief document as an attached PDF (base64), same content as the Doc. */
-  briefPdf: { fileName: string; contentType: 'application/pdf'; base64: string } | null
 }
 
 /**
- * Export the brief's Google Doc as a PDF buffer — same content/design as the
- * Doc, just PDF. Best-effort; returns null on failure. The doc was created by
- * this app (createDriveClient / drive.file scope), so export is permitted.
- */
-async function exportBriefDocAsPdf(docId: string): Promise<Buffer | null> {
-  try {
-    const { createDriveClient } = await import('@/lib/google-drive/client')
-    const drive = await createDriveClient()
-    const res = await drive.files.export(
-      { fileId: docId, mimeType: 'application/pdf' },
-      { responseType: 'arraybuffer' },
-    )
-    return Buffer.from(res.data as ArrayBuffer)
-  } catch (e) {
-    console.warn('[salesforce] brief PDF export failed:', e instanceof Error ? e.message : e)
-    return null
-  }
-}
-
-/**
- * Push a completed brief to Salesforce: the lean data payload + the brief's
- * Google Doc as PDF. Best-effort: never throws. Fires only for completed
+ * Push a completed brief to Salesforce: the lean data payload + a link to the
+ * brief Google Doc. Best-effort: never throws. Fires only for completed
  * briefs; no-ops when SALESFORCE_BRIEF_WEBHOOK_URL is unset. The second arg is
  * accepted for caller back-compat but unused (we only push completed briefs).
  */
@@ -194,22 +171,6 @@ export async function notifySalesforceBriefCompleted(
     ? (sub.platforms as string[]).join(', ')
     : typeof sub.platforms === 'string' ? (sub.platforms as string) : ''
 
-  // Export the existing brief Google Doc as PDF (same content/design, as PDF).
-  let briefPdf: SalesforceBriefPayload['briefPdf'] = null
-  const docId = meta.brief_drive_doc_id as string | undefined
-  if (docId) {
-    const pdf = await exportBriefDocAsPdf(docId)
-    if (pdf) {
-      briefPdf = {
-        fileName: `בריף — ${row.client_name ?? 'לקוח'}.pdf`,
-        contentType: 'application/pdf',
-        base64: pdf.toString('base64'),
-      }
-    }
-  } else {
-    console.warn(`${tag} no brief_drive_doc_id on metadata — sending without PDF`)
-  }
-
   const payload: SalesforceBriefPayload = {
     projectId: (meta.salesforce_ref as string | undefined) ?? null,
     token: row.token,
@@ -217,7 +178,6 @@ export async function notifySalesforceBriefCompleted(
     services,
     platforms,
     briefDocLink: (meta.brief_drive_doc_link as string | undefined) ?? null,
-    briefPdf,
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -232,7 +192,7 @@ export async function notifySalesforceBriefCompleted(
       console.warn(`${tag} non-2xx from Salesforce: ${res.status} ${body.slice(0, 300)}`)
       return { delivered: false, reason: 'non_2xx', status: res.status }
     }
-    console.log(`${tag} delivered (pdf=${briefPdf ? 'yes' : 'no'}) → ${res.status}`)
+    console.log(`${tag} delivered → ${res.status}`)
     return { delivered: true, status: res.status }
   } catch (e) {
     console.warn(`${tag} push failed:`, e instanceof Error ? e.message : e)
