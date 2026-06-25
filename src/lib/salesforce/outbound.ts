@@ -130,6 +130,9 @@ export interface SalesforceBriefPayload {
   briefName: string | null
   services: string[]
   platforms: string
+  /** Link to the brief document (Google Doc). */
+  briefDocLink: string | null
+  /** The brief document as an attached PDF (base64), same content as the Doc. */
   briefPdf: { fileName: string; contentType: 'application/pdf'; base64: string } | null
 }
 
@@ -213,6 +216,7 @@ export async function notifySalesforceBriefCompleted(
     briefName: row.client_name ?? null,
     services,
     platforms,
+    briefDocLink: (meta.brief_drive_doc_link as string | undefined) ?? null,
     briefPdf,
   }
 
