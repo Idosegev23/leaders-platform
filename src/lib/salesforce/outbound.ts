@@ -124,6 +124,8 @@ export interface OutboundResult {
  * the salesforce_ref we received on create; `token` is the idempotency key.
  */
 export interface SalesforceBriefPayload {
+  /** Status of the event. The push only fires for completed briefs. */
+  event: 'brief.completed'
   projectId: string | null
   token: string
   briefName: string | null
@@ -172,6 +174,7 @@ export async function notifySalesforceBriefCompleted(
     : typeof sub.platforms === 'string' ? (sub.platforms as string) : ''
 
   const payload: SalesforceBriefPayload = {
+    event: 'brief.completed',
     projectId: (meta.salesforce_ref as string | undefined) ?? null,
     token: row.token,
     briefName: row.client_name ?? null,
