@@ -57,6 +57,7 @@ export async function uploadBriefDocToFolder(
   })
   const dup = existing.data.files?.[0]
   if (dup?.id) {
+    await makeAnyoneReader(drive, dup.id)
     return {
       fileId: dup.id,
       viewLink: dup.webViewLink || `https://docs.google.com/document/d/${dup.id}/edit`,
@@ -93,12 +94,38 @@ export async function uploadBriefDocToFolder(
     supportsAllDrives: true,
   })
 
+  await makeAnyoneReader(drive, res.data.id!)
+
   return {
     fileId: res.data.id!,
     viewLink:
       res.data.webViewLink ||
       `https://docs.google.com/document/d/${res.data.id}/edit`,
     reused: false,
+  }
+}
+
+/**
+ * Make the file readable by anyone with the link (public view), so the brief
+ * doc link works for external systems (e.g. Salesforce) and recipients outside
+ * the Leaders domain. Best-effort — never throws. drive.file scope can manage
+ * permissions on files the app created.
+ */
+async function makeAnyoneReader(
+  drive: Awaited<ReturnType<typeof createDriveClient>>,
+  fileId: string,
+): Promise<void> {
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: { role: 'reader', type: 'anyone' },
+      supportsAllDrives: true,
+    })
+  } catch (e) {
+    console.warn(
+      `[brief-doc] could not set public permission on ${fileId}:`,
+      e instanceof Error ? e.message : e,
+    )
   }
 }
 
