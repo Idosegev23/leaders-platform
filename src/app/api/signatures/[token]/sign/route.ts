@@ -13,6 +13,7 @@ import {
 } from '@/lib/google-drive/client'
 import { sendGmailEmail, refreshAccessToken } from '@/lib/gmail'
 import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
+import { notifySalesforceQuote } from '@/lib/salesforce/quote'
 import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
 import { generateMultiPagePdf } from '@/lib/playwright/pdf'
 import type { PriceQuoteData, PriceQuoteSignature } from '@/types/price-quote'
@@ -221,6 +222,21 @@ export async function POST(
       signed_pdf_drive_view_link: signedUpload.viewLink,
     })
     .eq('token', token)
+
+  // Salesforce quote: push 'quote.signed' with the signed (public) PDF link.
+  const quoteMeta = req.payload as { source?: string; project_id?: string } | null
+  if (quoteMeta?.source === 'salesforce-quote' && quoteMeta.project_id) {
+    try {
+      await notifySalesforceQuote(quoteMeta.project_id, 'quote.signed', {
+        token,
+        signer_name: body.signer_name,
+        signed_at: signedAt,
+        signed_pdf_link: signedUpload.viewLink,
+      })
+    } catch (e) {
+      console.warn('[sign] salesforce quote push failed:', e instanceof Error ? e.message : e)
+    }
+  }
 
   // Activity log
   if (req.lead_id) {

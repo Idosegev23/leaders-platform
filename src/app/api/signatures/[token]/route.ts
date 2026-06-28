@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { notifySalesforceQuote } from '@/lib/salesforce/quote'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -23,7 +24,7 @@ export async function GET(
   const { data, error } = await supabase
     .from('signature_requests')
     .select(
-      'id, token, title, recipient_email, recipient_name, status, pdf_drive_view_link, signed_pdf_drive_view_link, signed_at, signer_name, expires_at, created_at, created_by_email, created_by_name',
+      'id, token, title, recipient_email, recipient_name, status, pdf_drive_view_link, signed_pdf_drive_view_link, signed_at, signer_name, expires_at, created_at, created_by_email, created_by_name, payload',
     )
     .eq('token', token)
     .maybeSingle()
@@ -41,6 +42,19 @@ export async function GET(
       .from('signature_requests')
       .update({ status: 'opened', opened_at: new Date().toISOString() })
       .eq('token', token)
+
+    // Salesforce quote: push 'quote.opened' on first view (best-effort).
+    const meta = data.payload as { source?: string; project_id?: string } | null
+    if (meta?.source === 'salesforce-quote' && meta.project_id) {
+      try {
+        await notifySalesforceQuote(meta.project_id, 'quote.opened', {
+          token,
+          quote_pdf_link: data.pdf_drive_view_link ?? null,
+        })
+      } catch (e) {
+        console.warn('[sign-opened] salesforce push failed:', e instanceof Error ? e.message : e)
+      }
+    }
   }
 
   return NextResponse.json(data)
