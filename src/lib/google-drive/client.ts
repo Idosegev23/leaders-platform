@@ -6,6 +6,7 @@
  */
 
 import { google } from 'googleapis'
+import { Readable } from 'stream'
 
 // Note: For server-side usage, you'll need to set up a service account
 // or use OAuth2 with user consent flow.
@@ -67,7 +68,6 @@ export async function uploadToGoogleDrive(
   }
 
   // Upload file
-  const { Readable } = await import('stream')
   const stream = new Readable()
   stream.push(options.buffer)
   stream.push(null)
@@ -171,7 +171,6 @@ export async function uploadBufferToDriveFolder(params: {
   shareWithDomain?: boolean
 }): Promise<{ id: string; viewLink: string; downloadLink: string }> {
   const drive = await createDriveClient()
-  const { Readable } = await import('stream')
   const stream = new Readable()
   stream.push(params.buffer)
   stream.push(null)
