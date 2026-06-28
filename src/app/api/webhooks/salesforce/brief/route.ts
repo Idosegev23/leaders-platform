@@ -81,6 +81,8 @@ interface CreateBriefBody {
   personal_note?: string | null
   /** Default true. Set false to create the link without emailing the client. */
   send_email?: boolean
+  /** QA/test flag: skip the management-notification email on completion. */
+  suppress_mgmt_mail?: boolean
 }
 
 export async function POST(request: Request) {
@@ -179,6 +181,7 @@ export async function POST(request: Request) {
         salesforce_ref: salesforceRef,
         language,
         ...(personalNote ? { personal_note: personalNote } : {}),
+        ...(body.suppress_mgmt_mail === true ? { suppress_mgmt_mail: true } : {}),
       },
     })
     .select('id, token')

@@ -166,6 +166,7 @@ export async function PATCH(
         submissionData: submission_data || (currentMeta.submission_data as Record<string, unknown> | undefined) || null,
         language: (currentMeta.language as 'he' | 'en' | undefined) || 'he',
         transition: status,
+        suppressMgmtMail: currentMeta.suppress_mgmt_mail === true,
       })
     } catch (e) {
       console.error('[brief-cascade] unexpected error:', e instanceof Error ? e.message : e)
@@ -205,6 +206,8 @@ async function runClientBriefCascade(params: {
   submissionData: Record<string, unknown> | null
   language?: 'he' | 'en'
   transition: 'completed' | 'failed'
+  /** Skip the management-notification email (used for QA/test briefs). */
+  suppressMgmtMail?: boolean
 }): Promise<void> {
   const tag = `[brief-cascade:${params.token.slice(0, 8)}]`
   console.log(`${tag} start — transition=${params.transition} client="${params.clientName}"`)
@@ -261,7 +264,10 @@ async function runClientBriefCascade(params: {
   }
 
   // 1. Email management + the BD-person who originally sent the brief.
-  try {
+  //    Skipped for QA/test briefs (suppress_mgmt_mail) so test runs don't spam mgmt.
+  if (params.suppressMgmtMail) {
+    console.log(`${tag} mgmt mail suppressed (test)`)
+  } else try {
     const { sendToManagement, getManagementRecipients } = await import('@/lib/gmail/management')
     // AI summary of the brief (Gemini 3.1 Pro). Best-effort — if it fails the
     // mail still goes out with the legacy hand-picked field preview as fallback.
