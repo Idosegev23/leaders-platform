@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { generateMultiPagePdf, generateReactPdf, generateScreenshotPdf } from '@/lib/playwright/pdf'
+import { htmlSlidesToPdf } from '@/lib/render/gotenberg'
+import { uploadAndSignedUrl, deckArtifactPath } from '@/lib/render/storage'
 
 export const maxDuration = 600
 import { renderProposalToHtml } from '@/templates/quote/proposal-template'
@@ -51,100 +52,47 @@ export async function POST(request: NextRequest) {
     // ─── HTML-Native Presentation path (v6) ─────────────────
     const htmlPres = documentData._htmlPresentation as { htmlSlides?: string[]; brandName?: string; title?: string } | undefined
     if (htmlPres?.htmlSlides?.length) {
-      console.log(`[PDF] 🎨 Using HTML-Native presentation: ${htmlPres.htmlSlides.length} slides (screenshot PDF for full visual fidelity)`)
-      const brandNameStr = (htmlPres.brandName || documentData.brandName as string) || ''
+      console.log(`[PDF] HTML-Native: ${htmlPres.htmlSlides.length} slides via Gotenberg`)
+      const brandNameStr = (htmlPres.brandName || (documentData.brandName as string)) || ''
 
-      // Screenshot PDF — pixel-perfect fidelity (blur, gradients, glassmorphism all preserved)
-      // File is ~10-40MB — uploaded to Supabase Storage, client downloads directly from CDN
-      // (avoids Vercel's 4.5MB response body limit)
-      const pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {
-        format: '16:9',
+      const pdfBuffer = await htmlSlidesToPdf(htmlPres.htmlSlides, {
         title: htmlPres.title || brandNameStr || 'Presentation',
         brandName: brandNameStr,
       })
-      console.log(`[PDF] Generated screenshot PDF, size: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB (${pdfBuffer.length} bytes)`)
+      console.log(`[PDF] PDF rendered: ${(pdfBuffer.length / 1024 / 1024).toFixed(1)} MB`)
 
-      const fileName = `proposal_${document.id}_${Date.now()}.pdf`
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, pdfBuffer, { contentType: 'application/pdf', upsert: true })
-      if (uploadError) {
-        console.error('[PDF] Upload to Storage failed:', uploadError)
-        return NextResponse.json({ error: 'Failed to save PDF to storage', details: uploadError.message }, { status: 500 })
-      }
-      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(fileName)
-      await supabase.from('documents').update({ pdf_url: urlData.publicUrl, status: 'generated' }).eq('id', documentId)
-      console.log(`[PDF] ✅ PDF saved to Storage: ${urlData.publicUrl}`)
-
-      // Always return URL — client fetches from Supabase CDN (no Vercel 4.5MB response limit)
-      // If action=download, client triggers the download from the URL client-side
-      return NextResponse.json({
-        success: true,
-        pdfUrl: urlData.publicUrl,
-        fileName,
-        sizeBytes: pdfBuffer.length,
+      const fileName = `proposal_${document.id}.pdf`
+      const { signedUrl } = await uploadAndSignedUrl({
+        path: deckArtifactPath(documentId, 'pdf'),
+        body: pdfBuffer,
+        contentType: 'application/pdf',
       })
+      await supabase.from('documents').update({ pdf_url: signedUrl, status: 'generated' }).eq('id', documentId)
+
+      return NextResponse.json({ success: true, pdfUrl: signedUrl, fileName, sizeBytes: pdfBuffer.length })
     }
 
-    // ─── AST Presentation path (fallback) ─────────────────
+    // ─── AST Presentation path ─────────────────
     const astPresentation = documentData._presentation as Presentation | undefined
     if (astPresentation && astPresentation.slides?.length > 0) {
-      console.log(`[PDF] Using AST presentation with ${astPresentation.slides.length} slides`)
+      console.log(`[PDF] AST presentation: ${astPresentation.slides.length} slides via Gotenberg`)
       const brandNameStr = (documentData.brandName as string) || ''
 
-      let pdfBuffer: Buffer
+      const astHtmlPages = presentationToHtmlSlides(astPresentation, true)
+      const pdfBuffer = await htmlSlidesToPdf(astHtmlPages, {
+        title: astPresentation.title || brandNameStr || 'Presentation',
+        brandName: brandNameStr,
+      })
 
-      // Try React render first (full CSS fidelity — aurora, shadows, gradients)
-      const useReactRender = process.env.PDF_USE_REACT_RENDER !== 'false'
-      if (useReactRender) {
-        try {
-          console.log(`[PDF] 🎨 Using React renderer (Playwright navigation)`)
-          pdfBuffer = await generateReactPdf(documentId, {
-            format: '16:9',
-            title: astPresentation.title || brandNameStr || 'Presentation',
-            brandName: brandNameStr,
-          })
-        } catch (reactErr) {
-          console.warn(`[PDF] ⚠️ React render failed, falling back to ast-to-html:`, reactErr)
-          const astHtmlPages = presentationToHtmlSlides(astPresentation, true)
-          pdfBuffer = await generateMultiPagePdf(astHtmlPages, {
-            format: '16:9',
-            title: astPresentation.title || brandNameStr || 'Presentation',
-            brandName: brandNameStr,
-          })
-        }
-      } else {
-        console.log(`[PDF] Using legacy ast-to-html renderer`)
-        const astHtmlPages = presentationToHtmlSlides(astPresentation, true)
-        pdfBuffer = await generateMultiPagePdf(astHtmlPages, {
-          format: '16:9',
-          title: astPresentation.title || brandNameStr || 'Presentation',
-          brandName: brandNameStr,
-        })
-      }
-      console.log(`[PDF] Generated PDF, size: ${pdfBuffer.length} bytes`)
+      const fileName = `proposal_${document.id}.pdf`
+      const { signedUrl } = await uploadAndSignedUrl({
+        path: deckArtifactPath(documentId, 'pdf'),
+        body: pdfBuffer,
+        contentType: 'application/pdf',
+      })
+      await supabase.from('documents').update({ pdf_url: signedUrl, status: 'generated' }).eq('id', documentId)
 
-      const fileName = `proposal_${document.id}_${Date.now()}.pdf`
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(fileName, pdfBuffer, { contentType: 'application/pdf', upsert: true })
-      if (uploadError) console.error('Upload error:', uploadError)
-
-      const { data: urlData } = supabase.storage.from('documents').getPublicUrl(fileName)
-      await supabase
-        .from('documents')
-        .update({ pdf_url: urlData.publicUrl, status: 'generated' })
-        .eq('id', documentId)
-
-      if (action === 'download') {
-        return new NextResponse(new Uint8Array(pdfBuffer), {
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="${fileName}"`,
-          },
-        })
-      }
-      return NextResponse.json({ success: true, pdfUrl: urlData.publicUrl })
+      return NextResponse.json({ success: true, pdfUrl: signedUrl, fileName, sizeBytes: pdfBuffer.length })
     }
     // ─── END AST path ──────────────────────────────────────
 
@@ -259,63 +207,29 @@ export async function POST(request: NextRequest) {
       })
     }
     
-    console.log(`[PDF] Rendering ${htmlPages.length} slides...`)
-    
-    // Generate multi-page PDF in 16:9 format
+    console.log(`[PDF] Legacy template: ${htmlPages.length} slides via Gotenberg`)
     const legacyBrandName = (documentData.brandName as string) || ''
-    const pdfBuffer = await generateMultiPagePdf(htmlPages, {
-      format: '16:9',
+    const pdfBuffer = await htmlSlidesToPdf(htmlPages, {
       title: legacyBrandName || 'Proposal',
       brandName: legacyBrandName,
     })
-    
-    console.log(`[PDF] Generated PDF, size: ${pdfBuffer.length} bytes`)
 
-    // Upload to Supabase Storage
-    const fileName = `proposal_${document.id}_${Date.now()}.pdf`
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(fileName, pdfBuffer, {
-        contentType: 'application/pdf',
-        upsert: true,
-      })
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError)
-      // Continue anyway - we can still return the PDF for download
-    }
-
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('documents')
-      .getPublicUrl(fileName)
-
-    // Update document with PDF URL and generated images
+    const fileName = `proposal_${document.id}.pdf`
+    const { signedUrl } = await uploadAndSignedUrl({
+      path: deckArtifactPath(documentId, 'pdf'),
+      body: pdfBuffer,
+      contentType: 'application/pdf',
+    })
     await supabase
       .from('documents')
-      .update({
-        pdf_url: urlData.publicUrl,
-        status: 'generated',
-        data: {
-          ...documentData,
-          _generatedImages: images,
-        }
-      })
+      .update({ pdf_url: signedUrl, status: 'generated', data: { ...documentData, _generatedImages: images } })
       .eq('id', documentId)
-
-    if (action === 'download') {
-      // Return PDF directly for download
-      return new NextResponse(new Uint8Array(pdfBuffer), {
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="${fileName}"`,
-        },
-      })
-    }
 
     return NextResponse.json({
       success: true,
-      pdfUrl: urlData.publicUrl,
+      pdfUrl: signedUrl,
+      fileName,
+      sizeBytes: pdfBuffer.length,
       generatedImages: Object.keys(images).length,
     })
   } catch (error) {
