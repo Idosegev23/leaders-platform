@@ -1,0 +1,10 @@
+services:
+  gotenberg:
+    build: .
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+    command:
+      - "gotenberg"
+      - "--chromium-disable-web-security"      # load cross-origin images (matches current puppeteer flag)
+      - "--api-timeout=120s"
