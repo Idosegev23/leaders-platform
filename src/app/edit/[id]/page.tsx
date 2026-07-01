@@ -494,6 +494,10 @@ export default function GammaProtoPage() {
       })
       const json = await res.json()
       if (!res.ok || !json?.edit_url) throw new Error(json?.error || 'ייבוא ל-Canva נכשל')
+      // Keep the link in state — the export takes ~30-60s, so this window.open
+      // is long past the click gesture and popup blockers usually eat it. The
+      // persistent "פתח ב-Canva" link in the toolbar is the reliable path.
+      setCanvaUrl(json.edit_url as string)
       window.open(json.edit_url as string, '_blank', 'noopener')
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'שגיאה בייצוא ל-Canva')
@@ -531,6 +535,7 @@ export default function GammaProtoPage() {
   const [validatingSlide, setValidatingSlide] = useState<number | null>(null)
   const [validatingAll, setValidatingAll] = useState(false)
   const [canvaBusy, setCanvaBusy] = useState(false)
+  const [canvaUrl, setCanvaUrl] = useState<string | null>(null)
 
   function showToast(msg: string) {
     setToast(msg)
@@ -796,8 +801,15 @@ export default function GammaProtoPage() {
             <button onClick={exportToCanva} disabled={canvaBusy}
               title="ייצא ל-Canva ופתח לעריכה"
               style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 6, background: canvaBusy ? '#555' : '#7c3aed', color: '#fff', border: 0, borderRadius: 6, padding: '7px 12px', cursor: canvaBusy ? 'default' : 'pointer', fontSize: 12, fontWeight: 600 }}>
-              {canvaBusy ? '⏳ מייצא…' : '🎨 Canva'}
+              {canvaBusy ? '⏳ מייצא ל-Canva (כדקה)…' : '🎨 Canva'}
             </button>
+            {canvaUrl && !canvaBusy && (
+              <a href={canvaUrl} target="_blank" rel="noopener noreferrer"
+                title="המצגת מוכנה ב-Canva — פתח לעריכה"
+                style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 6, background: '#16a34a', color: '#fff', borderRadius: 6, padding: '7px 12px', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
+                ↗ פתח ב-Canva
+              </a>
+            )}
           </ToolbarGroup>
         </div>
       </header>
