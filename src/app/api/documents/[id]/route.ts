@@ -55,8 +55,29 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // Attach the linked influencer brief (if this deck has been approved).
+    let influencerBrief: { id: string; title: string; pdfUrl: string; createdAt: string } | null = null
+    if (document.type === 'deck') {
+      const { data: briefRow } = await supabase
+        .from('documents')
+        .select('id, title, drive_file_url, pdf_url, created_at')
+        .eq('parent_document_id', id)
+        .eq('type', 'influencer_brief')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (briefRow) {
+        influencerBrief = {
+          id: briefRow.id,
+          title: briefRow.title,
+          pdfUrl: briefRow.drive_file_url || briefRow.pdf_url || '',
+          createdAt: briefRow.created_at,
+        }
+      }
+    }
+
     console.log(`[${requestId}] ⏱️ TOTAL: ${Date.now() - startTime}ms`)
-    return NextResponse.json({ document })
+    return NextResponse.json({ document, influencerBrief })
   } catch (error) {
     console.error(`[${requestId}] ❌ ERROR after ${Date.now() - startTime}ms:`, error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
