@@ -78,12 +78,16 @@ export async function POST(req: Request) {
   let mailFailed = 0
   try {
     const { sendToManagement } = await import('@/lib/gmail/management')
+    const { getEventRecipients } = await import('@/lib/notifications/recipients')
     const html = buildKickoffHtml(payload, user.user_metadata?.full_name ?? user.email)
+    const to = getEventRecipients('inner_meeting_completed')
+    console.log(`${tag} mgmt mail recipients:`, to.join(', '))
     const result = await sendToManagement({
       senderEmail: user.email,
       senderName: user.user_metadata?.full_name ?? user.email,
       subject: `🚀 פגישת התנעה — ${payload.clientName}`,
       html,
+      to,
     })
     mailSent = result.sent
     mailFailed = result.failed.length
