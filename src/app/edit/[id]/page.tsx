@@ -480,6 +480,28 @@ export default function GammaProtoPage() {
     } catch (e) { alert('PDF error: ' + (e instanceof Error ? e.message : 'unknown')) }
   }
 
+  // Export the CURRENT edited presentation to Canva and open it for editing.
+  // Sends the live `pres` so Canva gets exactly what's on screen — the import
+  // route renders the same StructuredPresentation → PDF → Canva url-import.
+  async function exportToCanva() {
+    if (!pres || canvaBusy) return
+    setCanvaBusy(true)
+    setErr(null)
+    try {
+      const res = await fetch('/api/canva/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: params.id, presentation: pres }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.edit_url) throw new Error(json?.error || 'ייבוא ל-Canva נכשל')
+      window.open(json.edit_url as string, '_blank', 'noopener')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'שגיאה בייצוא ל-Canva')
+    } finally {
+      setCanvaBusy(false)
+    }
+  }
+
   async function aiRewrite(key: string, mode: 'shorter' | 'dramatic' | 'formal') {
     if (!slide) return
     const value = (slide.slots as unknown as Record<string, unknown>)[key]
@@ -508,6 +530,7 @@ export default function GammaProtoPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [validatingSlide, setValidatingSlide] = useState<number | null>(null)
   const [validatingAll, setValidatingAll] = useState(false)
+  const [canvaBusy, setCanvaBusy] = useState(false)
 
   function showToast(msg: string) {
     setToast(msg)
@@ -769,6 +792,11 @@ export default function GammaProtoPage() {
             <button onClick={() => setShareOpen(true)}
               style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 6, background: '#0ea5e9', color: '#fff', border: 0, borderRadius: 6, padding: '7px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
               <Share2 size={14} /> שיתוף
+            </button>
+            <button onClick={exportToCanva} disabled={canvaBusy}
+              title="ייצא ל-Canva ופתח לעריכה"
+              style={{ display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 6, background: canvaBusy ? '#555' : '#7c3aed', color: '#fff', border: 0, borderRadius: 6, padding: '7px 12px', cursor: canvaBusy ? 'default' : 'pointer', fontSize: 12, fontWeight: 600 }}>
+              {canvaBusy ? '⏳ מייצא…' : '🎨 Canva'}
             </button>
           </ToolbarGroup>
         </div>

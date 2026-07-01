@@ -4,8 +4,9 @@ import { createClient } from '@supabase/supabase-js'
 import { generateScreenshotPdf, generateMultiPagePdf } from '@/lib/playwright/pdf'
 import { presentationToHtmlSlides } from '@/lib/presentation/ast-to-html'
 import type { Presentation } from '@/types/presentation'
-import { uploadBufferToDriveFolder } from '@/lib/google-drive/client'
-import { DRIVE_ANCHORS } from '@/lib/google-drive/client-folders'
+import { renderStructuredSlide } from '@/lib/gemini/layout-prototypes/renderer'
+import type { StructuredPresentation } from '@/lib/gemini/layout-prototypes/types'
+import { uploadAndSignedUrl, deckArtifactPath } from '@/lib/render/storage'
 import { importDesignFromUrl, waitForUrlImport } from '@/lib/canva/client'
 import { isDevMode } from '@/lib/auth/dev-mode'
 import { createClient as createSsrClient } from '@/lib/supabase/server'
@@ -39,9 +40,11 @@ export async function POST(request: Request) {
   }
 
   let documentId: string
+  let bodyPresentation: StructuredPresentation | undefined
   try {
     const body = await request.json()
     documentId = (body?.documentId || '').trim()
+    bodyPresentation = (body?.presentation as StructuredPresentation | undefined) || undefined
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
@@ -68,8 +71,24 @@ export async function POST(request: Request) {
     const htmlPres = documentData._htmlPresentation as { htmlSlides?: string[]; title?: string } | undefined
     const astPres = documentData._presentation as Presentation | undefined
     const cachedSlides = documentData._cachedSlides as string[] | undefined
+    // The /edit screen edits a StructuredPresentation and auto-saves it to
+    // _structuredPresentation. Prefer it (or a live copy POSTed straight from
+    // the editor) so Canva receives exactly what the user sees — not the older
+    // generate-time _htmlPresentation.
+    const structured =
+      (bodyPresentation?.slides?.length ? bodyPresentation : undefined) ||
+      (documentData._structuredPresentation as StructuredPresentation | undefined)
 
-    if (htmlPres?.htmlSlides?.length) {
+    if (structured?.slides?.length) {
+      const structuredHtml = structured.slides.map((s) =>
+        renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
+      )
+      pdfBuffer = await generateScreenshotPdf(structuredHtml, {
+        format: '16:9',
+        title: structured.brandName || brandName,
+        brandName: structured.brandName || brandName,
+      })
+    } else if (htmlPres?.htmlSlides?.length) {
       pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {
         format: '16:9', title: htmlPres.title || brandName, brandName,
       })
@@ -93,21 +112,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `PDF generation failed: ${e instanceof Error ? e.message : e}` }, { status: 500 })
   }
 
-  // 2. Upload PUBLIC to Drive (anyone-reader) → public downloadable URL.
+  // 2. Upload to Supabase Storage and hand Canva a SIGNED URL. Google Drive's
+  //    uc?export=download returns a redirect/confirm page (not a direct 200),
+  //    which Canva's url-import rejects ("status code wasn't 200"). A Supabase
+  //    signed URL is a direct 200 download Canva can fetch.
   let publicUrl: string
   try {
-    const uploaded = await uploadBufferToDriveFolder({
-      folderId: DRIVE_ANCHORS.BRIEFS_SENT,
-      fileName: `${brandName} (Canva import).pdf`,
-      mimeType: 'application/pdf',
-      buffer: pdfBuffer,
+    const { signedUrl } = await uploadAndSignedUrl({
+      path: deckArtifactPath(documentId, 'pdf'),
+      body: pdfBuffer,
+      contentType: 'application/pdf',
     })
-    // Canva's url-import needs a direct-download URL. downloadLink is the
-    // webContentLink; fall back to the uc?export=download form if empty.
-    publicUrl = uploaded.downloadLink || `https://drive.google.com/uc?export=download&id=${uploaded.id}`
+    publicUrl = signedUrl
   } catch (e) {
-    console.error('[canva-import] Drive upload failed:', e)
-    return NextResponse.json({ error: `Drive upload failed: ${e instanceof Error ? e.message : e}` }, { status: 502 })
+    console.error('[canva-import] storage upload failed:', e)
+    return NextResponse.json({ error: `Storage upload failed: ${e instanceof Error ? e.message : e}` }, { status: 502 })
   }
 
   // 3. Import into Canva + poll for the finished design.
