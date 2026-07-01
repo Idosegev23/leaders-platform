@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button, Card } from '@/components/ui'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import type { Document } from '@/types/database'
+import { CanvaDeckButton } from '@/components/canva/CanvaDeckButton'
 
 // Structured chat data type (flat structure from quote-schema)
 interface StructuredQuoteData {
@@ -152,21 +153,24 @@ export default function PreviewPage() {
             </div>
           </div>
 
-          <Button
-            variant="primary"
-            onClick={downloadPdf}
-            disabled={isGenerating}
-            className="bg-gradient-to-l from-blue-600 to-purple-600"
-          >
-            {isGenerating ? (
-              <>
-                <span className="animate-spin mr-2">⏳</span>
-                מייצר PDF...
-              </>
-            ) : (
-              <>📥 הורד PDF</>
-            )}
-          </Button>
+          <div className="flex items-center gap-3">
+            {!isQuote && <CanvaDeckButton documentId={document.id} />}
+            <Button
+              variant="primary"
+              onClick={downloadPdf}
+              disabled={isGenerating}
+              className="bg-gradient-to-l from-blue-600 to-purple-600"
+            >
+              {isGenerating ? (
+                <>
+                  <span className="animate-spin mr-2">⏳</span>
+                  מייצר PDF...
+                </>
+              ) : (
+                <>📥 הורד PDF</>
+              )}
+            </Button>
+          </div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
