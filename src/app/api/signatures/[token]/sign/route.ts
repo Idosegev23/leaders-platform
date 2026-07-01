@@ -104,7 +104,13 @@ export async function POST(
   //  (b) FALLBACK — download original from Drive and stamp the signature
   //      at the bottom margin. Used when no snapshot is stored (legacy
   //      requests from before this refactor).
-  const quoteData = (req.payload as { source?: string; quote_data?: PriceQuoteData } | null)?.quote_data
+  const sigPayload = req.payload as {
+    source?: string
+    quote_data?: PriceQuoteData
+    contract_data?: import('@/lib/templates/influencer-contract-template').InfluencerContractData
+  } | null
+  const quoteData = sigPayload?.quote_data
+  const contractData = sigPayload?.contract_data
   const signedAtIsoEarly = new Date().toISOString()
   const dateStr = new Date(signedAtIsoEarly).toLocaleDateString('he-IL', {
     day: '2-digit',
@@ -141,6 +147,34 @@ export async function POST(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return NextResponse.json({ error: `יצירת PDF חתום נכשלה: ${msg}` }, { status: 500 })
+    }
+  } else if (contractData) {
+    try {
+      const { generateInfluencerContractPages } = await import('@/lib/templates/influencer-contract-template')
+      const signatureBlock = {
+        date: dateStr,
+        signer_name: body.signer_name,
+        id_number: richBody.signer_id_number ?? null,
+        signer_role: body.signer_role ?? null,
+        company_name: richBody.signer_company ?? null,
+        company_hp: richBody.signer_company_hp ?? null,
+        image_data_url: body.signature_image ?? null,
+        typed_name: body.signature_image ? null : (body.typed_name ?? null),
+      }
+      const pages = generateInfluencerContractPages(
+        { ...contractData, signature: signatureBlock },
+        process.env.NEXT_PUBLIC_APP_URL ||
+          (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app'),
+      )
+      const buffer = await generateMultiPagePdf(pages, {
+        format: 'A4',
+        title: `${req.title} (חתום)`,
+        brandName: req.title,
+      })
+      signedPdfBytes = new Uint8Array(buffer)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return NextResponse.json({ error: `יצירת חוזה חתום נכשלה: ${msg}` }, { status: 500 })
     }
   } else {
     // Fallback: stamp the original at the bottom margin
