@@ -44,6 +44,46 @@ interface StructuredQuoteData {
   [key: string]: unknown
 }
 
+async function requestArtifact(
+  endpoint: string,
+  documentId: string,
+): Promise<{ url: string; fileName: string }> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 180_000) // 3 min
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ documentId }),
+      signal: controller.signal,
+    })
+    const text = await res.text()
+    let json: Record<string, unknown> = {}
+    try { json = JSON.parse(text) } catch { /* non-JSON error body */ }
+    if (!res.ok) {
+      const detail = (json.error as string) || text.slice(0, 200) || `HTTP ${res.status}`
+      throw new Error(`${res.status}: ${detail}`)
+    }
+    const url = (json.pdfUrl || json.pptxUrl) as string | undefined
+    const fileName = (json.fileName as string) || 'download'
+    if (!url) throw new Error('no download URL returned')
+    return { url, fileName }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function triggerDownload(url: string, fileName: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.target = '_blank'
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
 export default function PreviewPage() {
   const router = useRouter()
   const params = useParams()
@@ -76,32 +116,27 @@ export default function PreviewPage() {
 
   const downloadPdf = async () => {
     if (!document) return
-
     setIsGenerating(true)
     try {
-      const response = await fetch('/api/pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId: document.id,
-          action: 'download',
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('PDF generation failed')
-      }
-
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = window.document.createElement('a')
-      a.href = url
-      a.download = `${document.title}.pdf`
-      a.click()
-      window.URL.revokeObjectURL(url)
+      const { url, fileName } = await requestArtifact('/api/pdf', document.id)
+      triggerDownload(url, fileName)
     } catch (error) {
       console.error('Error downloading PDF:', error)
-      alert('שגיאה ביצירת ה-PDF')
+      alert(`שגיאה ביצירת ה-PDF\n${error instanceof Error ? error.message : ''}`)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const downloadPptx = async () => {
+    if (!document) return
+    setIsGenerating(true)
+    try {
+      const { url, fileName } = await requestArtifact('/api/export-pptx', document.id)
+      triggerDownload(url, fileName)
+    } catch (error) {
+      console.error('Error downloading PPTX:', error)
+      alert(`שגיאה ביצירת ה-PowerPoint\n${error instanceof Error ? error.message : ''}`)
     } finally {
       setIsGenerating(false)
     }
@@ -164,12 +199,30 @@ export default function PreviewPage() {
               {isGenerating ? (
                 <>
                   <span className="animate-spin mr-2">⏳</span>
-                  מייצר PDF...
+                  מייצר...
                 </>
               ) : (
                 <>📥 הורד PDF</>
               )}
             </Button>
+
+            {!isQuote && (
+              <Button
+                variant="primary"
+                onClick={downloadPptx}
+                disabled={isGenerating}
+                className="bg-gradient-to-l from-orange-500 to-red-600"
+              >
+                {isGenerating ? (
+                  <>
+                    <span className="animate-spin mr-2">⏳</span>
+                    מייצר...
+                  </>
+                ) : (
+                  <>📊 הורד PowerPoint</>
+                )}
+              </Button>
+            )}
           </div>
         </div>
 

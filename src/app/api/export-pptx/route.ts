@@ -5,6 +5,7 @@ import { renderProposalToHtml } from '@/templates/quote/proposal-template'
 import { generatePremiumProposalSlides } from '@/templates/quote/premium-proposal-template'
 import { generateAISlides } from '@/lib/gemini/slide-designer'
 import { isDevMode, DEV_AUTH_USER } from '@/lib/auth/dev-mode'
+import { uploadAndSignedUrl, deckArtifactPath } from '@/lib/render/storage'
 
 export const maxDuration = 600
 
@@ -111,18 +112,24 @@ export async function POST(request: NextRequest) {
 
     // Generate PPTX (renders HTML→PNG then builds slides with text overlays)
     const buffer = await generatePptx(documentData, htmlSlides)
-
     console.log(`[${requestId}] PPTX generated: ${buffer.length} bytes`)
 
-    // Return as downloadable file
-    const filename = encodeURIComponent(`${brandName}.pptx`)
-    return new NextResponse(new Uint8Array(buffer), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': buffer.length.toString(),
-      },
+    // Upload to Storage + return a signed URL — never stream a large buffer
+    // through the serverless response (Vercel ~4.5MB cap caused silent 413s).
+    const fileName = `${brandName}.pptx`
+    const { signedUrl } = await uploadAndSignedUrl({
+      path: deckArtifactPath(documentId, 'pptx'),
+      body: buffer,
+      contentType:
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    })
+    console.log(`[${requestId}] PPTX uploaded, signed URL issued`)
+
+    return NextResponse.json({
+      success: true,
+      pptxUrl: signedUrl,
+      fileName,
+      sizeBytes: buffer.length,
     })
   } catch (error) {
     console.error(`[${requestId}] PPTX export failed:`, error)
