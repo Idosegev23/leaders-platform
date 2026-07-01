@@ -5,6 +5,10 @@ import {
   countBusinessDaysBetween,
   isOlderThanNBusinessDays,
 } from '@/lib/businessDays'
+import {
+  getEventRecipients,
+  type NotificationEvent,
+} from '@/lib/notifications/recipients'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -44,6 +48,31 @@ function daysSince(iso: string): number {
 function hoursUntil(isoDate: string): number {
   const deadline = new Date(`${isoDate}T23:59:59`)
   return (deadline.getTime() - Date.now()) / 3_600_000
+}
+
+/**
+ * Today's calendar date in Israel (Asia/Jerusalem), as `yyyy-mm-dd`.
+ * The cron fires at 08:00 UTC = 10:00/11:00 Israel, so "today in Israel"
+ * is unambiguous. Uses the same Asia/Jerusalem convention as the brief
+ * views (src/app/briefs/[token]/page.tsx).
+ */
+function israelYmd(date: Date = new Date()): string {
+  // en-CA gives ISO-style yyyy-mm-dd.
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' })
+}
+
+/**
+ * "Tomorrow" = 1 calendar day after today-in-Israel, as `yyyy-mm-dd`.
+ * NOTE: calendar-day by default (business-day variant intentionally not
+ * used here — client meetings are scheduled on any weekday).
+ */
+function israelTomorrowYmd(): string {
+  const now = new Date()
+  // Anchor to Israel-local midnight, then add 24h, then re-read in Israel TZ.
+  const israelToday = israelYmd(now)
+  const tomorrow = new Date(`${israelToday}T12:00:00+02:00`)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  return israelYmd(tomorrow)
 }
 
 function buildReminderEmailHtml(params: {
@@ -164,6 +193,16 @@ type WebhookReminder =
       deadline_date: string
       hours_until: number
       last_editor_email: string | null
+    }
+  | {
+      kind: 'meeting_day_before'
+      form_id: string
+      share_token: string
+      client_name: string | null
+      meeting_type: 'client_presentation' | 'second_meeting'
+      meeting_date: string
+      canva_edit_url: string | null
+      recipients: string[]
     }
 
 type BriefReminderResult = {
@@ -428,6 +467,141 @@ export async function GET(request: Request) {
     }
   }
 
+  // 4. Client meetings happening TOMORROW (Israel TZ) → dedicated emails.
+  //    Two independent meeting dates on the kickoff doc, each with its own
+  //    "reminder sent" stamp so we notify exactly once. Recipients come from
+  //    getEventRecipients() (Phase-1 policy: includes ROEI/SHARON/NOA and the
+  //    NOTIFICATIONS_TEST_MODE override). We stamp *_reminder_sent_at and mail
+  //    each meeting separately so the two don't share a fate.
+  const meetingReminderResults: Array<{
+    inner_form_id: string
+    form_id: string
+    meeting_type: 'client_presentation' | 'second_meeting'
+    meeting_date: string
+    delivery: 'sent' | 'failed'
+    recipients: number
+    error?: string
+  }> = []
+  {
+    const tomorrow = israelTomorrowYmd()
+    const { sendToManagement } = await import('@/lib/gmail/management')
+
+    // Each config = one meeting kind: its date column, its "sent" stamp,
+    // and the notification event that resolves recipients.
+    const meetingConfigs: Array<{
+      dateCol: 'client_presentation_meeting_date' | 'second_meeting_date'
+      sentCol: 'client_presentation_reminder_sent_at' | 'second_meeting_reminder_sent_at'
+      type: 'client_presentation' | 'second_meeting'
+      event: NotificationEvent
+      heTitle: string
+    }> = [
+      {
+        dateCol: 'client_presentation_meeting_date',
+        sentCol: 'client_presentation_reminder_sent_at',
+        type: 'client_presentation',
+        event: 'client_presentation_day_before',
+        heTitle: 'פגישת הצגה ללקוח',
+      },
+      {
+        dateCol: 'second_meeting_date',
+        sentCol: 'second_meeting_reminder_sent_at',
+        type: 'second_meeting',
+        event: 'second_meeting_day_before',
+        heTitle: 'פגישה שנייה',
+      },
+    ]
+
+    for (const cfg of meetingConfigs) {
+      const { data: rows } = await supabase
+        .from('inner_meeting_forms')
+        .select(
+          `id, form_id, client_name, ${cfg.dateCol}, ${cfg.sentCol}, canva_edit_url, forms(share_token)`,
+        )
+        .eq(cfg.dateCol, tomorrow)
+        .is(cfg.sentCol, null)
+
+      for (const row of (rows ?? []) as Array<Record<string, unknown> & {
+        id: string
+        form_id: string
+        client_name: string | null
+        canva_edit_url: string | null
+        forms: { share_token: string } | { share_token: string }[] | null
+      }>) {
+        const formMeta = Array.isArray(row.forms) ? row.forms[0] : row.forms
+        const shareToken = formMeta?.share_token ?? ''
+        const meetingDate = (row[cfg.dateCol] as string | null) ?? tomorrow
+        const canvaEditUrl = (row.canva_edit_url as string | null) ?? null
+        const recipients = getEventRecipients(cfg.event)
+
+        webhookReminders.push({
+          kind: 'meeting_day_before',
+          form_id: row.form_id,
+          share_token: shareToken,
+          client_name: row.client_name,
+          meeting_type: cfg.type,
+          meeting_date: meetingDate,
+          canva_edit_url: canvaEditUrl,
+          recipients,
+        })
+
+        if (recipients.length === 0) {
+          meetingReminderResults.push({
+            inner_form_id: row.id,
+            form_id: row.form_id,
+            meeting_type: cfg.type,
+            meeting_date: meetingDate,
+            delivery: 'failed',
+            recipients: 0,
+            error: 'no_recipients',
+          })
+          continue
+        }
+
+        const subject = `תזכורת: ${cfg.heTitle} מחר${
+          row.client_name ? ` — ${row.client_name}` : ''
+        } · Leaders`
+        const html = buildMeetingReminderHtml({
+          heTitle: cfg.heTitle,
+          clientName: row.client_name,
+          meetingDate,
+          canvaEditUrl,
+          formLink: `${appBaseUrl()}/inner-meeting?form=${shareToken}`,
+        })
+
+        try {
+          const result = await sendToManagement({ subject, html, to: recipients })
+          if (result.sent > 0) {
+            await supabase
+              .from('inner_meeting_forms')
+              .update({ [cfg.sentCol]: new Date().toISOString() })
+              .eq('id', row.id)
+          }
+          meetingReminderResults.push({
+            inner_form_id: row.id,
+            form_id: row.form_id,
+            meeting_type: cfg.type,
+            meeting_date: meetingDate,
+            delivery: result.sent > 0 ? 'sent' : 'failed',
+            recipients: recipients.length,
+            ...(result.sent === 0 ? { error: 'send_failed' } : {}),
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error(`[reminders] meeting mail failed for ${row.id}:`, msg)
+          meetingReminderResults.push({
+            inner_form_id: row.id,
+            form_id: row.form_id,
+            meeting_type: cfg.type,
+            meeting_date: meetingDate,
+            delivery: 'failed',
+            recipients: recipients.length,
+            error: msg,
+          })
+        }
+      }
+    }
+  }
+
   // Native batch for #2 + #3 — single Gmail to management with the full
   // reminders list. (Make.com integration was removed entirely on
   // 2026-05-09 per user spec — no remaining external webhook here.)
@@ -469,7 +643,61 @@ export async function GET(request: Request) {
       }, {}),
       reminders: webhookReminders,
     },
+    meeting_reminders: {
+      total: meetingReminderResults.length,
+      sent: meetingReminderResults.filter((r) => r.delivery === 'sent').length,
+      failed: meetingReminderResults.filter((r) => r.delivery === 'failed').length,
+      details: meetingReminderResults,
+    },
   })
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Meeting "day before" reminder — Hebrew HTML. Includes the Canva edit
+ * link when the deck has been imported (item 2 of the shared contract).
+ * ──────────────────────────────────────────────────────────────────── */
+function buildMeetingReminderHtml(params: {
+  heTitle: string
+  clientName: string | null
+  meetingDate: string
+  canvaEditUrl: string | null
+  formLink: string
+}): string {
+  const { heTitle, clientName, meetingDate, canvaEditUrl, formLink } = params
+  const prettyDate = (() => {
+    try {
+      return new Date(`${meetingDate}T12:00:00+02:00`).toLocaleDateString('he-IL', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: 'Asia/Jerusalem',
+      })
+    } catch {
+      return meetingDate
+    }
+  })()
+
+  const canvaBlock = canvaEditUrl
+    ? `<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:0 0 16px">
+  <a href="${esc(canvaEditUrl)}" target="_blank" style="display:inline-block;background-color:#8b3dff;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 40px;border-radius:8px;">פתח מצגת ב-Canva</a>
+  </td></tr></table>`
+    : `<p style="font-size:13px;color:#888;text-align:center;margin:0 0 16px;">אין קישור Canva למצגת עדיין.</p>`
+
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><body style="font-family:'Heebo',Arial,sans-serif;background:#f5f3ef;color:#1a1a2e;margin:0;padding:32px;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e8e5dc;border-radius:8px;padding:32px;">
+    <p style="font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#888;margin:0 0 12px;">Leaders × OS · תזכורת פגישה</p>
+    <h1 style="font-size:22px;font-weight:700;margin:0 0 8px;line-height:1.3;">מחר: ${esc(heTitle)}${
+      clientName ? ` — ${esc(clientName)}` : ''
+    }</h1>
+    <p style="font-size:15px;color:#444;margin:0 0 24px;">התאריך: <strong>${esc(prettyDate)}</strong></p>
+    ${canvaBlock}
+    <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:0 0 8px">
+      <a href="${esc(formLink)}" target="_blank" style="display:inline-block;background-color:#1a1a2e;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;padding:12px 40px;border-radius:8px;">פתח מסמך התנעה</a>
+    </td></tr></table>
+    <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0;">
+    <p style="font-size:11px;color:#888;margin:0;">נוצר ב-${new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })} · Leaders × OS</p>
+  </div></body></html>`
 }
 
 /* ────────────────────────────────────────────────────────────────────
@@ -485,6 +713,22 @@ function buildRemindersDigestHtml(reminders: AnyReminder[]): string {
   const upcoming = reminders.filter((r) => r.kind === 'upcoming_deadline') as Array<
     Extract<AnyReminder, { kind: 'upcoming_deadline' }>
   >
+  const meetings = reminders.filter((r) => r.kind === 'meeting_day_before') as Array<
+    Extract<AnyReminder, { kind: 'meeting_day_before' }>
+  >
+  const meetingRows = meetings
+    .map(
+      (r) => `<tr>
+        <td style="padding:8px 12px;font-size:13px;border-bottom:1px solid #eee;">${esc(r.client_name || '—')}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#666;border-bottom:1px solid #eee;">${esc(
+          r.meeting_type === 'client_presentation' ? 'הצגה ללקוח' : 'פגישה שנייה',
+        )}</td>
+        <td style="padding:8px 12px;font-size:13px;text-align:left;border-bottom:1px solid #eee;">${
+          r.canva_edit_url ? `<a href="${esc(r.canva_edit_url)}" style="color:#8b3dff;">פתח</a>` : '—'
+        }</td>
+      </tr>`,
+    )
+    .join('')
 
   const staleRows = stale
     .map(
@@ -531,6 +775,17 @@ function buildRemindersDigestHtml(reminders: AnyReminder[]): string {
           <th style="padding:8px 12px;font-size:11px;text-align:left;font-weight:700;color:#666;letter-spacing:.05em;">בעוד</th>
         </tr></thead>
         <tbody>${upcomingRows}</tbody>
+      </table>`}
+
+      ${meetings.length === 0 ? '' : `
+      <h2 style="font-size:14px;font-weight:700;margin:24px 0 12px;color:#1a1a2e;">פגישות מחר (${meetings.length})</h2>
+      <table style="width:100%;border-collapse:collapse;background:#fafaf7;border:1px solid #eee;border-radius:6px;overflow:hidden;">
+        <thead><tr style="background:#f5f3ef;">
+          <th style="padding:8px 12px;font-size:11px;text-align:right;font-weight:700;color:#666;letter-spacing:.05em;">לקוח</th>
+          <th style="padding:8px 12px;font-size:11px;text-align:right;font-weight:700;color:#666;letter-spacing:.05em;">סוג פגישה</th>
+          <th style="padding:8px 12px;font-size:11px;text-align:left;font-weight:700;color:#666;letter-spacing:.05em;">Canva</th>
+        </tr></thead>
+        <tbody>${meetingRows}</tbody>
       </table>`}
 
       <hr style="border:none;border-top:1px solid #e8e5dc;margin:24px 0;">
