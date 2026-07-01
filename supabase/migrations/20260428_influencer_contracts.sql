@@ -16,3 +16,10 @@ CREATE INDEX IF NOT EXISTS idx_signature_requests_parent
 
 CREATE INDEX IF NOT EXISTS idx_signature_requests_source
   ON signature_requests ((payload->>'source'));
+
+-- Prevent duplicate influencer contracts for the same (signed quote, influencer)
+-- when two account managers generate concurrently (app-level dedup is TOCTOU).
+-- The losing INSERT hits this unique index and the endpoint records it as skipped.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_signature_requests_parent_influencer
+  ON signature_requests (parent_signature_request_id, ((payload->'influencer')->>'handle'))
+  WHERE payload->>'source' = 'influencer-contract';

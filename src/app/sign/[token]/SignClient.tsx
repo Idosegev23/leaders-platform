@@ -48,6 +48,14 @@ export default function SignClient(props: Props) {
       setError('יש להזין שם מלא')
       return
     }
+    // Require an email so the signer receives their signed copy and we record
+    // who signed. Client quotes pre-fill this from the request; influencer
+    // contracts start blank, so the signer must enter their own address.
+    const emailTrimmed = signerEmail.trim()
+    if (!emailTrimmed || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailTrimmed)) {
+      setError('יש להזין כתובת אימייל תקינה לקבלת עותק חתום')
+      return
+    }
     if (!agreed) {
       setError('יש לאשר את ההצעה ואת תנאיה לפני החתימה')
       return
@@ -77,7 +85,7 @@ export default function SignClient(props: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           signer_name: signerName.trim(),
-          signer_email: signerEmail.trim() || null,
+          signer_email: emailTrimmed,
           signer_role: signerRole.trim() || null,
           signer_notes: signerNotes.trim() || null,
           signer_id_number: signerIdNumber.trim() || null,

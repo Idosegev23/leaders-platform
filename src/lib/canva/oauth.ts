@@ -190,10 +190,31 @@ export async function getValidAccessToken(): Promise<string> {
   if (notExpired) return rowData.access_token as string
 
   // Refresh. Canva rotates the refresh_token — persist the NEW one.
-  const refreshed = await postToken({
-    grant_type: 'refresh_token',
-    refresh_token: rowData.refresh_token as string,
-  })
+  // Concurrency: canva_tokens is ONE shared service-account row, so two requests
+  // can hit an expired token simultaneously. Whoever refreshes first consumes the
+  // single-use refresh_token; the loser's refresh then 400s. On failure we re-read
+  // the row and reuse the freshly-persisted token from the winner instead of
+  // failing the whole import (self-healing, no lock needed).
+  let refreshed: CanvaTokenResponse
+  try {
+    refreshed = await postToken({
+      grant_type: 'refresh_token',
+      refresh_token: rowData.refresh_token as string,
+    })
+  } catch (refreshErr) {
+    const { data: reread } = await sb
+      .from('canva_tokens')
+      .select('access_token, access_token_expires_at')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const winnerValid =
+      reread?.access_token &&
+      reread.access_token_expires_at &&
+      new Date(reread.access_token_expires_at).getTime() - EXPIRY_SKEW_MS > Date.now()
+    if (winnerValid) return reread!.access_token as string
+    throw refreshErr
+  }
   const expiresAt = new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
   const { error: upErr } = await sb
     .from('canva_tokens')
