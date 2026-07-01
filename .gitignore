@@ -40,3 +40,6 @@ next-env.d.ts
 
 # Local working drafts (proposal decks, sales docs) — not source of truth
 /proposal
+
+# pptx export QA artifacts
+.pptx-verify/

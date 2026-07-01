@@ -6,6 +6,7 @@ import { presentationToHtmlSlides } from '@/lib/presentation/ast-to-html'
 import type { Presentation } from '@/types/presentation'
 import { renderStructuredSlide } from '@/lib/gemini/layout-prototypes/renderer'
 import type { StructuredPresentation } from '@/lib/gemini/layout-prototypes/types'
+import { structuredPresentationToPptxDetailed } from '@/lib/export/structured-pptx'
 import { uploadAndSignedUrl, deckArtifactPath } from '@/lib/render/storage'
 import { importDesignFromUrl, waitForUrlImport } from '@/lib/canva/client'
 import { isDevMode } from '@/lib/auth/dev-mode'
@@ -65,8 +66,12 @@ export async function POST(request: Request) {
   const documentData = (document.data ?? {}) as Record<string, unknown>
   const brandName = (documentData.brandName as string) || document.title || 'Presentation'
 
-  // 1. Produce the deck PDF (mirror /api/pdf slide selection).
-  let pdfBuffer: Buffer
+  // 1. Produce the deck artifact. StructuredPresentation → NATIVE PPTX (real
+  //    editable text/image/shape elements in Canva). Anything else falls back
+  //    to the legacy screenshot-PDF path (flat, but never blocks the import).
+  const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  let artifact: { buffer: Buffer; contentType: string; ext: 'pdf' | 'pptx'; mode: 'native-pptx' | 'screenshot-pdf' }
+  let pptxWarnings: string[] = []
   try {
     const htmlPres = documentData._htmlPresentation as { htmlSlides?: string[]; title?: string } | undefined
     const astPres = documentData._presentation as Presentation | undefined
@@ -80,27 +85,40 @@ export async function POST(request: Request) {
       (documentData._structuredPresentation as StructuredPresentation | undefined)
 
     if (structured?.slides?.length) {
-      const structuredHtml = structured.slides.map((s) =>
-        renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
-      )
-      pdfBuffer = await generateScreenshotPdf(structuredHtml, {
-        format: '16:9',
-        title: structured.brandName || brandName,
-        brandName: structured.brandName || brandName,
-      })
+      try {
+        const { buffer, warnings } = await structuredPresentationToPptxDetailed(structured)
+        pptxWarnings = warnings
+        artifact = { buffer, contentType: PPTX_MIME, ext: 'pptx', mode: 'native-pptx' }
+      } catch (pptxErr) {
+        // Native export failed — degrade to the screenshot PDF so the user
+        // still gets a Canva design (flat), and surface the reason in logs.
+        console.error('[canva-import] native PPTX failed, falling back to screenshot PDF:', pptxErr)
+        const structuredHtml = structured.slides.map((s) =>
+          renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
+        )
+        const pdfBuffer = await generateScreenshotPdf(structuredHtml, {
+          format: '16:9',
+          title: structured.brandName || brandName,
+          brandName: structured.brandName || brandName,
+        })
+        artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
+      }
     } else if (htmlPres?.htmlSlides?.length) {
-      pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {
+      const pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {
         format: '16:9', title: htmlPres.title || brandName, brandName,
       })
+      artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
     } else if (astPres?.slides?.length) {
       const pages = presentationToHtmlSlides(astPres, true)
-      pdfBuffer = await generateMultiPagePdf(pages, {
+      const pdfBuffer = await generateMultiPagePdf(pages, {
         format: '16:9', title: astPres.title || brandName, brandName,
       })
+      artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
     } else if (cachedSlides?.length) {
-      pdfBuffer = await generateMultiPagePdf(cachedSlides, {
+      const pdfBuffer = await generateMultiPagePdf(cachedSlides, {
         format: '16:9', title: brandName, brandName,
       })
+      artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
     } else {
       return NextResponse.json(
         { error: 'Deck has no rendered slides yet — generate the PDF first, then import to Canva.' },
@@ -108,8 +126,8 @@ export async function POST(request: Request) {
       )
     }
   } catch (e) {
-    console.error('[canva-import] PDF generation failed:', e)
-    return NextResponse.json({ error: `PDF generation failed: ${e instanceof Error ? e.message : e}` }, { status: 500 })
+    console.error('[canva-import] deck artifact generation failed:', e)
+    return NextResponse.json({ error: `Deck export failed: ${e instanceof Error ? e.message : e}` }, { status: 500 })
   }
 
   // 2. Upload to Supabase Storage and hand Canva a SIGNED URL. Google Drive's
@@ -119,9 +137,9 @@ export async function POST(request: Request) {
   let publicUrl: string
   try {
     const { signedUrl } = await uploadAndSignedUrl({
-      path: deckArtifactPath(documentId, 'pdf'),
-      body: pdfBuffer,
-      contentType: 'application/pdf',
+      path: deckArtifactPath(documentId, artifact.ext),
+      body: artifact.buffer,
+      contentType: artifact.contentType,
     })
     publicUrl = signedUrl
   } catch (e) {
@@ -135,7 +153,7 @@ export async function POST(request: Request) {
     const { jobId } = await importDesignFromUrl({
       title: brandName,
       url: publicUrl,
-      mimeType: 'application/pdf',
+      mimeType: artifact.contentType,
     })
     result = await waitForUrlImport(jobId)
   } catch (e) {
@@ -176,5 +194,7 @@ export async function POST(request: Request) {
     edit_url: result.editUrl,
     view_url: result.viewUrl,
     kickoff_updated: kickoffUpdated,
+    mode: artifact.mode,
+    export_warnings: pptxWarnings.length ? pptxWarnings : undefined,
   })
 }
