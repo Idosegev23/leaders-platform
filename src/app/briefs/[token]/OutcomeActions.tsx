@@ -173,7 +173,7 @@ export default function OutcomeActions({
 function formatFull(iso: string, isEnglish: boolean): string {
   const d = new Date(iso)
   const locale = isEnglish ? 'en-US' : 'he-IL'
-  const date = d.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: '2-digit' })
-  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+  const date = d.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'Asia/Jerusalem' })
+  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })
   return `${date} · ${time}`
 }
