@@ -7,7 +7,7 @@ export type Json =
   | Json[]
 
 export type UserRole = 'admin' | 'user'
-export type DocumentType = 'quote' | 'deck'
+export type DocumentType = 'quote' | 'deck' | 'influencer_brief'
 export type DocumentStatus = 'draft' | 'preview' | 'generated' | 'archived'
 export type TemplateStyle = 'minimal' | 'bold' | 'premium'
 export type SlideType = 'title' | 'context' | 'audience' | 'big_idea' | 'image_focus' | 'moodboard' | 'comparison' | 'summary'
@@ -109,6 +109,9 @@ export interface Database {
           pdf_url: string | null
           drive_file_id: string | null
           drive_file_url: string | null
+          approved_at: string | null
+          approved_by: string | null
+          parent_document_id: string | null
           created_at: string
           updated_at: string
         }
@@ -123,6 +126,9 @@ export interface Database {
           pdf_url?: string | null
           drive_file_id?: string | null
           drive_file_url?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          parent_document_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -137,6 +143,9 @@ export interface Database {
           pdf_url?: string | null
           drive_file_id?: string | null
           drive_file_url?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          parent_document_id?: string | null
           created_at?: string
           updated_at?: string
         }
