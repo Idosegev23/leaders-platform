@@ -43,6 +43,10 @@ export const innerMeetingSchema = z.object({
   creativeDeadline: z.string().min(1, 'שדה חובה'),
   internalDeadline: z.string().min(1, 'שדה חובה'),
   clientDeadline: z.string().min(1, 'שדה חובה'),
+  // Manual meeting dates entered by the account manager (optional — a
+  // kickoff can be filed before these are scheduled). Format: yyyy-mm-dd.
+  clientPresentationDate: z.string().optional(),
+  secondMeetingDate: z.string().optional(),
 })
 
 export type InnerMeetingFormData = z.infer<typeof innerMeetingSchema>

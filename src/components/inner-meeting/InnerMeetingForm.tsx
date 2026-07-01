@@ -97,7 +97,9 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
       setValue('creativeDeadline', innerForm.creative_deadline || '')
       setValue('internalDeadline', innerForm.internal_deadline || '')
       setValue('clientDeadline', innerForm.client_deadline || '')
-      
+      setValue('clientPresentationDate', innerForm.client_presentation_meeting_date || '')
+      setValue('secondMeetingDate', innerForm.second_meeting_date || '')
+
       prevInnerFormRef.current = innerForm
       
       // Reset the flag after a short delay to allow setValue to complete
@@ -138,6 +140,8 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
         creative_deadline: watchedFields.creativeDeadline || null,
         internal_deadline: watchedFields.internalDeadline || null,
         client_deadline: watchedFields.clientDeadline || null,
+        client_presentation_meeting_date: watchedFields.clientPresentationDate || null,
+        second_meeting_date: watchedFields.secondMeetingDate || null,
       }
 
       // Import updateFormData here
@@ -199,6 +203,8 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
         creative_deadline: watchedFields.creativeDeadline || null,
         internal_deadline: watchedFields.internalDeadline || null,
         client_deadline: watchedFields.clientDeadline || null,
+        client_presentation_meeting_date: watchedFields.clientPresentationDate || null,
+        second_meeting_date: watchedFields.secondMeetingDate || null,
       }
 
       // Save the form data
@@ -688,6 +694,39 @@ export default function InnerMeetingForm({ initialToken }: InnerMeetingFormProps
               {errors.clientDeadline && (
                 <p className="mt-1 text-xs md:text-sm text-red-600">{errors.clientDeadline.message}</p>
               )}
+            </div>
+          </div>
+
+          {/* פגישות עם הלקוח (תאריכים ידניים לתזכורות יום לפני) */}
+          <div className="mb-8">
+            <h2 className="text-lg md:text-xl font-bold text-gray-800 mb-4 pb-2 border-b-2 border-gray-200">
+              פגישות עם הלקוח
+            </h2>
+
+            <div className="mb-6">
+              <label htmlFor="clientPresentationDate" className="block text-sm md:text-base font-semibold text-gray-700 mb-2">
+                תאריך פגישת הצגה ללקוח
+                <span className="text-xs text-gray-500 font-normal mr-2">(תישלח תזכורת יום לפני)</span>
+              </label>
+              <input
+                id="clientPresentationDate"
+                type="date"
+                {...register('clientPresentationDate')}
+                className="w-full px-3 md:px-4 py-2 md:py-3 text-sm md:text-base border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              />
+            </div>
+
+            <div className="mb-6">
+              <label htmlFor="secondMeetingDate" className="block text-sm md:text-base font-semibold text-gray-700 mb-2">
+                תאריך פגישה שנייה
+                <span className="text-xs text-gray-500 font-normal mr-2">(תישלח תזכורת יום לפני)</span>
+              </label>
+              <input
+                id="secondMeetingDate"
+                type="date"
+                {...register('secondMeetingDate')}
+                className="w-full px-3 md:px-4 py-2 md:py-3 text-sm md:text-base border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              />
             </div>
           </div>
 

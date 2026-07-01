@@ -43,6 +43,10 @@ export interface InnerMeetingForm {
   creative_deadline: string | null
   internal_deadline: string | null
   client_deadline: string | null
+  client_presentation_meeting_date: string | null
+  second_meeting_date: string | null
+  client_presentation_reminder_sent_at: string | null
+  second_meeting_reminder_sent_at: string | null
   created_at: string
   updated_at: string
 }
