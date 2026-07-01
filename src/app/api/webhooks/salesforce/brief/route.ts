@@ -225,6 +225,15 @@ export async function POST(request: Request) {
     }
   }
 
+  // Record the mail outcome on the link so delivery is verifiable later.
+  try {
+    const { data: cur } = await sb.from('document_links').select('metadata').eq('id', created.id).maybeSingle()
+    await sb
+      .from('document_links')
+      .update({ metadata: { ...((cur?.metadata as Record<string, unknown>) || {}), mail_delivery: mailDelivery, mail_error: mailError } })
+      .eq('id', created.id)
+  } catch { /* non-fatal */ }
+
   return NextResponse.json(
     {
       ok: true,
