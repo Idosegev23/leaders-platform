@@ -144,7 +144,17 @@ const FUNCTION_DECLARATIONS = [
       properties: {
         slideType: {
           type: 'string',
-          enum: ['cover', 'brief', 'goals', 'audience', 'insight', 'strategy', 'bigIdea', 'deliverables', 'influencers', 'metrics', 'closing'],
+          // Free string (not a fixed enum) so the story can span as many slides
+          // as it needs — a slide per pillar (pillar-1/pillar-2…), several
+          // creative examples, etc. Downstream layout keys off
+          // cover/closing/insight/metrics/influencers and treats the rest as
+          // content, so any lowercase-kebab label is safe.
+          description:
+            "Slide beat, lowercase-kebab. First slide 'cover', last 'closing'. " +
+            'Suggested beats: cover, brief, goals, audience, insight, strategy, ' +
+            'pillar-1, pillar-2, pillar-3, bigIdea, creative, deliverables, ' +
+            'influencers, metrics, closing. Emit as many slides as the story needs ' +
+            '(typically 14-22) — a slide per pillar and per creative example is encouraged.',
         },
         title: { type: 'string', description: 'Hebrew title, max 8 words' },
         subtitle: { type: 'string', description: 'Hebrew subtitle, max 12 words' },
@@ -297,47 +307,69 @@ export async function runPresentationAgent(
 </role>
 
 <mission>
-מבריף אחד → מצגת שלמה של 11 שקפים בעברית: מעוצבת, מבוססת נתונים, ומספרת סיפור.
+מבריף אחד → מצגת שלמה בעברית שמספרת *סיפור אחד*: מעוצבת, מבוססת נתונים,
+ובאורך שהסיפור דורש (לא מכסה קבועה). המדד היחיד להצלחה: וואו.
 </mission>
 
 <flow>
 שלב 1 — מחקר (אם חסר): Google Search + URL Context + IMAI. בסס כל טענה.
 ${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. אל תחפש שוב.' : 'חקור את המותג וסרוק את האתר שלהם.'}
-שלב 2 — תכנון: קבע Design System (צבעים + פונטים) ואת 11 השקפים בסדר הנרטיבי:
-        cover, brief, goals, audience, insight, strategy, bigIdea, deliverables,
-        influencers, metrics, closing.
+שלב 2 — תכנון: קבע Design System (צבעים + פונטים) ואת קשת הסיפור. ה-beats המחייבים,
+        כשכל beat יכול להתפרש על פני כמה שקפים לפי הצורך:
+        cover → brief → goals → audience → INSIGHT → strategy →
+        pillars (שקף לכל pillar) → bigIdea → creative (דוגמאות קונקרטיות) →
+        influencers → deliverables → metrics → closing.
 שלב 3 — יצירה: קריאה אחת ל-generate_slide_html לכל שקף, בסדר, עם צבעים ותמונה.
 שלב 4 — KPI: code_execution לחישוב CPE/CPM/reach אמיתיים. אל תנחש מספרים.
 </flow>
 
+<narrative_development>
+המצגת היא סיפור אחד, לא אוסף שקפים. ה-INSIGHT הוא עמוד השדרה — כל שקף אחריו
+בונה אליו או פורע אותו:
+- הצהרה = התחייבות. תובנה או החלטה שנאמרה בשקף אחד *חייבת* להתפתח בשקפים הבאים:
+  קודם נטענת → מוכחת (נתון/דוגמה) → המשמעות שלה → מה שהיא מייצרת בפועל.
+- אסור "שקף אי": שקף שמשליך רעיון ולא חוזר אליו. אמרת "היא לא מחכה לכם"? האסטרטגיה,
+  ה-pillars והקריאייטיב חייבים להראות *איך בדיוק* עונים על זה.
+- Open loops: כל שקף מסיים בשאלה שהשקף הבא עונה עליה — הצופה תמיד רוצה את הבא.
+- הד והסלמה: כל חזרה על התובנה מעמיקה אותה, לא חוזרת עליה.
+- כל pillar וכל מהלך קריאייטיבי נקשרים במפורש חזרה לתובנה. שקף המדדים מוכיח
+  שההימור של התובנה עבד — הוא פירעון הלולאה שנפתחה ב-INSIGHT.
+- מוטב שקף נוסף שמפתח רעיון, מאשר לדחוס שלושה רעיונות לשקף אחד.
+</narrative_development>
+
 <iron_rules>
 1.  כל הטקסט בעברית; שמות מותגים באנגלית.
-2.  INSIGHT חד ומבוסס נתון — "אסימון שנופל", לא "השוק משתנה".
-3.  STRATEGY קונקרטית — headline + 3 pillars, לכל pillar זווית ייחודית.
+2.  INSIGHT חד ומבוסס נתון — "אסימון שנופל", לא "השוק משתנה". זהו עמוד השדרה
+    שכל השקפים אחריו מפתחים.
+3.  STRATEGY קונקרטית — headline + 3 pillars. כל pillar מקבל שקף משלו שמראה *איך*
+    הוא משרת את התובנה.
 4.  אפס המצאת נתונים. אין נתון? חשב או חפש.
-5.  כל שקף = קריאה אחת ל-generate_slide_html. לא יותר מ-11.
-6.  Design System עקבי — אותם צבעים ופונטים ב-11 השקפים.
+5.  כל שקף = קריאה אחת ל-generate_slide_html. מספר השקפים נגזר מהסיפור (לרוב 14–22),
+    לא ממכסה שרירותית. אין תקרה — יש רק "האם זה מוסיף לוואו".
+6.  Design System עקבי — אותם צבעים ופונטים בכל השקפים.
 7.  כותרות מקס 8 מילים; גוף מקס 40 מילים.
 8.  גיוון תמונות (חוק קשיח): לעולם אל תשלח את אותו imageUrl ליותר משקף אחד.
     [המערכת דוחה שימוש שלישי ומחזירה את מאגר התמונות הפנוי.]
 9.  כל שקף תוכן חייב לפחות אחד מ: bodyText / bulletPoints / cards / keyNumber.
-    כותרת בלבד = שקף מעבר (section divider).
-10. עבודה אחת לשקף — הכלל העליון. שקף שמנסה 3 דברים → פצל או חדד.
-11. נאמנות לבריף: כל מטרה, KPI, מתחרה ודרישת חובה מופיעים במצגת.
+    כותרת בלבד = שקף מעבר (section divider) שמפריד פרקים בסיפור.
+10. עבודה אחת לשקף — הכלל העליון. שקף שמנסה 3 דברים → פצל לשקפים (מותר ורצוי) או חדד.
+11. נאמנות לבריף: כל מטרה, KPI, מתחרה ודרישת חובה מופיעים במצגת ומפותחים.
 </iron_rules>
 
 <anti_ai_patterns>
 אל: כותרת שמתארת קטגוריה · בולטים שמתחילים ב"יצירת/הגברת" · אותו מבנה בכל שקף ·
-מילים שחוזרות בין שקפים · כרטיסים באותו אורך בדיוק.
+מילים שחוזרות בין שקפים · כרטיסים באותו אורך בדיוק · שקף שמצהיר רעיון ולא מפתח אותו.
 </anti_ai_patterns>
 
 <self_check>
 לפני שאתה מסיים: (1) כל מטרה מהבריף מכוסה? (2) ה-INSIGHT מפתיע ומגובה במספר?
-(3) יש imageUrl כפול? (4) יש מספר ממומצא? כל "כן/לא" בעייתי → תקן לפני מסירה.
+(3) כל תובנה/החלטה שהוצהרה — פותחה והוכחה בשקפים הבאים ולא נשארה "שקף אי"?
+(4) הלולאה שנפתחה ב-INSIGHT נפרעת בסוף? (5) imageUrl כפול? (6) מספר ממומצא?
+כל "כן/לא" בעייתי → תקן לפני מסירה.
 </self_check>
 
 ## פורמט סיום:
-אחרי שיצרת את כל 11 השקפים, סכם ב-JSON:
+אחרי שיצרת את כל השקפים (כמה שהסיפור דרש), סכם ב-JSON:
 {
   "designSystem": { "colors": {...}, "fonts": {...}, "effects": {...}, "creativeDirection": {...} },
   "summary": "סיכום בעברית של ההצעה"
@@ -419,15 +451,15 @@ ${preferredImageryContext}
       console.log(`[PresentationAgent][${requestId}] ✅ Research complete: ${researchText.length} chars`)
 
       // Inject research into history so Phase 2 has full context
-      history.push({ role: 'user', parts: [{ text: `מחקר מותג שנאסף:\n\n${researchText}\n\nעכשיו בנה את המצגת. קרא ל-generate_slide_html עבור כל אחד מ-11 השקפים.` }] })
+      history.push({ role: 'user', parts: [{ text: `מחקר מותג שנאסף:\n\n${researchText}\n\nעכשיו בנה את המצגת לפי קשת הסיפור, כשכל תובנה מתפתחת בשקפים הבאים ומספר השקפים נגזר מהסיפור (לא ממכסה). קרא ל-generate_slide_html לכל שקף בסדר.` }] })
     } catch (researchErr) {
       console.warn(`[PresentationAgent][${requestId}] ⚠️ Research failed (continuing without):`, researchErr instanceof Error ? researchErr.message : researchErr)
-      history.push({ role: 'user', parts: [{ text: `לא הצלחתי לחקור — השתמש במידע מהבריף בלבד. בנה את המצגת. קרא ל-generate_slide_html עבור כל אחד מ-11 השקפים.` }] })
+      history.push({ role: 'user', parts: [{ text: `לא הצלחתי לחקור — השתמש במידע מהבריף בלבד. בנה את המצגת לפי קשת הסיפור, כשמספר השקפים נגזר מהסיפור (לא ממכסה). קרא ל-generate_slide_html לכל שקף בסדר.` }] })
     }
   } else {
     console.log(`[PresentationAgent][${requestId}] ℹ️ Phase 1 skipped — brandResearch already provided`)
     // Add instruction to generate slides immediately
-    history.push({ role: 'user', parts: [{ text: `מחקר מותג כבר קיים. בנה את המצגת עכשיו בסדר: cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing. קרא ל-generate_slide_html עבור כל אחד מ-11 השקפים.` }] })
+    history.push({ role: 'user', parts: [{ text: `מחקר מותג כבר קיים. בנה את המצגת עכשיו לפי קשת הסיפור (cover → ... → closing), כשכל תובנה מתפתחת בשקפים הבאים ומספר השקפים נגזר מהסיפור, לא ממכסה.` }] })
   }
 
   // ════════════════════════════════════════════════════════════
@@ -446,11 +478,11 @@ ${preferredImageryContext}
     tools: generationTools,
   } as GenerateContentConfig
 
-  const MAX_ITERATIONS = 25 // 11 slides + IMAI searches + buffer
+  const MAX_ITERATIONS = 45 // up to ~22 slides + IMAI/image/code tool calls + buffer
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const iterStart = Date.now()
-    console.log(`[PresentationAgent][${requestId}] 🔁 Iteration ${iter + 1}/${MAX_ITERATIONS} (${slides.length}/11 slides, ${totalToolCalls} tool calls)`)
+    console.log(`[PresentationAgent][${requestId}] 🔁 Iteration ${iter + 1}/${MAX_ITERATIONS} (${slides.length} slides, ${totalToolCalls} tool calls)`)
 
     const response: any = await client.models.generateContent({
       model: 'gemini-3.1-pro-preview',
@@ -559,9 +591,8 @@ ${preferredImageryContext}
 
             onProgress?.({
               stage: 'generating',
-              message: `🎨 מייצר שקף ${slideIndex + 1}/11: ${slideType}`,
+              message: `🎨 מייצר שקף ${slideIndex + 1}: ${slideType}`,
               slideIndex,
-              totalSlides: 11,
             })
 
             const html = renderAgentSlide(args, { persona, slideIndex, brandName: input.brandName })

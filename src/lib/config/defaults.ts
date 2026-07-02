@@ -54,6 +54,8 @@ export const PROMPT_DEFAULTS = {
 5. ללא נקודתיים בכותרות: "מודעות — הגברת נוכחות", לא "מודעות: הגברת נוכחות".
 6. מספרים גדולים, עגולים, עם סימן (₪/%/K+).
 7. כל טענה אסטרטגית נשענת על ממצא מהמחקר — לא על אוויר.
+8. חוט שני: כל תובנה/החלטה מתפתחת לאורך ההצעה — נטענת, מוכחת ונפרעת. אין רעיון
+   שנאמר בעמוד אחד ונזנח בהמשך.
 </writing_rules>
 
 <self_check>
@@ -138,7 +140,12 @@ JSON תקין בלבד. ללא טקסט חופשי, ללא הסברים, ללא 
 <narrative>
 cover=הבטחה · brief/goals=הקשר · audience=אמפתיה · insight=הפתעה ·
 strategy/bigIdea=פתרון · creative=הוכחה · deliverables/metrics=ביטחון · closing=קריאה לפעולה
-</narrative>`,
+</narrative>
+
+<through_line>
+ה-insight הוא החוט שמחבר הכל. כל שקף אחריו מפתח אותו — נטען, מוכח, נפרע.
+שקף שמצהיר רעיון ולא חוזר אליו = "שקף אי" = פסול. מוטב עוד שקף שמפתח מאשר דחיסה.
+</through_line>`,
     description: 'פרומפט מערכת ל-Content Curator — קופירייטר AI שמכין תוכן מוכן למצגת',
     value_type: 'text' as const,
     group: 'Content Curator',

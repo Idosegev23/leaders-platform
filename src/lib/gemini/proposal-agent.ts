@@ -541,6 +541,10 @@ ${JSON.stringify(influencerStrategy, null, 1).slice(0, 4000)}` : ''}
 פרק 3 (creative+deliverables+influencers): "ככה זה ייראה" — שמות, מספרים, לו"ז
 פרק 4 (metrics): "התוצאות מדברות" — benchmarks + ביטחון
 
+### חוט שני:
+ה-Key Insight הוא עמוד השדרה. כל החלטה אחריו נטענת → מוכחת → נפרעת. אין רעיון
+שנאמר בעמוד אחד ונזנח. שקף המדדים מוכיח שההימור של התובנה עבד.
+
 ### טון:
 התאם לאישיות המותג מהמחקר (brandPersonality, toneOfVoice). פיננסי=data-first. אופנה=חוצפן. מזון=חם. טכנולוגיה=חד.`)
 
