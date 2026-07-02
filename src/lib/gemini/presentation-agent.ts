@@ -18,6 +18,7 @@
 
 import { GoogleGenAI, type GenerateContentConfig } from '@google/genai'
 import { searchIsraeliInfluencers, getAudienceReport } from '@/lib/imai/client'
+import { pickPersona, renderAgentSlide } from './slide-personas'
 import { checkWizardCoverage, type WizardContract, type CoverageResult } from './wizard-contract'
 import { ART_DIRECTOR_RULES, auditDesignSystem } from '@/lib/design/art-director-rules'
 import type { BrandAssets } from '@/lib/brand/types'
@@ -194,72 +195,6 @@ const FUNCTION_DECLARATIONS = [
 
 // ─── Function Handlers ──────────────────────────────────
 
-function buildSlideHtml(args: Record<string, unknown>): string {
-  const c = (args.designColors || {}) as Record<string, string>
-  const bg = c.background || '#0C0C10'
-  const text = c.text || '#F5F5F7'
-  const primary = c.primary || '#E94560'
-  const accent = c.accent || primary
-  const title = (args.title as string) || ''
-  const subtitle = (args.subtitle as string) || ''
-  const body = (args.bodyText as string) || ''
-  const imageUrl = args.imageUrl as string | undefined
-  const keyNum = args.keyNumber as string | undefined
-  const keyLabel = args.keyNumberLabel as string | undefined
-  const bullets = (args.bulletPoints as string[]) || []
-  const cards = (args.cards as Array<{ title: string; body: string }>) || []
-  const tone = (args.emotionalTone as string) || 'professional'
-
-  // Dynamic glow colors
-  const glow1 = `${primary}25`
-  const glow2 = `${accent}18`
-
-  const bulletsHtml = bullets.length
-    ? `<ul style="list-style:none;margin-top:32px;">${bullets.map(b => `<li style="margin-bottom:16px;font-size:22px;padding-right:24px;position:relative;"><span style="position:absolute;right:0;color:${primary};">●</span>${b}</li>`).join('')}</ul>`
-    : ''
-
-  const cardsHtml = cards.length
-    ? `<div style="display:flex;gap:24px;margin-top:40px;flex-wrap:wrap;">${cards.map((card, i) => `<div style="flex:1;min-width:280px;background:rgba(255,255,255,0.04);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px;"><div style="font-size:48px;font-weight:900;color:${primary};opacity:0.15;margin-bottom:8px;">0${i + 1}</div><h3 style="font-size:24px;font-weight:700;margin-bottom:12px;">${card.title}</h3><p style="font-size:18px;opacity:0.7;line-height:1.5;">${card.body}</p></div>`).join('')}</div>`
-    : ''
-
-  const keyNumHtml = keyNum
-    ? `<div style="position:absolute;bottom:120px;left:120px;"><span style="font-size:96px;font-weight:900;color:${primary};text-shadow:0 0 60px ${primary}40;">${keyNum}</span>${keyLabel ? `<div style="font-size:18px;opacity:0.5;margin-top:8px;">${keyLabel}</div>` : ''}</div>`
-    : ''
-
-  const imageHtml = imageUrl
-    ? `<div style="position:absolute;inset:0;z-index:0;"><img src="${imageUrl}" style="width:100%;height:100%;object-fit:cover;filter:brightness(0.4) contrast(1.15);" /><div style="position:absolute;inset:0;background:linear-gradient(180deg, ${bg}CC 0%, ${bg}40 40%, ${bg}CC 100%);"></div></div>`
-    : ''
-
-  return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@100;300;400;500;700;800;900&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box;}
-.slide{width:1920px;height:1080px;position:relative;overflow:hidden;font-family:'Heebo',sans-serif;direction:rtl;background:${bg};color:${text};}
-.slide h1,.slide h2,.slide h3{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;word-break:break-word;text-wrap:balance;}
-.slide p{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;word-break:break-word;}
-.slide li{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;text-overflow:ellipsis;}
-</style>
-</head><body><div class="slide">
-${imageHtml}
-<!-- Atmosphere: aurora mesh -->
-<div style="position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse 120% 80% at 15% 50%, ${glow1}, transparent 60%), radial-gradient(ellipse 80% 120% at 85% 30%, ${glow2}, transparent 55%);"></div>
-<!-- Accent stripe top -->
-<div style="position:absolute;top:0;right:0;width:100%;height:4px;z-index:5;background:linear-gradient(90deg, ${primary}, ${accent}, transparent);"></div>
-<!-- Content -->
-<div style="position:relative;z-index:3;padding:100px 120px;height:100%;display:flex;flex-direction:column;justify-content:center;">
-<h1 style="font-size:${title.length > 20 ? '48' : '64'}px;font-weight:900;line-height:1.05;margin-bottom:24px;text-shadow:0 4px 30px rgba(0,0,0,0.6), 0 0 80px ${accent}20;">${title}</h1>
-${subtitle ? `<h2 style="font-size:28px;font-weight:300;opacity:0.7;margin-bottom:32px;letter-spacing:2px;">${subtitle}</h2>` : ''}
-${body ? `<p style="font-size:22px;line-height:1.6;max-width:1200px;opacity:0.85;">${body}</p>` : ''}
-${bulletsHtml}
-${cardsHtml}
-</div>
-${keyNumHtml}
-<!-- Watermark -->
-<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-15deg);font-size:300px;font-weight:900;-webkit-text-stroke:2px ${text}08;color:transparent;opacity:0.04;z-index:2;white-space:nowrap;pointer-events:none;">${args.slideType || ''}</div>
-<!-- Accent stripe bottom -->
-<div style="position:absolute;bottom:0;right:0;width:100%;height:4px;z-index:5;background:linear-gradient(270deg, ${primary}, ${accent}, transparent);"></div>
-</div></body></html>`
-}
 
 async function handleGenerateImage(args: Record<string, unknown>): Promise<{ imageUrl: string } | { error: string }> {
   try {
@@ -306,6 +241,13 @@ export async function runPresentationAgent(
   const slides: AgentSlide[] = []
   const htmlSlides: string[] = []
   const slideTypes: string[] = []
+  // Per-brand visual language — deterministic, so the same brand regenerates
+  // consistently but different brands stop looking identical.
+  const persona = pickPersona(input.brandName)
+  console.log(`[PresentationAgent][${requestId}] 🎭 Visual persona: ${persona}`)
+  // Image-variety enforcement: a URL may appear on at most 2 slides; the 3rd
+  // use is rejected back to the model with the unused pool.
+  const imageUse = new Map<string, number>()
   let totalToolCalls = 0
   let designSystem: PremiumDesignSystem | null = null
   let researchData: Record<string, unknown> | undefined
@@ -382,6 +324,13 @@ ${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. 
 5. כל שקף = קריאה אחת ל-generate_slide_html. לא יותר מ-11 קריאות.
 6. הצבעים חייבים להיות עקביים — אותו Design System בכל 11 השקפים.
 7. כותרות: מקסימום 8 מילים. גוף: מקסימום 40 מילים.
+8. גיוון תמונות — חוק קשיח: לעולם אל תעביר את אותו imageUrl ליותר משקף אחד
+   (המערכת תדחה שימוש שלישי). לכל שקף ויזואלי בחר תמונה אחרת מהמאגר; אם אין
+   תמונה חדשה מתאימה — צור אחת עם generate_brand_image או השמט את imageUrl
+   (שקף טיפוגרפי נקי עדיף על תמונה חוזרת).
+9. לכל שקף תוכן חייב להיות לפחות אחד מ: bodyText / bulletPoints / cards /
+   keyNumber. שקף עם כותרת בלבד מוצג כשקף מעבר (section divider) — השתמש בזה
+   בכוונה רק אם זו המטרה.
 
 ## פורמט סיום:
 אחרי שיצרת את כל 11 השקפים, סכם ב-JSON:
@@ -591,6 +540,21 @@ ${preferredImageryContext}
             const slideTitle = args.title as string
             const slideIndex = slides.length
 
+            // Image-variety gate: reject the 3rd use of the same URL and hand
+            // the model the still-unused pool so it can retry immediately.
+            const imgUrl = ((args.imageUrl as string) || '').trim()
+            if (imgUrl && (imageUse.get(imgUrl) ?? 0) >= 2) {
+              const unused = preferredImageryUrls.filter(u => !imageUse.has(u)).slice(0, 10)
+              console.log(`[PresentationAgent][${requestId}]     ✋ Rejected reused image on ${slideType} (already used twice)`)
+              result = {
+                success: false,
+                error: 'התמונה הזו כבר בשימוש בשני שקפים. קרא שוב ל-generate_slide_html לאותו שקף עם תמונה אחרת מהרשימה, או צור חדשה עם generate_brand_image, או השמט imageUrl.',
+                unusedImages: unused,
+              }
+              break
+            }
+            if (imgUrl) imageUse.set(imgUrl, (imageUse.get(imgUrl) ?? 0) + 1)
+
             onProgress?.({
               stage: 'generating',
               message: `🎨 מייצר שקף ${slideIndex + 1}/11: ${slideType}`,
@@ -598,7 +562,7 @@ ${preferredImageryContext}
               totalSlides: 11,
             })
 
-            const html = buildSlideHtml(args)
+            const html = renderAgentSlide(args, { persona, slideIndex, brandName: input.brandName })
             const content: Record<string, unknown> = { ...args }
             delete content.designColors
             slides.push({ slideType, title: slideTitle, html, content })
@@ -739,10 +703,14 @@ ${preferredImageryContext}
             if (fc.name === 'generate_slide_html') {
               const args = fc.args || {}
               const slideType = args.slideType as string
-              const html = buildSlideHtml(args)
+              const idx = slideTypes.indexOf(slideType)
+              const html = renderAgentSlide(args, {
+                persona,
+                slideIndex: idx >= 0 ? idx : slides.length,
+                brandName: input.brandName,
+              })
               const content: Record<string, unknown> = { ...args }
               delete content.designColors
-              const idx = slideTypes.indexOf(slideType)
               if (idx >= 0) {
                 slides[idx] = { slideType, title: (args.title as string) || slides[idx].title, html, content }
                 htmlSlides[idx] = html

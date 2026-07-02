@@ -247,32 +247,38 @@ export async function generateScreenshotPdf(
 
     console.log(`[PDF] Rendering ${htmlPages.length} slides via SCREENSHOT (full CSS fidelity)`)
 
-    for (let i = 0; i < htmlPages.length; i++) {
-      const page = await setupPage(browser, htmlPages[i], {
-        width: 1920,
-        height: 1080,
-        deviceScaleFactor: 2, // 2x for sharp output
-        isFirst: i === 0,
-      })
+    // Render slides CONCURRENTLY (3 pages per browser) — the serial loop made
+    // a 15-slide download take minutes. Order is preserved by index.
+    // JPEG, not PNG: PNG at high scale blew past Supabase Storage's max object
+    // size ("The object exceeded the maximum allowed size"); q88 is visually
+    // equivalent at ~1/10 the bytes. Scale 1.5 (2880px wide) stays sharp.
+    const shots: Buffer[] = new Array(htmlPages.length)
+    let nextIdx = 0
+    const renderWorker = async (): Promise<void> => {
+      for (;;) {
+        const i = nextIdx++
+        if (i >= htmlPages.length) return
+        const page = await setupPage(browser, htmlPages[i], {
+          width: 1920,
+          height: 1080,
+          deviceScaleFactor: 1.5,
+          isFirst: i === 0,
+        })
+        const screenshotBuffer = await page.screenshot({
+          type: 'jpeg',
+          quality: 88,
+          clip: { x: 0, y: 0, width: 1920, height: 1080 },
+        })
+        await page.close()
+        shots[i] = Buffer.from(screenshotBuffer)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(3, htmlPages.length) }, renderWorker))
 
-      // Take screenshot of the slide (captures ALL CSS effects perfectly).
-      // JPEG, not PNG: at deviceScaleFactor 2 each PNG slide is 3-10MB and a
-      // 15-slide deck blows past Supabase Storage's max object size ("The
-      // object exceeded the maximum allowed size"). JPEG q88 is visually
-      // equivalent for photographic decks at ~1/10 the bytes.
-      const screenshotBuffer = await page.screenshot({
-        type: 'jpeg',
-        quality: 88,
-        clip: { x: 0, y: 0, width: 1920, height: 1080 },
-      })
-      await page.close()
-
-      // Embed screenshot as a full-page image in PDF
-      const jpgImage = await mergedPdf.embedJpg(screenshotBuffer)
+    for (const shot of shots) {
+      const jpgImage = await mergedPdf.embedJpg(shot)
       const pdfPage = mergedPdf.addPage([1920, 1080])
-      pdfPage.drawImage(jpgImage, {
-        x: 0, y: 0, width: 1920, height: 1080,
-      })
+      pdfPage.drawImage(jpgImage, { x: 0, y: 0, width: 1920, height: 1080 })
     }
 
     // Metadata
