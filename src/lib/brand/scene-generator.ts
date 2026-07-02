@@ -185,10 +185,14 @@ async function collectRefs(urls: string[]): Promise<FetchedRef[]> {
 
 // ─── Prompt construction ────────────────────────────────
 
+// v2 §5 scene-generator: strict text-free + explicit negative prompt.
 const NO_TEXT_CLAUSE =
   'Absolutely no text, no letters, no numbers, no logos overlaid, no watermarks, ' +
-  'no captions anywhere in the image — the only branding allowed is what is ' +
+  'no UI elements anywhere in the image — the only branding allowed is what is ' +
   'natively printed on the product packaging itself.'
+
+const NEGATIVE_CLAUSE =
+  'Negative: distorted product, wrong colors, extra limbs, cluttered background, cartoonish.'
 
 const STRENGTHENED_FIDELITY_CLAUSE =
   'CRITICAL FIDELITY REQUIREMENT: the product must be an EXACT visual replica of ' +
@@ -210,16 +214,16 @@ function paletteHint(designSystem?: SceneRequest['designSystem']): string {
 
 function buildScenePrompt(req: SceneRequest, strengthened: boolean): string {
   const lines = [
-    `Premium lifestyle / editorial photography scene for the "${req.forSlideType}" slide ` +
-      `of a brand presentation for ${req.brandName}.`,
-    'The scene features the EXACT product shown in the attached reference images as its hero — ' +
-      'faithfully preserve the product label, packaging shape, proportions and colors. ' +
+    `A premium editorial lifestyle scene for the "${req.forSlideType}" slide of a brand ` +
+      `presentation for ${req.brandName}, featuring the real product from the reference images.`,
+    'Photorealistic, magazine-grade lighting and composition, mood matched to the brand.',
+    'The product is the hero and must match the references EXACTLY in shape, color, and label. ' +
       'Never redesign or substitute the product.',
     `Art direction: ${req.artDirection}.`,
     paletteHint(req.designSystem),
-    'Photorealistic, magazine-quality composition and lighting, cinematic depth, ' +
-      '16:9 full-bleed framing for a 1920x1080 presentation slide.',
+    'Aspect ratio 16:9, full-bleed framing for a 1920x1080 presentation slide.',
     NO_TEXT_CLAUSE,
+    NEGATIVE_CLAUSE,
     strengthened ? STRENGTHENED_FIDELITY_CLAUSE : '',
   ]
   return lines.filter(Boolean).join('\n')

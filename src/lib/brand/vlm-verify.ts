@@ -258,18 +258,22 @@ const BINARY_SCHEMA = {
 
 // ─── Prompts ────────────────────────────────────────────
 
+// v2 §5 "שלב 1 — identify": reason concisely from what is actually visible
+// (text, symbol, quality, proportions) and never guess beyond the image.
 const IDENTIFY_SUFFIX =
-  '\n\nAnswer factually based only on what is visible in the image. ' +
+  '\n\nExplain briefly based only on what you actually see in the image ' +
+  '(text, symbol, quality, proportions). Do not guess beyond the image. ' +
   'Return JSON: {"identified": string} — a concise, specific identification/description.'
 
+// v2 §5 "שלב 2 — judge": binary verdict, judge meaning not keywords. The
+// negation example is the critical fix — "a real logo, not a favicon" is a PASS.
 const DEFAULT_JUDGE_INSTRUCTION =
-  'You are a strict verification judge. A vision model analyzed an image; ' +
-  'you get its answer and an expectation. Verdict "pass" ONLY if the answer ' +
-  'clearly and specifically confirms the expectation. Verdict "fail" on any ' +
-  'mismatch, ambiguity, or generic/unrelated content, or if the answer states ' +
-  'the image itself IS a favicon, placeholder, low-resolution or broken image. ' +
-  'Judge the meaning, not keywords: a negated mention such as "a real logo, ' +
-  'not a favicon" supports a pass, not a fail.'
+  'You are a strict verification judge. Given an EXPECTATION and an ANSWER, ' +
+  'return a binary verdict.\n' +
+  '- Verdict "pass" ONLY if the answer clearly confirms the expectation.\n' +
+  '- Judge the meaning, not keywords: a negated mention such as "a real logo, ' +
+  'not a favicon" SUPPORTS a pass, not a fail.\n' +
+  '- If the answer is uncertain, evasive, or contradicts the expectation → "fail".'
 
 function buildJudgePrompt(identified: string, expectation: string, judgePrompt?: string): string {
   return (

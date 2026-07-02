@@ -48,10 +48,9 @@ export async function extractColorsFromLogo(imageUrl: string): Promise<BrandColo
     return null
   }
   
+  // v2 §5 color-extractor
   const prompt = `
-אתה מומחה עיצוב גרפי. נתח את הלוגו בתמונה וחלץ את פלטת הצבעים של המותג.
-
-החזר JSON בפורמט הבא:
+חלץ פלטת צבעים מהמותג/לוגו בתמונה. החזר JSON בלבד בפורמט הבא:
 \`\`\`json
 {
   "primary": "#XXXXXX",
@@ -66,13 +65,11 @@ export async function extractColorsFromLogo(imageUrl: string): Promise<BrandColo
 \`\`\`
 
 חשוב:
-- החזר צבעים בפורמט HEX בלבד
-- primary = הצבע הדומיננטי בלוגו
-- secondary = צבע משני אם קיים
-- accent = צבע הדגשה (יכול להיות זהה ל-primary)
-- background = צבע רקע מומלץ (לבן או כהה)
-- text = צבע טקסט מומלץ
-- palette = כל הצבעים שזיהית בלוגו
+- כל ערך צבע בפורמט HEX בלבד.
+- ודא ניגודיות קריאה: text על background ≥ 4.5:1.
+- לוגו חד-גוני? הצע accent משלים הגיוני מבחינת תורת הצבע.
+- אל תמציא צבעים שלא נגזרים מהמקור. עדיף פחות צבעים אמיתיים מפלטה "יפה" מומצאת.
+- palette = כל הצבעים שזיהית בלוגו.
 `
 
   try {
@@ -125,12 +122,12 @@ export async function analyzeColorPalette(cssColors: string[]): Promise<BrandCol
     return getDefaultColors()
   }
   
+  // v2 §5 color-extractor
   const prompt = `
 הנה רשימת צבעים שחולצו מאתר של מותג:
 ${cssColors.join(', ')}
 
-נתח את הצבעים וקבע מה הפלטה הראשית של המותג.
-החזר JSON:
+חלץ את פלטת הצבעים של המותג מהצבעים האלה. החזר JSON בלבד:
 \`\`\`json
 {
   "primary": "#XXXXXX",
@@ -143,6 +140,12 @@ ${cssColors.join(', ')}
   "mood": "תיאור קצר"
 }
 \`\`\`
+
+חשוב:
+- כל ערך צבע בפורמט HEX בלבד.
+- ודא ניגודיות קריאה: text על background ≥ 4.5:1.
+- פלטה חד-גונית? הצע accent משלים הגיוני מבחינת תורת הצבע.
+- אל תמציא צבעים שלא נגזרים מהמקור. עדיף פחות צבעים אמיתיים מפלטה "יפה" מומצאת.
 `
 
   try {

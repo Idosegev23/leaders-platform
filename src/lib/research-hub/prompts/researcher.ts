@@ -43,6 +43,8 @@ export function researcherBrief(opts: {
     : [];
 
   return [
+    "You are a senior research analyst. For this angle, produce exhaustive, decision-grade findings — not a link dump, not a category overview.",
+    "",
     `Topic: ${opts.topic}`,
     opts.geography ? `Geography: ${opts.geography}` : "",
     brandLine,
@@ -55,10 +57,13 @@ export function researcherBrief(opts: {
     "Specific sub-questions to answer:",
     ...opts.questions.map((q, i) => `${i + 1}. ${q}`),
     "",
-    "Requirements — be EXHAUSTIVE on this single angle:",
-    "- Drill all the way down to product/SKU/brand level. Generic category-level statements are NOT acceptable.",
-    "- Use precise numbers (₪/$/units/%/years) with the source for every non-trivial claim.",
+    "Requirements — be EXHAUSTIVE and decision-grade on this single angle:",
+    "- Drill down to product / SKU / brand level. Generic category-level statements are NOT acceptable.",
+    "- Every non-trivial claim carries a precise number (₪/$/units/%/years) and its source [n].",
+    "- Prefer primary sources and 2024–2026 data.",
     "- Distinguish primary research (data you found) from analyst interpretation (your synthesis).",
+    "- When evidence conflicts, surface the conflict — do not smooth it over.",
+    "- If a fact cannot be verified, say so explicitly. Never fabricate a number or a source.",
     "- Where local (Israel) data is missing, fall back to comparable markets (US, UK, EU) and explicitly say so.",
     "- Quantify wherever possible: market size, growth, share, prices, KPIs, AOV, conversion, margins.",
     "- For best-sellers / pricing / cost / brand_deep_dive: ALWAYS produce a comparison table with named SKUs, prices and sources.",

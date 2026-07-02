@@ -13,7 +13,21 @@
 
 // ─── Prompt-injectable rulebook ───────────────────────────────────────────
 
-export const ART_DIRECTOR_RULES = `ART DIRECTION RULES — 1920x1080 slides, Hebrew RTL. Hard constraints, not suggestions.
+export const ART_DIRECTOR_RULES = `<art_director_rules>
+טיפוגרפיה:   eyebrow 14px · body 20–24px · display 96–180px. סולם ברור, בלי ביניים מטושטש.
+ניגודיות:    body ≥ 4.5:1 · display ≥ 3:1. אף פעם לא טקסט בהיר על רקע בהיר.
+צבע:         60-30-10 (רקע / משני / אקצנט). אקצנט אחד דומיננטי לכל המצגת.
+פונטים:      זיווג של פונט כותרת חזק + פונט גוף קריא (Heebo/Assistant/Ploni). לא יותר משניים.
+ההחלטה הדרמטית: לכל שקף החלטה ויזואלית אחת נועזת (טקסט שגולש מהקצה · 70% חלל ריק ·
+             תמונה מלאה · מילה בודדת כסימן מים). כל השאר משרת אותה.
+קצב:         11–15 שקפים בקשת מתח — פתיחה שקטה, שיא באמצע (insight/bigIdea),
+             נחיתה בטוחה (metrics/closing).
+איסורי קלישאה: אין stock גנרי · אין אייקונים דקורטיביים חסרי מובן ·
+             אין gradient סגול-כחול דיפולטי · אין "מילוי" ויזואלי.
+RTL:         יישור לימין, כיווניות נכונה, מספרים ואנגלית LTR בתוך טקסט RTL.
+</art_director_rules>
+
+ART DIRECTION RULES — 1920x1080 slides, Hebrew RTL. Hard constraints, not suggestions.
 
 TYPE SCALE
 1. One modular scale per deck (ratio 1.25–1.333) anchored to the 1920px canvas: eyebrow 14px, body 20–24px, h3 28–32px, h2 48–64px, display 96–180px. Never invent sizes between steps.

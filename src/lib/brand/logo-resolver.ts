@@ -140,8 +140,10 @@ export async function resolveBrandLogo(input: LogoResolverInput): Promise<BrandL
   push(scraped.ogImage, 'og-image')
 
   // ── Verify candidates in order; first pass wins ──
+  // v2 §5 "שלב 1 — identify"
   const identifyPrompt =
-    'What brand is this logo? Is this an actual brand logo, or a favicon / placeholder / low-resolution image?'
+    'נתח את התמונה והחזר: 1. איזה מותג מוצג? 2. האם זה לוגו אמיתי ורשמי — או ' +
+    'favicon / placeholder / צילום מסך גנרי?'
   const expectation = `The official logo of the brand "${brandName}"${domain ? ` (website: ${domain})` : ''}`
 
   const verdicts: { candidate: LogoCandidate; reasoning: string }[] = []

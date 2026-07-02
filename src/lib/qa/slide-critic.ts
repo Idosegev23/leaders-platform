@@ -118,6 +118,9 @@ const CRITIQUE_SCHEMA = {
       },
       required: [...CHECK_KEYS],
     },
+    // v2 prompt asks the model for an explicit pass/fail verdict; parse logic
+    // still derives fail from the checks (see parseCritique), so this stays optional.
+    verdict: { type: Type.STRING, enum: ['pass', 'fail'] },
     issues: { type: Type.ARRAY, items: { type: Type.STRING } },
     fixes: {
       type: Type.ARRAY,
@@ -139,28 +142,40 @@ const CRITIQUE_SCHEMA = {
 
 // ─── Prompt ─────────────────────────────────────────────
 
-const CHECKLIST_PROMPT = `You are a meticulous presentation art director doing visual QA on ONE rendered slide (1920x1080 canvas, Hebrew RTL deck).
-Evaluate the attached screenshot against this BINARY checklist — true/false only, never scores:
+const CHECKLIST_PROMPT = `<role>
+You are a strict visual-QA critic. You look at ONE rendered slide image (1920x1080 canvas, Hebrew RTL deck) and return a BINARY verdict per check — true/false only, never scores. You are not polite — you are precise. A broken slide gets called broken.
+</role>
+
+<checklist>
+For this slide, return true/false on each:
 - legible: every piece of text is readable — sufficient contrast against what it actually sits on, not too small, not lost inside a busy image.
 - noOverlap: no element collides with another in a way that hurts reading (text over text, text over an unscrimmed busy image area, cards colliding).
 - noOverflow: nothing is clipped by the canvas edges; no text cut off mid-word or mid-line.
-- imageRelevant: imagery looks intentional, fully loaded, and brand-appropriate (no broken-image icons, no placeholder/generic mismatch). true when the slide has no imagery.
+- imageRelevant: imagery looks intentional, fully loaded, and brand-appropriate — related to the content, not decorative filler (no broken-image icons, no placeholder/generic mismatch). true when the slide has no imagery.
 - rtlOk: Hebrew text reads right-to-left with correct alignment; no mixed-direction glitches (punctuation/numbers on the wrong side).
 - hasFocalPoint: one clear focal point; the slide is not a uniform wall of equal-weight content.
+</checklist>
 
-Rules for issues and fixes:
+<rules>
+- Every check you mark false → verdict "fail" + ONE concrete fix: what to change and how (e.g. "move title up 80px so it clears the numeral"), never "improve the design".
 - Report an issue ONLY for a check you marked false. Be concrete: name the element and what is wrong.
-- Propose a fix ONLY when you are confident it resolves a false check. Minimal, surgical changes.
+- No vague fail: never fail a check without an actionable fix. No polite pass: never pass a broken slide to be nice.
 - CSS patch fix: {"role": "<data-role>", "cssPatch": "prop: value; prop: value;", "reason": "..."} — role MUST be one of the data-role names listed below.
 - Action fix: {"action": "swap-image" | "shrink-text" | "recolor", "target": "<data-role>", "reason": "..."} — use only when a CSS nudge cannot fix it.
-- If every check passes, issues and fixes MUST be empty arrays.`
+- If every check passes → verdict "pass", and issues and fixes MUST be empty arrays.
+</rules>
+
+<output>JSON only: {"checks": {...}, "verdict": "pass"|"fail", "issues": string[], "fixes": [...]}.</output>`
 
 // Few-shot exemplars (research: exemplars materially improve VLM QA).
-const FEW_SHOT_EXEMPLARS = `EXAMPLE 1 — clean slide (60/40 split: product photo right, headline + 3 short bullets left, generous margins):
-{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"rtlOk":true,"hasFocalPoint":true},"issues":[],"fixes":[]}
+const FEW_SHOT_EXEMPLARS = `EXAMPLE 1 — clean slide (60/40 split: product photo right, headline + 3 short bullets left, generous margins): every check passes → pass, empty arrays.
+{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"rtlOk":true,"hasFocalPoint":true},"verdict":"pass","issues":[],"fixes":[]}
 
-EXAMPLE 2 — broken slide (headline collides with the oversized stat numeral; body paragraph runs past the bottom edge):
-{"checks":{"legible":true,"noOverlap":false,"noOverflow":false,"imageRelevant":true,"rtlOk":true,"hasFocalPoint":true},"issues":["headline overlaps the stat-0 numeral","body paragraph is clipped at the bottom canvas edge"],"fixes":[{"role":"title","cssPatch":"top: 120px; max-width: 900px;","reason":"move the headline up and constrain its width so it clears stat-0"},{"action":"shrink-text","target":"body","reason":"body overflows the canvas bottom; smaller type fits the frame"}]}`
+EXAMPLE 2 — broken slide (headline collides with the oversized stat numeral; body paragraph runs past the bottom edge): two checks fail → fail, one concrete fix each.
+{"checks":{"legible":true,"noOverlap":false,"noOverflow":false,"imageRelevant":true,"rtlOk":true,"hasFocalPoint":true},"verdict":"fail","issues":["headline overlaps the stat-0 numeral","body paragraph is clipped at the bottom canvas edge"],"fixes":[{"role":"title","cssPatch":"top: 120px; max-width: 900px;","reason":"move the headline up and constrain its width so it clears stat-0"},{"action":"shrink-text","target":"body","reason":"body overflows the canvas bottom; smaller type fits the frame"}]}
+
+EXAMPLE 3 — RTL-broken slide (Hebrew paragraph is left-aligned and the ₪ sign sits on the wrong side of the number): one check fails → fail, one concrete fix.
+{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"rtlOk":false,"hasFocalPoint":true},"verdict":"fail","issues":["body paragraph is left-aligned and reads with mixed direction; the ₪ sign is on the wrong side of the numeral"],"fixes":[{"role":"body","cssPatch":"direction: rtl; text-align: right;","reason":"force right-to-left flow so Hebrew aligns right and the currency sign sits correctly"}]}`
 
 const ROLE_RE = /data-role="([^"]+)"/g
 
@@ -175,7 +190,7 @@ function buildPrompt(html: string): string {
   return (
     `${CHECKLIST_PROMPT}\n\n${FEW_SHOT_EXEMPLARS}\n\n` +
     `Elements on this slide (valid data-role names): ${roles.length ? roles.join(', ') : '(none found)'}\n\n` +
-    'Return JSON only: {"checks": {...}, "issues": string[], "fixes": [...]}.'
+    'Return JSON only: {"checks": {...}, "verdict": "pass"|"fail", "issues": string[], "fixes": [...]}.'
   )
 }
 

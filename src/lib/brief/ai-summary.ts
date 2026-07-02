@@ -80,8 +80,9 @@ export async function summariseBriefForMgmt(
 }
 
 function buildHebrewPrompt(fields: string, today: string): string {
-  return `אתה כותב סיכום קצר להנהלת סוכנות פרסום על בריף שלקוח הרגע מילא.
-המטרה: 30 שניות קריאה — מנהלי הסוכנות פותחים את המייל ומיד יודעים מה הלקוח רוצה.
+  return `<role>
+אתה מסכם בריף שלקוח הרגע מילא, להנהלת סוכנות הפרסום. הפלט נקרא ב-30 שניות במייל — חד, ענייני, בלי מים. המנהלים פותחים ומיד יודעים מה הלקוח רוצה.
+</role>
 
 התאריך היום: ${today}. כשאתה מעריך תאריכים בבריף, השווה אותם ל-${today} ולא להנחות פנימיות שלך.
 
@@ -89,26 +90,35 @@ function buildHebrewPrompt(fields: string, today: string): string {
 
 ${fields}
 
+<output>
 החזר JSON בפורמט הבא בדיוק:
 {
-  "headline": "משפט אחד שמסכם מה הלקוח רוצה (עד 15 מילים, עברית, ישיר, ללא קלישאות)",
+  "headline": "💡 ההזדמנות — משפט אחד: הזווית הגדולה שאתה רואה כאן / מה הלקוח באמת רוצה (עד 15 מילים, עברית, ישיר, ללא קלישאות)",
   "bullets": [
     {"label": "מותג", "value": "..."},
     {"label": "מטרה", "value": "..."},
-    {"label": "קהל יעד", "value": "..."},
     {"label": "תקציב", "value": "..."},
-    {"label": "טיימינג", "value": "..."},
-    {"label": "אתגר מרכזי", "value": "..."},
+    {"label": "קהל יעד", "value": "..."},
+    {"label": "לוח זמנים", "value": "..."},
+    {"label": "דרישות חובה", "value": "..."},
     {"label": "תובנה / זווית", "value": "..."}
   ],
   "attention": []
 }
 
-כללים על bullets:
-- כל value עד 20 מילים, ישיר, ללא קישוטים, ללא חזרה על המילה ב-label.
-- אם הבריף לא מכיל מידע על שדה מסוים — השמט את ה-bullet הזה לגמרי (אל תמציא ואל תכתוב "לא צוין").
+- headline = "💡 ההזדמנות": משפט אחד עם הזווית הגדולה / מה הלקוח באמת רוצה.
+- bullets = התקציר: 5-7 בולטים חדים (מותג · מטרה · תקציב · קהל · לוח זמנים · דרישות חובה · תובנה).
+- attention = "⚠️ דורש תשומת לב": פערים בבריף, סיכונים, דרישות חריגות או סתירות.
+</output>
 
-כללים על attention (חשוב מאוד — הסף גבוה):
+<rules>
+- רק מה שכתוב בבריף. חסר משהו קריטי? זה הולך ל-attention ("דורש תשומת לב"), לא לניחוש והמצאה.
+- כל value בבולט עד 20 מילים, ישיר, ללא קישוטים, ללא חזרה על המילה ב-label.
+- אם הבריף לא מכיל מידע על שדה מסוים — השמט את ה-bullet הזה לגמרי (אל תמציא ואל תכתוב "לא צוין").
+- עברית טלגרפית, בלי מבוא ובלי סיכום מנומס, ללא אנגלית מעורבבת.
+- אל תוסיף שדות שלא בסכמה.
+
+attention — הסף גבוה:
 - ברירת המחדל היא מערך ריק []. כך תחזיר ברוב הבריפים.
 - attention זה לא רשימת נקודות מהבריף — זה רשימת התראות שדורשות שיקול דעת אנושי מיידי.
 - מה לא להחזיר ב-attention (אלה דברים נורמליים, לא alerts):
@@ -123,16 +133,14 @@ ${fields}
   • איסור או רגישות שהלקוח ציין במפורש ("אסור לעבוד עם X", "תוכן רגיש מבחינה רגולטורית").
   • מתחרה ישיר ומסוכן שהלקוח שמו בשם.
   • דרישה לא חוקית / לא אפשרית.
-
-הנחיות פורמט:
-- כל הטקסט בעברית, ללא אנגלית מעורבבת.
-- אל תוסיף שדות שלא בסכמה.
-- במקרה של ספק לגבי attention — השמט אותו.`
+- במקרה של ספק לגבי attention — השמט אותו.
+</rules>`
 }
 
 function buildEnglishPrompt(fields: string, today: string): string {
-  return `You are writing a 30-second executive summary for the management of a marketing agency about a brief a client just filled out.
-Goal: management opens the mail and instantly knows what the client wants.
+  return `<role>
+You summarise a brief a client just filled out, for the management of a marketing agency. The output is read in 30 seconds in an email — sharp, to the point, no fluff. Management opens it and instantly knows what the client wants.
+</role>
 
 Today's date: ${today}. When evaluating dates in the brief, compare them to ${today}, not to internal assumptions.
 
@@ -140,26 +148,35 @@ Client-filled fields (key: value):
 
 ${fields}
 
+<output>
 Return JSON in exactly this format:
 {
-  "headline": "one sentence (≤ 15 words) describing what the client wants — direct, no fluff",
+  "headline": "💡 The opportunity — one sentence: the big angle you see here / what the client really wants (≤ 15 words, direct, no fluff)",
   "bullets": [
     {"label": "Brand", "value": "..."},
     {"label": "Goal", "value": "..."},
-    {"label": "Audience", "value": "..."},
     {"label": "Budget", "value": "..."},
-    {"label": "Timing", "value": "..."},
-    {"label": "Core challenge", "value": "..."},
+    {"label": "Audience", "value": "..."},
+    {"label": "Timeline", "value": "..."},
+    {"label": "Mandatories", "value": "..."},
     {"label": "Angle / insight", "value": "..."}
   ],
   "attention": []
 }
 
-Bullet rules:
-- Each value ≤ 20 words, direct, no fluff, no echoing the label word.
-- If the brief doesn't contain info for a field — omit that bullet entirely (don't invent, don't write "not specified").
+- headline = "💡 The opportunity": one sentence with the big angle / what the client really wants.
+- bullets = the summary: 5-7 sharp bullets (brand · goal · budget · audience · timeline · mandatories · insight).
+- attention = "⚠️ Needs attention": gaps in the brief, risks, unusual requirements, or contradictions.
+</output>
 
-Attention rules (important — bar is HIGH):
+<rules>
+- Only what's in the brief. Something critical missing? It goes to attention ("needs attention"), not to a guess or invention.
+- Each bullet value ≤ 20 words, direct, no fluff, no echoing the label word.
+- If the brief doesn't contain info for a field — omit that bullet entirely (don't invent, don't write "not specified").
+- English, telegraphic, no intro and no polite wrap-up.
+- No fields outside the schema.
+
+attention — bar is HIGH:
 - Default is an empty array []. That's what you should return for most briefs.
 - attention is NOT a list of points from the brief — it's a list of alerts that need immediate human judgement.
 - What NOT to put in attention (these are normal brief content, not alerts):
@@ -174,9 +191,6 @@ Attention rules (important — bar is HIGH):
   • A restriction or sensitivity the client explicitly named.
   • A direct, dangerous competitor named by name.
   • An illegal or impossible requirement.
-
-Format:
-- All text in English.
-- No fields outside the schema.
-- When in doubt about an attention item — omit it.`
+- When in doubt about an attention item — omit it.
+</rules>`
 }

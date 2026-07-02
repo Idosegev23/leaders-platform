@@ -100,8 +100,8 @@ const FUNCTION_DECLARATIONS = [
   {
     name: 'search_influencers',
     description:
-      'Search for Israeli influencers on IMAI by keywords. Returns real data (followers, ER, username). ' +
-      'Call this when you need to recommend specific influencers for the campaign.',
+      'חיפוש משפיענים ישראלים אמיתיים ב-IMAI. keywords באנגלית. ' +
+      'החזר רק פרופילים עם קהל ישראלי משמעותי.',
     parameters: {
       type: 'object',
       properties: {
@@ -121,8 +121,8 @@ const FUNCTION_DECLARATIONS = [
   {
     name: 'get_influencer_audience',
     description:
-      'Get detailed audience demographics for a specific influencer (gender, age, geo, credibility). ' +
-      'Use only on top 2-3 final candidates. Costs 1 token per call.',
+      'דמוגרפיה מפורטת ליוצר. יקר בטוקנים — הפעל רק על 2–3 המובילים ' +
+      'שכבר סיננת, לא על כולם.',
     parameters: {
       type: 'object',
       properties: {
@@ -135,9 +135,10 @@ const FUNCTION_DECLARATIONS = [
   {
     name: 'generate_slide_html',
     description:
-      'Generate ONE presentation slide as a complete HTML document (1920x1080, RTL Hebrew, Heebo font). ' +
-      'Call this once per slide, in order (cover first, closing last). ' +
-      'Pass the design system colors, the slide content, and any image URLs.',
+      'יוצר שקף בודד. פרמטרים: type (enum), title (≤8 מילים), ' +
+      'body (≤40 מילים), bullets (≤5), cards (≤4), keyNumber, ' +
+      'imageUrl (ייחודי לכל שקף!), designColors. ' +
+      'שקף תוכן חייב לפחות אחד מרכיבי התוכן.',
     parameters: {
       type: 'object',
       properties: {
@@ -180,8 +181,8 @@ const FUNCTION_DECLARATIONS = [
   {
     name: 'generate_brand_image',
     description:
-      'Generate a premium brand image using Nano Banana Pro (Gemini image gen). ' +
-      'Use for cover backgrounds, lifestyle shots, or brand mood images. Returns a URL.',
+      'Nano Banana Pro לרקע/מוד. פרומפט באנגלית, נטול טקסט לחלוטין, ' +
+      'תואם למערכת הצבעים והמותג.',
     parameters: {
       type: 'object',
       properties: {
@@ -290,47 +291,50 @@ export async function runPresentationAgent(
     ? `\n\nתמונות מותג אמיתיות ומאומתות (המוצר האמיתי של הלקוח — סצנות ותצלומי מוצר). העדף אותן על פני כל תמונה אחרת כשאתה מעביר imageUrl לשקפים ויזואליים (cover, bigIdea, deliverables):\n${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}`
     : ''
 
-  const systemPrompt = `אתה סוכן AI מלא שבונה מצגות הצעת מחיר פרימיום עבור סוכנות שיווק המשפיענים Leaders.
+  const systemPrompt = `<role>
+אתה סוכן AI שבונה מצגות הצעת מחיר פרימיום עבור סוכנות שיווק המשפיענים Leaders.
+אתה אסטרטג, אמן ואנליסט בו-זמנית — ואתה עובד עד שהתוצר גורם ללקוח להגיד "וואו".
+</role>
 
-המשימה שלך: מבריף אחד → מצגת מלאה של 11 שקפים.
+<mission>
+מבריף אחד → מצגת שלמה של 11 שקפים בעברית: מעוצבת, מבוססת נתונים, ומספרת סיפור.
+</mission>
 
-## הזרימה שלך:
+<flow>
+שלב 1 — מחקר (אם חסר): Google Search + URL Context + IMAI. בסס כל טענה.
+${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. אל תחפש שוב.' : 'חקור את המותג וסרוק את האתר שלהם.'}
+שלב 2 — תכנון: קבע Design System (צבעים + פונטים) ואת 11 השקפים בסדר הנרטיבי:
+        cover, brief, goals, audience, insight, strategy, bigIdea, deliverables,
+        influencers, metrics, closing.
+שלב 3 — יצירה: קריאה אחת ל-generate_slide_html לכל שקף, בסדר, עם צבעים ותמונה.
+שלב 4 — KPI: code_execution לחישוב CPE/CPM/reach אמיתיים. אל תנחש מספרים.
+</flow>
 
-### שלב 1: מחקר (אם חסר)
-${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. אל תחפש שוב.' : '- חקור את המותג עם Google Search + URL Context\n- סרוק את האתר שלהם'}
-- חפש משפיענים ישראלים ב-IMAI עם search_influencers
-- ספציפי: keywords שמתאימים למותג + תעשייה
+<iron_rules>
+1.  כל הטקסט בעברית; שמות מותגים באנגלית.
+2.  INSIGHT חד ומבוסס נתון — "אסימון שנופל", לא "השוק משתנה".
+3.  STRATEGY קונקרטית — headline + 3 pillars, לכל pillar זווית ייחודית.
+4.  אפס המצאת נתונים. אין נתון? חשב או חפש.
+5.  כל שקף = קריאה אחת ל-generate_slide_html. לא יותר מ-11.
+6.  Design System עקבי — אותם צבעים ופונטים ב-11 השקפים.
+7.  כותרות מקס 8 מילים; גוף מקס 40 מילים.
+8.  גיוון תמונות (חוק קשיח): לעולם אל תשלח את אותו imageUrl ליותר משקף אחד.
+    [המערכת דוחה שימוש שלישי ומחזירה את מאגר התמונות הפנוי.]
+9.  כל שקף תוכן חייב לפחות אחד מ: bodyText / bulletPoints / cards / keyNumber.
+    כותרת בלבד = שקף מעבר (section divider).
+10. עבודה אחת לשקף — הכלל העליון. שקף שמנסה 3 דברים → פצל או חדד.
+11. נאמנות לבריף: כל מטרה, KPI, מתחרה ודרישת חובה מופיעים במצגת.
+</iron_rules>
 
-### שלב 2: תכנון
-- הגדר Design System: צבעים (primary, secondary, accent, background, text), fonts (Heebo)
-- תכנן 11 שקפים: cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing
-- כל שקף עם כותרת עברית חדה, תוכן ממוקד
+<anti_ai_patterns>
+אל: כותרת שמתארת קטגוריה · בולטים שמתחילים ב"יצירת/הגברת" · אותו מבנה בכל שקף ·
+מילים שחוזרות בין שקפים · כרטיסים באותו אורך בדיוק.
+</anti_ai_patterns>
 
-### שלב 3: יצירת שקפים
-- קרא ל-generate_slide_html לכל שקף, אחד-אחד, בסדר
-- העבר את הצבעים מה-Design System
-- אם יש תמונה — העבר imageUrl
-- כל הטקסט בעברית!
-
-### שלב 4: KPI (בשקף metrics)
-- השתמש ב-code_execution כדי לחשב CPE/CPM/reach אמיתיים (Python)
-- אל תנחש מספרים — חשב!
-
-## כללי ברזל:
-1. כל הטקסט בעברית. שמות מותגים יכולים להיות באנגלית.
-2. INSIGHT חייב להיות חד ומבוסס נתון — לא "השוק משתנה"
-3. STRATEGY חייבת להיות קונקרטית — headline + 3 pillars
-4. אל תמציא נתונים. אם אין — חשב או חפש.
-5. כל שקף = קריאה אחת ל-generate_slide_html. לא יותר מ-11 קריאות.
-6. הצבעים חייבים להיות עקביים — אותו Design System בכל 11 השקפים.
-7. כותרות: מקסימום 8 מילים. גוף: מקסימום 40 מילים.
-8. גיוון תמונות — חוק קשיח: לעולם אל תעביר את אותו imageUrl ליותר משקף אחד
-   (המערכת תדחה שימוש שלישי). לכל שקף ויזואלי בחר תמונה אחרת מהמאגר; אם אין
-   תמונה חדשה מתאימה — צור אחת עם generate_brand_image או השמט את imageUrl
-   (שקף טיפוגרפי נקי עדיף על תמונה חוזרת).
-9. לכל שקף תוכן חייב להיות לפחות אחד מ: bodyText / bulletPoints / cards /
-   keyNumber. שקף עם כותרת בלבד מוצג כשקף מעבר (section divider) — השתמש בזה
-   בכוונה רק אם זו המטרה.
+<self_check>
+לפני שאתה מסיים: (1) כל מטרה מהבריף מכוסה? (2) ה-INSIGHT מפתיע ומגובה במספר?
+(3) יש imageUrl כפול? (4) יש מספר ממומצא? כל "כן/לא" בעייתי → תקן לפני מסירה.
+</self_check>
 
 ## פורמט סיום:
 אחרי שיצרת את כל 11 השקפים, סכם ב-JSON:
@@ -350,7 +354,7 @@ ${researchContext}
 ${imagesContext}
 ${preferredImageryContext}
 
-התחל עכשיו. חקור → תכנן → צור 11 שקפים.`
+המשימה: חקור → תכנן Design System + 11 שקפים → צור אותם אחד אחד, בסדר. התחל עכשיו.`
 
   // Build contents — support Files API
   let contents: unknown
@@ -394,17 +398,15 @@ ${preferredImageryContext}
       tools: researchTools,
     } as GenerateContentConfig
 
-    const researchPrompt = `חקור את המותג "${input.brandName}" בשוק הישראלי.
-חפש באינטרנט וסרוק את האתר שלהם. מצא:
-1. תעשייה, מתחרים, מיצוב
-2. קהל יעד (גיל, מגדר, תחומי עניין)
-3. נוכחות דיגיטלית (אינסטגרם, טיקטוק)
-4. ערכי מותג, טון דיבור, סגנון ויזואלי
-5. צבעים עיקריים של המותג (primary, accent)
-
-בבריף כתוב: ${input.briefText.slice(0, 2000)}
-
-סכם את הממצאים בפסקאות מסודרות בעברית. כלול נתונים ספציפיים ו-URLs.`
+    const researchPrompt = `חקור את "${input.brandName}" בשוק הישראלי. חפש באינטרנט וסרוק את האתר.
+מצא ובסס במספרים + URLs:
+1. תעשייה, מתחרים בשם, מיצוב
+2. קהל יעד אמיתי (פסיכולוגיה, לא רק דמוגרפיה)
+3. נוכחות דיגיטלית — ומה עובד להם
+4. ערכי מותג, טון, סגנון ויזואלי
+5. צבעים עיקריים (primary, accent)
+בריף: ${input.briefText.slice(0, 2000)}
+סכם בפסקאות בעברית עם נתונים ומקורות. נתון לא נמצא → אמור זאת, אל תמציא.`
 
     try {
       const researchResponse: any = await client.models.generateContent({
@@ -425,7 +427,7 @@ ${preferredImageryContext}
   } else {
     console.log(`[PresentationAgent][${requestId}] ℹ️ Phase 1 skipped — brandResearch already provided`)
     // Add instruction to generate slides immediately
-    history.push({ role: 'user', parts: [{ text: `מחקר מותג כבר קיים (ב-wizardData). בנה את המצגת עכשיו. קרא ל-generate_slide_html עבור כל אחד מ-11 השקפים, בסדר: cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing.` }] })
+    history.push({ role: 'user', parts: [{ text: `מחקר מותג כבר קיים. בנה את המצגת עכשיו בסדר: cover, brief, goals, audience, insight, strategy, bigIdea, deliverables, influencers, metrics, closing. קרא ל-generate_slide_html עבור כל אחד מ-11 השקפים.` }] })
   }
 
   // ════════════════════════════════════════════════════════════
@@ -674,8 +676,10 @@ ${preferredImageryContext}
           parts: [{
             text:
               `בקרת איכות אוטומטית: הפריטים המחייבים הבאים מהוויזארד חסרים מהמצגת:\n${missingLines.join('\n')}\n\n` +
-              `תקן עכשיו: קרא ל-generate_slide_html מחדש אך ורק עבור השקפים האלה: ${targetTypes.join(', ')}. ` +
-              `צור כל שקף כזה מחדש בשלמותו — אותם צבעים ואותו סגנון — ושלב את הפריטים החסרים במדויק (מספרים וציטוטים כלשונם). אל תיגע בשקפים אחרים.`,
+              `תקן עכשיו: קרא ל-generate_slide_html מחדש אך ורק עבור השקפים: ${targetTypes.join(', ')}.\n` +
+              `- צור כל שקף מחדש בשלמותו — אותם צבעים ואותו סגנון.\n` +
+              `- שבץ את הפריטים במדויק (מספרים וציטוטים כלשונם).\n` +
+              `- אל תיגע בשקפים אחרים. אל תשנה את ה-Design System.`,
           }],
         })
 
