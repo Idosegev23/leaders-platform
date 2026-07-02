@@ -66,7 +66,7 @@ export async function updateSession(request: NextRequest) {
   const protectedPaths = [
     '/dashboard', '/admin', '/documents', '/preview',
     '/create', '/create-proposal', '/price-quote', '/wizard', '/research',
-    '/generate', '/edit',
+    '/generate', '/edit', '/blueprint',
     // New hub rubrics (Phases 2–5)
     '/inner-meeting', '/summary', '/send',
     // Hub transparency: dedicated per-brief view (employees only)

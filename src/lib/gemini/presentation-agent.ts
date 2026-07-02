@@ -50,6 +50,9 @@ export interface AgentInput {
   /** Absolute epoch-ms ceiling for OPTIONAL post-passes (wizard repair).
    *  Past it, repair is skipped/aborted so the caller keeps time to persist. */
   deadlineTs?: number
+  /** Approved deck blueprint ("הפיצוח") — when present, the agent renders the
+   *  slides EXACTLY to this plan instead of planning on its own. */
+  blueprintMandate?: string
 }
 
 export interface AgentSlide {
@@ -416,7 +419,7 @@ ${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. 
 {
   "designSystem": { "colors": {...}, "fonts": {...}, "effects": {...}, "creativeDirection": {...} },
   "summary": "סיכום בעברית של ההצעה"
-}${input.wizardContract?.promptBlock ? `\n\n${input.wizardContract.promptBlock}` : ''}
+}${input.blueprintMandate ? `\n\n${input.blueprintMandate}` : ''}${input.wizardContract?.promptBlock ? `\n\n${input.wizardContract.promptBlock}` : ''}
 
 ${ART_DIRECTOR_RULES}`
 

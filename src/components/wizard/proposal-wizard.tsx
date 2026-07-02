@@ -437,6 +437,7 @@ export default function ProposalWizard({
         },
         _wizardComplete: true,
         _cachedSlides: null, // Invalidate - will regenerate on visual generation page
+        _deckBlueprint: null, // Invalidate the strategic blueprint — wizard changed
         _pipelineStatus: {
           textGeneration: 'complete',
           research: 'complete',
@@ -457,8 +458,10 @@ export default function ProposalWizard({
 
       dispatch({ type: 'MARK_SAVED', timestamp: new Date().toISOString() })
 
-      // Redirect to visual generation page
-      router.push(`/generate/${documentId}`)
+      // Route to the strategic-blueprint gate ("הפיצוח"): the user reviews and
+      // corrects the deck plan before slides are rendered. /blueprint generates
+      // the plan on mount, then "אשר ובנה" kicks off generation with it.
+      router.push(`/blueprint/${documentId}`)
     } catch (err) {
       console.error('[Wizard] Generate error:', err)
       toast.error('שגיאה ביצירת ההצעה — נסה שוב')

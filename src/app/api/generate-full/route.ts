@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       userId = user.id
     }
 
-    const { documentId } = await request.json()
+    const { documentId, useBlueprint } = await request.json()
     if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
 
     // Load document
@@ -81,6 +81,20 @@ export async function POST(request: NextRequest) {
       console.warn(`[${requestId}] ⚠️ Wizard contract build failed (continuing without):`, contractErr)
     }
 
+    // Approved blueprint ("הפיצוח") — when the user came through the /blueprint
+    // gate, the agent renders the slides EXACTLY to that plan.
+    let blueprintMandate: string | undefined
+    if (useBlueprint) {
+      const bp = data._deckBlueprint as import('@/lib/gemini/deck-blueprint').DeckBlueprint | undefined
+      if (bp?.slidePlan?.length) {
+        const { blueprintToMandate } = await import('@/lib/gemini/deck-blueprint')
+        blueprintMandate = blueprintToMandate(bp)
+        console.log(`[${requestId}] 🧠 Using approved blueprint: ${bp.slidePlan.length} planned slides`)
+      } else {
+        console.warn(`[${requestId}] ⚠️ useBlueprint set but no _deckBlueprint — planning freely`)
+      }
+    }
+
     const agentInput: AgentInput = {
       brandName,
       briefText: (data._briefText as string) || (data.brandBrief as string) || '',
@@ -92,6 +106,7 @@ export async function POST(request: NextRequest) {
       brandResearch: (data._brandResearch as Record<string, unknown>) || undefined,
       images,
       brandAssets,
+      blueprintMandate,
       clientLogoUrl: brandAssets?.logo?.url || scraped?.logoUrl || (data.brandLogoFile as string) || undefined,
     }
 
