@@ -340,6 +340,7 @@ export default function GeneratePage() {
               brandResearch: freshData._brandResearch,
               stepData: freshData._stepData,
               websiteUrl,
+              documentId,
             }),
           })
 
@@ -349,6 +350,7 @@ export default function GeneratePage() {
               _pipelineStatus: { ...freshData._pipelineStatus, visualAssets: 'complete' },
             }
             if (visualAssets.scraped) patchVisuals._scraped = visualAssets.scraped
+            if (visualAssets.brandAssets) patchVisuals._brandAssets = visualAssets.brandAssets
             if (visualAssets.brandColors?.primary) patchVisuals._brandColors = visualAssets.brandColors
             if (visualAssets.generatedImages) patchVisuals._generatedImages = visualAssets.generatedImages
             if (visualAssets.extraImages?.length) patchVisuals._extraImages = visualAssets.extraImages

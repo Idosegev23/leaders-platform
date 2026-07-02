@@ -10,6 +10,7 @@
 import { ThinkingLevel } from '@google/genai'
 import { callAI } from '@/lib/ai-provider'
 import { parseGeminiJson } from '@/lib/utils/json-cleanup'
+import { auditDesignSystem } from '@/lib/design/art-director-rules'
 import type {
   StructuredPresentation,
   StructuredSlide,
@@ -724,6 +725,22 @@ function normalizePresentation(
           recurringPattern: input.visualDNA.recurringPattern,
         }
       : pres.designSystem?.visualDNA,
+  }
+
+  // Art-director hardening: contrast floors + allowed Hebrew fonts,
+  // auto-corrected before any slide renders (never throws).
+  try {
+    const { issues, corrected } = auditDesignSystem({ colors: ds.colors, fonts: ds.fonts })
+    if (issues.length) {
+      console.warn(
+        `[gamma-proto] Design-system audit corrected ${issues.length} issue(s): ` +
+          issues.map((i) => `${i.field}: ${i.problem} → ${i.fix}`).join(' | '),
+      )
+      ds.colors = { ...ds.colors, ...corrected.colors } as DesignSystem['colors']
+      if (corrected.fonts) ds.fonts = { ...ds.fonts, ...corrected.fonts } as DesignSystem['fonts']
+    }
+  } catch (auditErr) {
+    console.warn('[gamma-proto] Design-system audit failed (using unaudited):', auditErr)
   }
 
   const slides: StructuredSlide[] = (pres.slides || [])

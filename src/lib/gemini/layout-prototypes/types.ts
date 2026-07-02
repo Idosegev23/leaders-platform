@@ -172,6 +172,8 @@ export interface StructuredSlide {
       source?: { status: 'verified' | 'unverified' | 'fake'; reasoning?: string; checkedAt?: string; foundUrl?: string }
       reference?: { status: 'verified' | 'unverified' | 'fake'; reasoning?: string; checkedAt?: string }
       image?: { status: 'ok' | 'broken' | 'mismatch'; reasoning?: string; checkedAt?: string }
+      /** Visual QA verdict from the slide critic (qa/slide-critic). */
+      layout?: { status: 'ok' | 'issues'; issues?: string[]; checkedAt?: string }
     }
   }
 }

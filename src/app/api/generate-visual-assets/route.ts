@@ -9,6 +9,10 @@ import { createClient } from '@/lib/supabase/server'
 import { compositeLogo } from '@/lib/utils/image-compositor'
 import { fetchScrape } from '@/lib/apify/fetch-scraper'
 import { validateExternalUrl } from '@/lib/utils/url-validator'
+import { resolveBrandLogo } from '@/lib/brand/logo-resolver'
+import { collectProductImages } from '@/lib/brand/product-images'
+import { generateBrandScene } from '@/lib/brand/scene-generator'
+import type { BrandAssets, BrandLogoAsset, SceneImageAsset } from '@/lib/brand/types'
 
 /**
  * POST /api/generate-visual-assets
@@ -22,6 +26,18 @@ import { validateExternalUrl } from '@/lib/utils/url-validator'
  *
  * Returns: { scraped, brandColors, generatedImages, imageStrategy }
  */
+
+/** Reject after `ms` so a slow brand-asset stage falls into its catch-and-continue
+ *  path instead of eating the route's maxDuration. The underlying promise keeps
+ *  running detached — acceptable, the route just stops waiting for it. */
+function withTimeout<T>(ms: number, label: string, promise: Promise<T>): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms),
+    ),
+  ])
+}
 
 async function uploadImageToStorage(
   buffer: Buffer,
@@ -64,6 +80,7 @@ export async function POST(request: NextRequest) {
       brandResearch,
       stepData,
       websiteUrl,
+      documentId,
     } = body
 
     if (!brandName) {
@@ -144,63 +161,43 @@ export async function POST(request: NextRequest) {
     // Extract scraped data (for images/logo only)
     if (scrapeResult.status === 'fulfilled' && scrapeResult.value) {
       scrapedData = scrapeResult.value
-      logoUrl = scrapedData.logoUrl || scrapedData.ogImage || scrapedData.favicon || null
     }
 
-    // Use Gemini's logo URL if scraping didn't find one
+    // ── Logo resolver v2 (art-director engine C1) ──
+    // Chain: scraped site logo → Brandfetch CDN → Logo.dev → og:image → favicon,
+    // every accepted candidate VLM-verified. Replaces the dead Clearbit chain
+    // (Clearbit Logo API DNS gone since Dec 2025). Missing env keys just skip
+    // that source; a resolver failure falls back to the pre-resolver behavior.
+    const geminiWebsiteDomain =
+      geminiResult.status === 'fulfilled' ? geminiResult.value?.websiteDomain : undefined
+    let brandLogo: BrandLogoAsset | null = null
+    try {
+      // Time-budgeted: the resolver's serial VLM chain must not eat the
+      // route's maxDuration (the legacy imagery passes below were sized to it).
+      brandLogo = await withTimeout(90_000, 'logo resolver', resolveBrandLogo({
+        brandName,
+        domain: siteUrl || geminiWebsiteDomain || undefined,
+        scraped: {
+          logoUrl: scrapedData?.logoUrl || geminiLogoUrl || undefined,
+          ogImage: scrapedData?.ogImage || undefined,
+          favicon: scrapedData?.favicon || undefined,
+        },
+      }))
+      if (brandLogo) {
+        logoUrl = brandLogo.url
+        console.log(`[Visual Assets][${requestId}] [LogoResolver] ${brandLogo.status} via ${brandLogo.source}: ${brandLogo.url}`)
+      } else {
+        console.log(`[Visual Assets][${requestId}] [LogoResolver] No logo candidates found`)
+      }
+    } catch (logoErr) {
+      console.warn(`[Visual Assets][${requestId}] [LogoResolver] Failed — falling back to legacy chain:`, logoErr instanceof Error ? logoErr.message : logoErr)
+      logoUrl = scrapedData?.logoUrl || scrapedData?.ogImage || scrapedData?.favicon || null
+    }
+
+    // Use Gemini's logo URL if the resolver came up empty
     if (!logoUrl && geminiLogoUrl) {
       logoUrl = geminiLogoUrl
       console.log(`[Visual Assets][${requestId}] Using Gemini logo URL: ${logoUrl}`)
-    }
-
-    // Clearbit Logo API — fast, free, reliable fallback
-    if (!logoUrl && siteUrl) {
-      try {
-        const domain = new URL(siteUrl.startsWith('http') ? siteUrl : `https://${siteUrl}`).hostname
-        const clearbitUrl = `https://logo.clearbit.com/${domain}`
-        console.log(`[Visual Assets][${requestId}] [Clearbit] Trying: ${clearbitUrl}`)
-        const clearbitRes = await fetch(clearbitUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
-        if (clearbitRes.ok && clearbitRes.headers.get('content-type')?.startsWith('image/')) {
-          logoUrl = clearbitUrl
-          console.log(`[Visual Assets][${requestId}] [Clearbit] Found logo via domain`)
-        }
-      } catch (clearbitErr) {
-        console.log(`[Visual Assets][${requestId}] [Clearbit] Domain attempt failed:`, clearbitErr)
-      }
-    }
-
-    // Clearbit with Gemini's websiteDomain (if Gemini returned one)
-    if (!logoUrl && geminiResult.status === 'fulfilled' && geminiResult.value) {
-      const websiteDomain = geminiResult.value.websiteDomain
-      if (websiteDomain) {
-        try {
-          const clearbitUrl = `https://logo.clearbit.com/${websiteDomain}`
-          console.log(`[Visual Assets][${requestId}] [Clearbit] Trying Gemini domain: ${clearbitUrl}`)
-          const res = await fetch(clearbitUrl, { method: 'HEAD', signal: AbortSignal.timeout(3000) })
-          if (res.ok && res.headers.get('content-type')?.startsWith('image/')) {
-            logoUrl = clearbitUrl
-            console.log(`[Visual Assets][${requestId}] [Clearbit] Found logo via Gemini domain`)
-          }
-        } catch { /* skip */ }
-      }
-    }
-
-    // Clearbit with brand name domain guess (last resort)
-    if (!logoUrl && brandName) {
-      const cleanBrand = brandName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
-      if (cleanBrand.length >= 2) {
-        for (const suffix of ['.com', '.co.il', '.co']) {
-          try {
-            const clearbitUrl = `https://logo.clearbit.com/${cleanBrand}${suffix}`
-            const res = await fetch(clearbitUrl, { method: 'HEAD', signal: AbortSignal.timeout(3000) })
-            if (res.ok && res.headers.get('content-type')?.startsWith('image/')) {
-              logoUrl = clearbitUrl
-              console.log(`[Visual Assets][${requestId}] [Clearbit] Found logo via brand guess: ${cleanBrand}${suffix}`)
-              break
-            }
-          } catch { /* try next */ }
-        }
-      }
     }
 
     // ── Gemini URL Context: if all logo lookups failed, scrape the website for the logo ──
@@ -271,6 +268,89 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
       console.warn(`[Visual Assets][${requestId}] ⚠️ Using DEFAULT colors (all extraction methods failed) — brand identity may be inaccurate`)
     }
 
+    // ─── Step 2.5: Brand assets — verified product photos + scene pre-pass (C2+C3) ───
+    // Failures here never block the route: assets are simply absent and the
+    // legacy imagery flow below behaves exactly as before.
+    const brandAssets: BrandAssets = { updatedAt: new Date().toISOString() }
+    if (brandLogo) brandAssets.logo = brandLogo
+
+    try {
+      const wizardReferenceImages = [
+        ...(stepData?.creative?.referenceImages || []),
+        ...(stepData?.deliverables?.referenceImages || []),
+      ]
+        .map((r: { url?: string } | string) => (typeof r === 'string' ? r : r?.url || ''))
+        .filter(Boolean)
+
+      const productImages = await withTimeout(120_000, 'product images', collectProductImages({
+        brandName,
+        productContext: brandResearch?.industry || undefined,
+        scraped: scrapedData
+          ? {
+              heroImages: scrapedData.heroImages || [],
+              ogImage: scrapedData.ogImage || undefined,
+              images: [
+                ...(scrapedData.productImages || []),
+                ...(scrapedData.lifestyleImages || []),
+              ],
+            }
+          : undefined,
+        wizardReferenceImages,
+      }))
+      if (productImages.length) brandAssets.productImages = productImages
+      console.log(`[Visual Assets][${requestId}] [ProductImages] ${productImages.filter(p => p.status === 'verified').length} verified / ${productImages.length} collected`)
+    } catch (productErr) {
+      console.warn(`[Visual Assets][${requestId}] [ProductImages] Failed (continuing without):`, productErr instanceof Error ? productErr.message : productErr)
+    }
+
+    // Scene pre-pass: up to 2 brand-faithful scenes (hero-cover + one content
+    // scene) seeded with VERIFIED product photos only. Hard ~120s cap.
+    try {
+      const verifiedProducts = (brandAssets.productImages || []).filter(p => p.status === 'verified')
+      if (verifiedProducts.length >= 1) {
+        const artDirection =
+          stepData?.creative?.visualDirection ||
+          brandColors.mood ||
+          'premium editorial lifestyle scene, cinematic lighting'
+        const productRefs = verifiedProducts.map(p => p.url)
+        const sceneDeadline = Date.now() + 120_000
+        const scenes: SceneImageAsset[] = []
+        for (const forSlideType of ['hero-cover', 'split-image-text']) {
+          const remaining = sceneDeadline - Date.now()
+          if (remaining <= 5_000) {
+            console.log(`[Visual Assets][${requestId}] [ScenePrePass] Budget exhausted — stopping at ${scenes.length} scenes`)
+            break
+          }
+          const scene = await Promise.race([
+            generateBrandScene({
+              brandName,
+              forSlideType,
+              artDirection,
+              designSystem: {
+                colors: {
+                  primary: brandColors.primary,
+                  secondary: brandColors.secondary,
+                  accent: brandColors.accent,
+                  background: brandColors.background,
+                  text: brandColors.text,
+                },
+              },
+              productRefs,
+              documentId: (documentId as string) || '',
+            }),
+            new Promise<SceneImageAsset | null>(resolve => setTimeout(() => resolve(null), remaining)),
+          ])
+          if (scene) scenes.push(scene)
+        }
+        if (scenes.length) brandAssets.sceneImages = scenes
+        console.log(`[Visual Assets][${requestId}] [ScenePrePass] ${scenes.length} scenes (${scenes.filter(s => s.status === 'verified').length} verified)`)
+      } else {
+        console.log(`[Visual Assets][${requestId}] [ScenePrePass] Skipped: no verified product images`)
+      }
+    } catch (sceneErr) {
+      console.warn(`[Visual Assets][${requestId}] [ScenePrePass] Failed (continuing without):`, sceneErr instanceof Error ? sceneErr.message : sceneErr)
+    }
+
     // ─── Step 3: Generate AI images ───
     console.log(`[Visual Assets][${requestId}] Step 3: Generating AI images`)
 
@@ -333,12 +413,8 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
       // ─── Fetch client logo buffer for compositing onto generated images ───
       let clientLogoBuffer: Buffer | null = null
       if (logoUrl) {
-        // Try direct URL first, then Clearbit fallback on DNS/network failure
+        // Clearbit fallback removed — the Logo API is dead (DNS gone Dec 2025).
         const logoFetchUrls = [logoUrl]
-        try {
-          const domain = new URL(logoUrl.startsWith('http') ? logoUrl : `https://${logoUrl}`).hostname
-          logoFetchUrls.push(`https://logo.clearbit.com/${domain}`)
-        } catch { /* can't parse URL, skip Clearbit */ }
 
         for (const fetchUrl of logoFetchUrls) {
           try {
@@ -524,10 +600,17 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`[Visual Assets][${requestId}] Complete in ${elapsed}s`)
 
+    const hasBrandAssets = !!(
+      brandAssets.logo ||
+      brandAssets.productImages?.length ||
+      brandAssets.sceneImages?.length
+    )
+
     return NextResponse.json({
       success: true,
       scraped: scrapedData ? {
-        logoUrl: scrapedData.logoUrl || logoUrl || null,
+        // Legacy field — kept for backward compat; now the VERIFIED logo url.
+        logoUrl: logoUrl || scrapedData.logoUrl || null,
         logoAlternatives: scrapedData.logoAlternatives || [],
         heroImages: scrapedData.heroImages || [],
         productImages: scrapedData.productImages || [],
@@ -539,6 +622,7 @@ Return ONLY the absolute URL of the best quality logo image. No explanation, jus
         productImages: [],
         lifestyleImages: [],
       } : null,
+      brandAssets: hasBrandAssets ? brandAssets : null,
       brandColors,
       generatedImages: imageUrls,
       extraImages: extraImageUrls,

@@ -117,6 +117,7 @@ export async function POST(request: NextRequest) {
               brandName: documentData.brandName || '',
               brandResearch: documentData._brandResearch,
               stepData: documentData._stepData,
+              documentId,
             }),
           })
           if (visualRes.ok) {
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
               _pipelineStatus: { ...documentData._pipelineStatus as Record<string, string>, visualAssets: 'complete' },
             }
             if (visualAssets.scraped) patch._scraped = visualAssets.scraped
+            if (visualAssets.brandAssets) patch._brandAssets = visualAssets.brandAssets
             if (visualAssets.brandColors?.primary) patch._brandColors = visualAssets.brandColors
             if (visualAssets.generatedImages) patch._generatedImages = visualAssets.generatedImages
             if (visualAssets.extraImages?.length) patch._extraImages = visualAssets.extraImages
