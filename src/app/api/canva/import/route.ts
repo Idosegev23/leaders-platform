@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   //    editable text/image/shape elements in Canva). Anything else falls back
   //    to the legacy screenshot-PDF path (flat, but never blocks the import).
   const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-  let artifact: { buffer: Buffer; contentType: string; ext: 'pdf' | 'pptx'; mode: 'native-pptx' | 'screenshot-pdf' }
+  let artifact: { buffer: Buffer; contentType: string; ext: 'pdf' | 'pptx'; mode: 'measured-pptx' | 'native-pptx' | 'screenshot-pdf' }
   let pptxWarnings: string[] = []
   try {
     const htmlPres = documentData._htmlPresentation as { htmlSlides?: string[]; title?: string } | undefined
@@ -85,23 +85,42 @@ export async function POST(request: Request) {
       (documentData._structuredPresentation as StructuredPresentation | undefined)
 
     if (structured?.slides?.length) {
+      // Render the EXACT editor HTML for each slide, then choose the export:
+      //  1. MEASURED PPTX (primary) — measure every element's real box in
+      //     headless Chrome and emit native elements at those coordinates, so
+      //     Canva shows what the user saw (max fidelity for the server-side
+      //     Connect API; element-level positioning APIs are editor-app-only).
+      //  2. SEMANTIC native PPTX — if measurement fails.
+      //  3. SCREENSHOT PDF — last resort (flat, never blocks the import).
+      const structuredHtml = structured.slides.map((s) =>
+        renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
+      )
       try {
-        const { buffer, warnings } = await structuredPresentationToPptxDetailed(structured)
+        const { measureSlides } = await import('@/lib/export/measure-slide')
+        const { measuredSlidesToPptx } = await import('@/lib/export/measured-pptx')
+        const measured = await measureSlides(structuredHtml)
+        const nonEmpty = measured.filter((m) => m.elements.length > 0).length
+        if (nonEmpty < Math.ceil(measured.length / 2)) {
+          throw new Error(`measurement too sparse (${nonEmpty}/${measured.length} slides had elements)`)
+        }
+        const { buffer, warnings } = await measuredSlidesToPptx(measured)
         pptxWarnings = warnings
-        artifact = { buffer, contentType: PPTX_MIME, ext: 'pptx', mode: 'native-pptx' }
-      } catch (pptxErr) {
-        // Native export failed — degrade to the screenshot PDF so the user
-        // still gets a Canva design (flat), and surface the reason in logs.
-        console.error('[canva-import] native PPTX failed, falling back to screenshot PDF:', pptxErr)
-        const structuredHtml = structured.slides.map((s) =>
-          renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
-        )
-        const pdfBuffer = await generateScreenshotPdf(structuredHtml, {
-          format: '16:9',
-          title: structured.brandName || brandName,
-          brandName: structured.brandName || brandName,
-        })
-        artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
+        artifact = { buffer, contentType: PPTX_MIME, ext: 'pptx', mode: 'measured-pptx' }
+      } catch (measErr) {
+        console.error('[canva-import] measured PPTX failed, trying semantic native PPTX:', measErr)
+        try {
+          const { buffer, warnings } = await structuredPresentationToPptxDetailed(structured)
+          pptxWarnings = warnings
+          artifact = { buffer, contentType: PPTX_MIME, ext: 'pptx', mode: 'native-pptx' }
+        } catch (pptxErr) {
+          console.error('[canva-import] native PPTX failed, falling back to screenshot PDF:', pptxErr)
+          const pdfBuffer = await generateScreenshotPdf(structuredHtml, {
+            format: '16:9',
+            title: structured.brandName || brandName,
+            brandName: structured.brandName || brandName,
+          })
+          artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
+        }
       }
     } else if (htmlPres?.htmlSlides?.length) {
       const pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {

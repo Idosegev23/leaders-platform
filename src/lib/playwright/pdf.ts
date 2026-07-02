@@ -13,7 +13,7 @@ export interface PdfOptions {
  * --force-color-profile=srgb prevents Chrome's print engine from converting
  * colors to a different profile (the #1 cause of washed-out colors in PDF).
  */
-async function getBrowser() {
+export async function getBrowser() {
   const isServerless = process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL
 
   const extraArgs = [
