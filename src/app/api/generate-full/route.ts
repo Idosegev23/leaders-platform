@@ -151,6 +151,11 @@ export async function POST(request: NextRequest) {
     const savedData: Record<string, unknown> = {
       ...cleanData,
       _htmlPresentation: htmlPresentation,
+      // Content args per slide — lets /edit derive its structured deck 1:1
+      // from THIS deck (same order/copy) instead of regenerating from the brief.
+      _agentSlides: result.slides.map(s => ({ slideType: s.slideType, title: s.title, content: s.content })),
+      // A fresh generation invalidates any previously-derived structured deck.
+      _structuredPresentation: null,
       _agentResult: {
         totalToolCalls: result.totalToolCalls,
         durationMs: result.durationMs,
