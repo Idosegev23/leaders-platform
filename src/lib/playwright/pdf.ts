@@ -255,17 +255,22 @@ export async function generateScreenshotPdf(
         isFirst: i === 0,
       })
 
-      // Take screenshot of the slide (captures ALL CSS effects perfectly)
+      // Take screenshot of the slide (captures ALL CSS effects perfectly).
+      // JPEG, not PNG: at deviceScaleFactor 2 each PNG slide is 3-10MB and a
+      // 15-slide deck blows past Supabase Storage's max object size ("The
+      // object exceeded the maximum allowed size"). JPEG q88 is visually
+      // equivalent for photographic decks at ~1/10 the bytes.
       const screenshotBuffer = await page.screenshot({
-        type: 'png',
+        type: 'jpeg',
+        quality: 88,
         clip: { x: 0, y: 0, width: 1920, height: 1080 },
       })
       await page.close()
 
       // Embed screenshot as a full-page image in PDF
-      const pngImage = await mergedPdf.embedPng(screenshotBuffer)
+      const jpgImage = await mergedPdf.embedJpg(screenshotBuffer)
       const pdfPage = mergedPdf.addPage([1920, 1080])
-      pdfPage.drawImage(pngImage, {
+      pdfPage.drawImage(jpgImage, {
         x: 0, y: 0, width: 1920, height: 1080,
       })
     }

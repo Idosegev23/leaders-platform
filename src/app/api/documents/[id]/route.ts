@@ -49,11 +49,8 @@ export async function GET(
     console.log(`[${requestId}]   Status: ${document.status}`)
     console.log(`[${requestId}]   Owner: ${document.user_id}`)
 
-    // Verify ownership (skip in dev mode)
-    if (!isDevMode && document.user_id !== userId) {
-      console.log(`[${requestId}] ❌ Forbidden - owner ${document.user_id} != user ${userId}`)
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    // Documents are platform-shared: any authenticated Leaders user may view
+    // any deck (ownership gating removed by request — auth is still required).
 
     // Attach the linked influencer brief (if this deck has been approved).
     let influencerBrief: { id: string; title: string; pdfUrl: string; createdAt: string } | null = null
@@ -123,11 +120,8 @@ export async function PATCH(
     }
     console.log(`[${requestId}] 📄 Found document in ${Date.now() - getStart}ms: "${document.title}"`)
 
-    // Verify ownership (skip in dev mode)
-    if (!isDevMode && document.user_id !== userId) {
-      console.log(`[${requestId}] ❌ Forbidden - owner ${document.user_id} != user ${userId}`)
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    // Documents are platform-shared: any authenticated Leaders user may edit
+    // any deck (ownership gating removed by request; DELETE stays owner-only).
 
     // Get updates from request body
     const updates = await request.json()

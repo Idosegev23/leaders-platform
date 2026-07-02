@@ -487,6 +487,16 @@ export default function GammaProtoPage() {
     if (!pres || canvaBusy) return
     setCanvaBusy(true)
     setErr(null)
+    // Open the tab NOW, inside the click gesture — the export takes ~30-60s
+    // and a window.open after the await gets eaten by popup blockers. We
+    // navigate this pre-opened tab to the Canva design when the import lands.
+    const canvaTab = window.open('', '_blank')
+    if (canvaTab) {
+      canvaTab.document.write(
+        '<html dir="rtl"><body style="font-family:sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">' +
+        '<div style="text-align:center"><div style="font-size:40px">🎨</div><h2>מייצא ל-Canva…</h2><p>זה לוקח עד דקה — הטאב יעבור לקאנבה אוטומטית בסיום.</p></div></body></html>',
+      )
+    }
     try {
       const res = await fetch('/api/canva/import', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -494,12 +504,11 @@ export default function GammaProtoPage() {
       })
       const json = await res.json()
       if (!res.ok || !json?.edit_url) throw new Error(json?.error || 'ייבוא ל-Canva נכשל')
-      // Keep the link in state — the export takes ~30-60s, so this window.open
-      // is long past the click gesture and popup blockers usually eat it. The
-      // persistent "פתח ב-Canva" link in the toolbar is the reliable path.
       setCanvaUrl(json.edit_url as string)
-      window.open(json.edit_url as string, '_blank', 'noopener')
+      if (canvaTab && !canvaTab.closed) canvaTab.location.href = json.edit_url as string
+      else window.open(json.edit_url as string, '_blank', 'noopener')
     } catch (e) {
+      if (canvaTab && !canvaTab.closed) canvaTab.close()
       setErr(e instanceof Error ? e.message : 'שגיאה בייצוא ל-Canva')
     } finally {
       setCanvaBusy(false)
