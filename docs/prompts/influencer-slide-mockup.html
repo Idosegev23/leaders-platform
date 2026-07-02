@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leaders · שקף משפיענים — הדגמת רף איכות</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;800;900&family=Frank+Ruhl+Libre:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --panel2:#161b25;
+    --ink:#f4f1ea; --muted:#98a0ad; --line:rgba(255,255,255,.08);
+    --gold:#e3c07f; --gold-2:#c9a35b; --teal:#4ec9b8;
+    --hi:#43c07f; --mid:#e0a53c;
+    --shadow:0 20px 60px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:radial-gradient(1200px 700px at 80% -10%,#1a2130 0%,var(--bg) 55%);
+    font-family:'Heebo',system-ui,sans-serif;color:var(--ink);
+    padding:40px 20px;min-height:100vh}
+  .wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+  .tagline{display:flex;align-items:center;gap:12px;justify-content:center;
+    color:var(--muted);font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
+  .tagline .dot{width:6px;height:6px;border-radius:50%;background:var(--gold)}
+
+  /* SLIDE FRAME */
+  .slide{position:relative;aspect-ratio:16/9;background:
+      linear-gradient(160deg,var(--panel2) 0%,#0e1118 70%);
+    border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);
+    padding:54px 60px;overflow:hidden}
+  .slide::before{content:"";position:absolute;inset:0;
+    background:radial-gradient(600px 300px at 90% 0%,rgba(227,192,127,.10),transparent 60%);
+    pointer-events:none}
+  .eyebrow{color:var(--gold);font-size:14px;font-weight:700;letter-spacing:.22em;
+    text-transform:uppercase;display:flex;align-items:center;gap:12px}
+  .eyebrow::after{content:"";height:1px;width:60px;background:linear-gradient(90deg,var(--gold),transparent)}
+  .brandmark{position:absolute;top:40px;left:60px;font-size:13px;letter-spacing:.3em;
+    color:var(--muted);font-weight:700}
+  .demo-ribbon{position:absolute;bottom:22px;left:60px;font-size:11px;color:var(--muted);
+    letter-spacing:.04em}
+
+  /* SLIDE A */
+  h1.title{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:52px;
+    line-height:1.05;margin:14px 0 6px}
+  h1.title .accent{color:var(--gold)}
+  .sub{color:var(--muted);font-size:18px;max-width:520px;line-height:1.5}
+  .heroStats{display:flex;gap:40px;margin:26px 0 30px}
+  .heroStats .s .n{font-size:40px;font-weight:900;letter-spacing:-.02em;
+    font-variant-numeric:tabular-nums}
+  .heroStats .s .n small{font-size:22px;color:var(--gold);font-weight:800}
+  .heroStats .s .l{color:var(--muted);font-size:13px;margin-top:2px;letter-spacing:.03em}
+  .heroStats .sep{width:1px;background:var(--line)}
+
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .card{background:linear-gradient(180deg,var(--panel) 0%,#10141c 100%);
+    border:1px solid var(--line);border-radius:14px;padding:20px 18px;position:relative}
+  .card .head{display:flex;align-items:center;gap:13px;margin-bottom:16px}
+  .avatar{width:56px;height:56px;border-radius:50%;flex:none;position:relative;
+    display:grid;place-items:center;font-weight:800;font-size:19px;color:#0b0d12;
+    box-shadow:0 0 0 2px rgba(227,192,127,.35),0 6px 16px rgba(0,0,0,.4)}
+  .a1{background:linear-gradient(135deg,#e3c07f,#b98a45)}
+  .a2{background:linear-gradient(135deg,#4ec9b8,#2f8f86)}
+  .a3{background:linear-gradient(135deg,#c9a0e8,#8659b0)}
+  .card .who{min-width:0}
+  .card .who .nm{font-weight:800;font-size:16px}
+  .card .who .hd{color:var(--muted);font-size:12.5px;letter-spacing:.02em}
+  .fit{position:absolute;top:16px;left:16px;font-size:10.5px;font-weight:800;
+    padding:4px 9px;border-radius:20px;letter-spacing:.06em}
+  .fit.high{color:#0b1a11;background:var(--hi)}
+  .fit.mid{color:#1c1405;background:var(--mid)}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+  .metrics .m{background:rgba(255,255,255,.03);border:1px solid var(--line);
+    border-radius:9px;padding:9px 8px;text-align:center}
+  .metrics .m .mv{font-weight:800;font-size:17px;font-variant-numeric:tabular-nums}
+  .metrics .m .ml{color:var(--muted);font-size:10.5px;margin-top:2px}
+  .barwrap{margin-bottom:12px}
+  .barwrap .cap{display:flex;justify-content:space-between;color:var(--muted);
+    font-size:11px;margin-bottom:5px}
+  .bar{height:7px;border-radius:6px;background:#2a2f3a;overflow:hidden;display:flex}
+  .bar i{display:block;height:100%}
+  .bar .il{background:linear-gradient(90deg,var(--gold),var(--gold-2))}
+  .bar .other{background:#39414f}
+  .foot{display:flex;justify-content:space-between;align-items:center;
+    border-top:1px solid var(--line);padding-top:11px;font-size:12.5px}
+  .foot .fmt{color:var(--teal);font-weight:700}
+  .foot .price{font-weight:800;font-variant-numeric:tabular-nums}
+  .foot .price small{color:var(--muted);font-weight:500;font-size:11px}
+
+  /* SLIDE B — TABLE */
+  .tableHead{display:flex;justify-content:space-between;align-items:flex-end;margin:12px 0 20px}
+  h2.thd{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:38px;line-height:1.1}
+  .thd .accent{color:var(--gold)}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  thead th{color:var(--muted);font-size:13px;font-weight:700;letter-spacing:.03em;
+    text-align:right;padding:0 14px 12px;border-bottom:1px solid var(--line)}
+  thead th.num{text-align:center}
+  tbody td{padding:14px;font-size:15.5px;border-bottom:1px solid rgba(255,255,255,.05);
+    text-align:center}
+  tbody td.name{text-align:right;font-weight:700}
+  tbody td.name .h{display:block;color:var(--muted);font-size:12px;font-weight:500}
+  tbody tr:hover{background:rgba(255,255,255,.02)}
+  .win{position:relative;color:var(--gold);font-weight:900}
+  .win::after{content:"▲";font-size:8px;position:relative;top:-6px;right:2px;opacity:.8}
+  .pill{font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px}
+  .pill.high{color:#0b1a11;background:var(--hi)}
+  .pill.mid{color:#1c1405;background:var(--mid)}
+  tfoot td{padding:15px 14px;font-weight:800;font-size:15.5px;text-align:center;
+    border-top:2px solid var(--gold)}
+  tfoot td.name{text-align:right;color:var(--gold)}
+  .src{display:flex;justify-content:space-between;margin-top:16px;color:var(--muted);font-size:12px}
+  .src code{color:#c7cdd8;background:rgba(255,255,255,.05);padding:2px 8px;border-radius:6px;
+    font-family:ui-monospace,monospace;direction:ltr;display:inline-block}
+  @media(max-width:760px){
+    .slide{padding:30px 24px}.heroStats{gap:20px}h1.title{font-size:34px}
+    .cards{grid-template-columns:1fr}.metrics .m .mv{font-size:15px}
+    thead th,tbody td{padding:9px 6px;font-size:12.5px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="tagline"><span class="dot"></span> הדגמת רף איכות · שקף משפיענים מבוסס-נתונים <span class="dot"></span></div>
+
+  <!-- ============ SLIDE A ============ -->
+  <section class="slide">
+    <div class="brandmark">LEADERS</div>
+    <div class="eyebrow">הקאסט · מי נושא את הקמפיין</div>
+    <h1 class="title">ארבעה קולות. <span class="accent">קהל אחד</span> שמקשיב.</h1>
+    <p class="sub">כל יוצר נבחר לפי חפיפת קהל אמיתית — לא לפי מספר עוקבים. הנתונים נמשכים ישירות מ-IMAI.</p>
+
+    <div class="heroStats">
+      <div class="s"><div class="n">1.15<small>M</small></div><div class="l">reach מצטבר צפוי</div></div>
+      <div class="sep"></div>
+      <div class="s"><div class="n">78<small>%</small></div><div class="l">קהל ישראלי ממוצע</div></div>
+      <div class="sep"></div>
+      <div class="s"><div class="n">7.5<small>%</small></div><div class="l">engagement ממוצע</div></div>
+      <div class="sep"></div>
+      <div class="s"><div class="n">₪37<small>K</small></div><div class="l">תקציב יוצרים</div></div>
+    </div>
+
+    <div class="cards">
+      <!-- card 1 -->
+      <div class="card">
+        <span class="fit high">BRAND FIT · HIGH</span>
+        <div class="head">
+          <div class="avatar a1">מל</div>
+          <div class="who"><div class="nm">מאיה לוי</div><div class="hd">@maya.lev · Instagram</div></div>
+        </div>
+        <div class="metrics">
+          <div class="m"><div class="mv">482K</div><div class="ml">עוקבים</div></div>
+          <div class="m"><div class="mv">6.8%</div><div class="ml">engagement</div></div>
+          <div class="m"><div class="mv">210K</div><div class="ml">צפיות ממוצע</div></div>
+        </div>
+        <div class="barwrap">
+          <div class="cap"><span>קהל ישראלי</span><span>82%</span></div>
+          <div class="bar"><i class="il" style="width:82%"></i><i class="other" style="width:18%"></i></div>
+        </div>
+        <div class="foot"><span class="fmt">▸ Reels</span><span class="price">₪9,500 <small>/ תוצר</small></span></div>
+      </div>
+      <!-- card 2 -->
+      <div class="card">
+        <span class="fit high">BRAND FIT · HIGH</span>
+        <div class="head">
+          <div class="avatar a2">דב</div>
+          <div class="who"><div class="nm">דניאל בר</div><div class="hd">@daniel.bar · TikTok</div></div>
+        </div>
+        <div class="metrics">
+          <div class="m"><div class="mv">265K</div><div class="ml">עוקבים</div></div>
+          <div class="m"><div class="mv">8.1%</div><div class="ml">engagement</div></div>
+          <div class="m"><div class="mv">140K</div><div class="ml">צפיות ממוצע</div></div>
+        </div>
+        <div class="barwrap">
+          <div class="cap"><span>קהל ישראלי</span><span>74%</span></div>
+          <div class="bar"><i class="il" style="width:74%"></i><i class="other" style="width:26%"></i></div>
+        </div>
+        <div class="foot"><span class="fmt">▸ TikTok</span><span class="price">₪6,200 <small>/ תוצר</small></span></div>
+      </div>
+      <!-- card 3 -->
+      <div class="card">
+        <span class="fit mid">BRAND FIT · MEDIUM</span>
+        <div class="head">
+          <div class="avatar a3">שכ</div>
+          <div class="who"><div class="nm">שירה כהן</div><div class="hd">@shira.k · Instagram</div></div>
+        </div>
+        <div class="metrics">
+          <div class="m"><div class="mv">1.1M</div><div class="ml">עוקבים</div></div>
+          <div class="m"><div class="mv">3.9%</div><div class="ml">engagement</div></div>
+          <div class="m"><div class="mv">390K</div><div class="ml">צפיות ממוצע</div></div>
+        </div>
+        <div class="barwrap">
+          <div class="cap"><span>קהל ישראלי</span><span>69%</span></div>
+          <div class="bar"><i class="il" style="width:69%"></i><i class="other" style="width:31%"></i></div>
+        </div>
+        <div class="foot"><span class="fmt">▸ Stories</span><span class="price">₪18,000 <small>/ תוצר</small></span></div>
+      </div>
+    </div>
+    <div class="demo-ribbon">נתוני דמו להמחשה · בפרודקשן כל שדה (כולל התמונה) נמשך מ-IMAI API</div>
+  </section>
+
+  <!-- ============ SLIDE B — TABLE ============ -->
+  <section class="slide">
+    <div class="brandmark">LEADERS</div>
+    <div class="eyebrow">השוואת יוצרים · המספרים המלאים</div>
+    <div class="tableHead">
+      <h2 class="thd">כל <span class="accent">יוצר</span> מול הנתון שלו</h2>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>יוצר</th>
+          <th class="num">עוקבים</th>
+          <th class="num">ER</th>
+          <th class="num">reach צפוי</th>
+          <th class="num">קהל ישראלי</th>
+          <th class="num">מחיר / תוצר</th>
+          <th class="num">BRAND FIT</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="name">מאיה לוי <span class="h">@maya.lev</span></td>
+          <td>482K</td><td>6.8%</td><td>328K</td><td>82%</td><td>₪9,500</td>
+          <td><span class="pill high">HIGH</span></td>
+        </tr>
+        <tr>
+          <td class="name">דניאל בר <span class="h">@daniel.bar</span></td>
+          <td>265K</td><td>8.1%</td><td>205K</td><td>74%</td><td>₪6,200</td>
+          <td><span class="pill high">HIGH</span></td>
+        </tr>
+        <tr>
+          <td class="name">שירה כהן <span class="h">@shira.k</span></td>
+          <td class="win">1.1M</td><td>3.9%</td><td class="win">540K</td><td>69%</td><td>₪18,000</td>
+          <td><span class="pill mid">MEDIUM</span></td>
+        </tr>
+        <tr>
+          <td class="name">עידן פרץ <span class="h">@idan.p</span></td>
+          <td>92K</td><td class="win">11.2%</td><td>78K</td><td class="win">88%</td><td class="win">₪3,400</td>
+          <td><span class="pill high">HIGH</span></td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="name">סה״כ · ממוצע</td>
+          <td>1.94M</td><td>7.5%</td><td>1.15M</td><td>78%</td><td>₪37,100</td>
+          <td>—</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="src">
+      <span>מקור: IMAI · יוני 2026 · ▲ = המוביל בעמודה</span>
+      <span>חישוב reach: <code>Σ(followers × ER × viewFactor)</code> · CPE: <code>budget ÷ engagements</code></span>
+    </div>
+    <div class="demo-ribbon">נתוני דמו להמחשה · כל תא מגיע מ-API או מחישוב code_execution — אפס מספרים מומצאים</div>
+  </section>
+
+</div>
+</body>
+</html>
