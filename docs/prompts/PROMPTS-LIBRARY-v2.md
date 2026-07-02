@@ -861,3 +861,28 @@ real (not invented)? Is RTL correct and nothing clipped? If any answer is no —
 ---
 
 ★ = נוסף/שודרג במנוע ה-Art-Director (spec: `docs/superpowers/specs/2026-07-02-art-director-engine-design.md`).
+
+---
+
+## 🛡️ שכבת האמת והשלמות — Hardening v3 (2026-07-02)
+
+מקור: ביקורת ארט-דיירקטור על דק אמיתי (סולתם) שנוצר בפייפליין. כל כשל שזוהה הפך לשומר קשיח רב-שכבתי (גנרציה + QA). רוב השינויים **קשיחים-בקוד** — נכנסים לתוקף ב-deploy.
+
+### presentation-agent (System Prompt) — שני בלוקים חדשים
+- `<visual_truth>` — לוגו אמיתי בלבד (אסור מוצר-גיבור עם לוגו מומצא), התאמת קטגוריה, אפס placeholder (@@/TBD/handle חלקי), אין מיחזור/כמעט-כפילות תמונות.
+- `<proposal_integrity>` — תקציב מופיע, מטרה↔KPI+מנגנון מדידה, קהל צר (לא "כולם 25–65"), עקביות מספרים בין שקפים (7=7), רצף ממוספר שלם, מקור לכל סטטיסטיקה חיצונית, הוכחת קריאייטיב, אפס שקף ריק, תווית=תוכן.
+- `<self_check>` הורחב ל-13 בדיקות; תיאורי הכלים ופרומפט ה-Repair חוזקו (ערכים אמיתיים / אין לוגו מומצא / תווית תואמת).
+- **באג תוקן:** פרומפט המשתמש אמר "11 שקפים" (בסתירה ל-14–22 הדינמי) → הוחלף לאורך נגזר-סיפור.
+
+### art-director-rules.ts — חוקים קשיחים 26–31
+איזון קומפוזיציה (אין חלל-מת/שורה יתומה) · תווית=סקשן ואין שקף ריק · אמת-מוצר (לוגו/קטגוריה) · אין תמונה כמעט-כפולה · אפס placeholder · מספר-במילים = מוצג.
+
+### שערי QA — בדיקות אמת חדשות
+- `slide-critic.ts` (מסלול `generate-full`): נוספו `imageTruthful` + `noPlaceholder` + `labelMatches` → 9 בדיקות בינאריות, כולל exemplar כשל-אמת ומדיניות issue-only לבדיקות תוכן.
+- `vision-inspector.ts` (מסלול `slide-designer`): אותן 3 בדיקות בסכימה, באינטרפייס, בפרומפט ובכל 3 ברירות-המחדל + היוריסטיקת placeholder ב-HTML-only fallback.
+- `proposal-agent.ts` fallback (`<non_negotiables>`): הורחב — תקציב, מטרה↔מדד, קהל צר, מקור לסטטיסטיקה, אפס placeholder. ⚠️ אם קיימת גרסת DB ל-`proposal_agent.system_prompt` ב-`admin_config`/`ai_prompts` — היא מסתירה את ה-fallback; יש לעדכן גם אותה.
+
+### מיפוי כשל → שומר
+מחבת עם לוגו זר → visual_truth / AD-28 · קדרות חרס למותג מתכת → visual_truth / AD-28 · `oztelem@@` → visual_truth / AD-30 / QA-noPlaceholder · 7↔4 משפיענים → proposal_integrity / AD-31 · שקף סיכונים ריק + "INSIGHT" → proposal_integrity / AD-27 / QA-labelMatches · דילוג שבוע 2 → proposal_integrity / AD-31 · "78% — Nielsen" → proposal_integrity · אין תקציב → proposal_integrity · קהל 25–65 → proposal_integrity · רקעים ממוחזרים → visual_truth / AD-29 · Big Idea מופשט → proposal_integrity.
+
+> ✅ אומת: `tsc --noEmit` עובר עם 0 שגיאות בכל הפרויקט. הבריף המלא ל-Claude Code (כולל צעדי המשך ורגרסיה): `docs/prompts/PRESENTATION-HARDENING-BRIEF.md`.

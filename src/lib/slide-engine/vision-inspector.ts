@@ -22,7 +22,7 @@ const VISION_INSPECTOR_SCHEMA = {
     score: { type: 'integer', minimum: 0, maximum: 100 },
     checks: {
       type: 'object',
-      required: ['textOverflow', 'titleClipped', 'imageUsed', 'contrastOk', 'layoutBalanced', 'hebrewPresent', 'rtlCorrect', 'noBlankSlide'],
+      required: ['textOverflow', 'titleClipped', 'imageUsed', 'contrastOk', 'layoutBalanced', 'hebrewPresent', 'rtlCorrect', 'noBlankSlide', 'imageTruthful', 'noPlaceholder', 'labelMatches'],
       properties: {
         textOverflow:    { type: 'boolean' },
         titleClipped:    { type: 'boolean' },
@@ -32,6 +32,9 @@ const VISION_INSPECTOR_SCHEMA = {
         hebrewPresent:   { type: 'boolean' },
         rtlCorrect:      { type: 'boolean' },
         noBlankSlide:    { type: 'boolean' },
+        imageTruthful:   { type: 'boolean' },
+        noPlaceholder:   { type: 'boolean' },
+        labelMatches:    { type: 'boolean' },
       },
     },
     issues: { type: 'array', items: { type: 'string' } },
@@ -53,6 +56,9 @@ export interface SlideDefectReport {
     hebrewPresent: boolean      // Actually has Hebrew text
     rtlCorrect: boolean         // Text aligned right
     noBlankSlide: boolean       // Slide has visible content
+    imageTruthful: boolean      // Real brand product — no fabricated/foreign logo, right category
+    noPlaceholder: boolean      // No @@/TBD/lorem/bare-@/[...] placeholder tokens
+    labelMatches: boolean       // Eyebrow/section label + watermark match the slide's content
   }
   issues: string[]              // Human-readable issue descriptions
   revisionHint?: string         // Specific fix instruction for re-generation
@@ -134,6 +140,11 @@ ${hasImage ? 'An image URL was provided to the slide generator — check whether
 You are a STRICT presentation QA inspector. Find every visual problem.
 Return ONLY a JSON defect report — no markdown, no commentary.
 
+Truth & integrity checks (true = good):
+- imageTruthful: any product shown is the real brand product — NOT a generated product with a fabricated or foreign logo/emblem, and NOT imagery from a different product category. true if no product is shown.
+- noPlaceholder: no visible placeholder/unfilled token — no "@@", "TBD", "lorem", a bare "@" with no handle, or "[...]". Every handle, name and number looks real.
+- labelMatches: the eyebrow/section label and any watermark word match THIS slide's own content (a risk slide must not read "INSIGHT"), and the slide is not blank.
+
 Issues should be in Hebrew. revisionHint should be a concrete fix instruction (in English, for the next AI to apply).`
 
   let responseText = ''
@@ -204,6 +215,7 @@ function defaultChecks(): SlideDefectReport['checks'] {
     textOverflow: false, titleClipped: false, imageUsed: true,
     contrastOk: true, layoutBalanced: true, hebrewPresent: true,
     rtlCorrect: true, noBlankSlide: true,
+    imageTruthful: true, noPlaceholder: true, labelMatches: true,
   }
 }
 
@@ -231,6 +243,9 @@ function analyzeHtmlOnly(
   const hasOverflowProtection = /overflow:\s*hidden|line-clamp/i.test(html)
   if (!hasOverflowProtection) issues.push('חסרת הגנת overflow על טקסט')
 
+  const noPlaceholder = !/@@|\bTBD\b|lorem|\[\s*\.\.\.\s*\]/i.test(html)
+  if (!noPlaceholder) issues.push('יש placeholder בטקסט (@@ / TBD / lorem)')
+
   return {
     slideIndex,
     slideType,
@@ -245,6 +260,9 @@ function analyzeHtmlOnly(
       hebrewPresent,
       rtlCorrect,
       noBlankSlide: hasContent,
+      imageTruthful: true, // Can't detect without rendering
+      noPlaceholder,
+      labelMatches: true, // Can't detect without rendering
     },
     issues,
     revisionHint: issues.length > 0 ? issues.join('. ') + '. תקן את הבעיות הנ"ל.' : undefined,
@@ -260,6 +278,7 @@ function makeDefaultReport(slideIndex: number, slideType: string, score: number)
       textOverflow: false, titleClipped: false, imageUsed: true,
       contrastOk: true, layoutBalanced: true, hebrewPresent: true,
       rtlCorrect: true, noBlankSlide: true,
+      imageTruthful: true, noPlaceholder: true, labelMatches: true,
     },
     issues: [],
   }

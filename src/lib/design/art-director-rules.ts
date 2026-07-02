@@ -71,7 +71,19 @@ NARRATIVE RHYTHM (~15 slides)
 BANNED CLICHES
 23. No bullet walls: max 4 bullets per slide, <=12 words each — more content means split the slide or promote to pillars.
 24. No centered-everything decks: at most 1/3 of slides centered; default composition is asymmetric with RTL reading gravity (heavy side right).
-25. Max one stats-grid layout in a row; every content slide carries an uppercase, letterspaced (>=4px) eyebrow label.`
+25. Max one stats-grid layout in a row; every content slide carries an uppercase, letterspaced (>=4px) eyebrow label.
+
+COMPOSITION INTEGRITY
+26. Card/stat rows are vertically balanced on the canvas — never stranded at the top with a dead lower half. Whitespace is a deliberate zone (rule 12), not leftover void: a row of 3 cards leaving >40% empty below must be centered or enlarged, and an uneven last row (3 on top, 1 orphaned below) must be re-balanced.
+27. Every slide's eyebrow label and any watermark word must name THIS slide's own section — never a label copied from another beat. A "Risk Management" slide reading "INSIGHT" is a defect; an empty content slide is a defect.
+
+IMAGE TRUTH
+28. A product shown as hero = the client's real product from verified brand imagery only. Never a generated product carrying a fabricated logo, and never imagery from a different product category (clay pots for a steel-cookware brand is a defect). No verified product image → use a logo-free atmospheric background, not an invented product.
+29. No repeated or near-duplicate background across slides; vary imagery deck-wide. The closing may echo the cover's treatment but must not reuse the same file.
+
+CONTENT INTEGRITY
+30. Never render a placeholder or partial token (@@, TBD, lorem, "@handle", blank name, unsourced round number). Every handle, name, and figure is real or the element is omitted.
+31. A count stated in words must equal what is shown ("7 creators" → 7 cards); numbered sequences (weeks/steps) are consecutive with no gaps.`
 
 // ─── Color math (WCAG, local reimplementation) ────────────────────────────
 

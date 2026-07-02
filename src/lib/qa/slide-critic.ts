@@ -27,8 +27,11 @@ export interface SlideCritique {
     noOverlap: boolean
     noOverflow: boolean
     imageRelevant: boolean
+    imageTruthful: boolean
     rtlOk: boolean
     hasFocalPoint: boolean
+    noPlaceholder: boolean
+    labelMatches: boolean
   }
   issues: string[]
   fixes: Array<
@@ -42,8 +45,11 @@ const CHECK_KEYS = [
   'noOverlap',
   'noOverflow',
   'imageRelevant',
+  'imageTruthful',
   'rtlOk',
   'hasFocalPoint',
+  'noPlaceholder',
+  'labelMatches',
 ] as const
 
 const AUTO_ACTIONS = ['swap-image', 'shrink-text', 'recolor'] as const
@@ -113,8 +119,11 @@ const CRITIQUE_SCHEMA = {
         noOverlap: { type: Type.BOOLEAN },
         noOverflow: { type: Type.BOOLEAN },
         imageRelevant: { type: Type.BOOLEAN },
+        imageTruthful: { type: Type.BOOLEAN },
         rtlOk: { type: Type.BOOLEAN },
         hasFocalPoint: { type: Type.BOOLEAN },
+        noPlaceholder: { type: Type.BOOLEAN },
+        labelMatches: { type: Type.BOOLEAN },
       },
       required: [...CHECK_KEYS],
     },
@@ -152,12 +161,16 @@ For this slide, return true/false on each:
 - noOverlap: no element collides with another in a way that hurts reading (text over text, text over an unscrimmed busy image area, cards colliding).
 - noOverflow: nothing is clipped by the canvas edges; no text cut off mid-word or mid-line.
 - imageRelevant: imagery looks intentional, fully loaded, and brand-appropriate — related to the content, not decorative filler (no broken-image icons, no placeholder/generic mismatch). true when the slide has no imagery.
+- imageTruthful: any product shown is the real brand product — NOT a generated product carrying a fabricated or foreign logo/emblem, and NOT imagery from a different product category (e.g. clay pots for a steel-cookware brand). true when the slide shows no product.
 - rtlOk: Hebrew text reads right-to-left with correct alignment; no mixed-direction glitches (punctuation/numbers on the wrong side).
 - hasFocalPoint: one clear focal point; the slide is not a uniform wall of equal-weight content.
+- noPlaceholder: no visible placeholder or unfilled token in any text — no "@@", "TBD", "lorem", a bare "@" without a handle, "[…]", or an obvious dummy name/number. Every handle, name and figure looks real and final.
+- labelMatches: the eyebrow/section label and any watermark word describe THIS slide's own content (a "Risk" slide must not carry an "INSIGHT" watermark), and the slide actually has content — not blank.
 </checklist>
 
 <rules>
 - Every check you mark false → verdict "fail" + ONE concrete fix: what to change and how (e.g. "move title up 80px so it clears the numeral"), never "improve the design".
+- Content-truth checks (imageTruthful, noPlaceholder, labelMatches) may be issue-only when no CSS/image fix applies: mark the check false and name the exact problem; add a "swap-image" fix for a fabricated, foreign, or off-category product image.
 - Report an issue ONLY for a check you marked false. Be concrete: name the element and what is wrong.
 - No vague fail: never fail a check without an actionable fix. No polite pass: never pass a broken slide to be nice.
 - CSS patch fix: {"role": "<data-role>", "cssPatch": "prop: value; prop: value;", "reason": "..."} — role MUST be one of the data-role names listed below.
@@ -169,13 +182,16 @@ For this slide, return true/false on each:
 
 // Few-shot exemplars (research: exemplars materially improve VLM QA).
 const FEW_SHOT_EXEMPLARS = `EXAMPLE 1 — clean slide (60/40 split: product photo right, headline + 3 short bullets left, generous margins): every check passes → pass, empty arrays.
-{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"rtlOk":true,"hasFocalPoint":true},"verdict":"pass","issues":[],"fixes":[]}
+{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"imageTruthful":true,"rtlOk":true,"hasFocalPoint":true,"noPlaceholder":true,"labelMatches":true},"verdict":"pass","issues":[],"fixes":[]}
 
 EXAMPLE 2 — broken slide (headline collides with the oversized stat numeral; body paragraph runs past the bottom edge): two checks fail → fail, one concrete fix each.
-{"checks":{"legible":true,"noOverlap":false,"noOverflow":false,"imageRelevant":true,"rtlOk":true,"hasFocalPoint":true},"verdict":"fail","issues":["headline overlaps the stat-0 numeral","body paragraph is clipped at the bottom canvas edge"],"fixes":[{"role":"title","cssPatch":"top: 120px; max-width: 900px;","reason":"move the headline up and constrain its width so it clears stat-0"},{"action":"shrink-text","target":"body","reason":"body overflows the canvas bottom; smaller type fits the frame"}]}
+{"checks":{"legible":true,"noOverlap":false,"noOverflow":false,"imageRelevant":true,"imageTruthful":true,"rtlOk":true,"hasFocalPoint":true,"noPlaceholder":true,"labelMatches":true},"verdict":"fail","issues":["headline overlaps the stat-0 numeral","body paragraph is clipped at the bottom canvas edge"],"fixes":[{"role":"title","cssPatch":"top: 120px; max-width: 900px;","reason":"move the headline up and constrain its width so it clears stat-0"},{"action":"shrink-text","target":"body","reason":"body overflows the canvas bottom; smaller type fits the frame"}]}
 
 EXAMPLE 3 — RTL-broken slide (Hebrew paragraph is left-aligned and the ₪ sign sits on the wrong side of the number): one check fails → fail, one concrete fix.
-{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"rtlOk":false,"hasFocalPoint":true},"verdict":"fail","issues":["body paragraph is left-aligned and reads with mixed direction; the ₪ sign is on the wrong side of the numeral"],"fixes":[{"role":"body","cssPatch":"direction: rtl; text-align: right;","reason":"force right-to-left flow so Hebrew aligns right and the currency sign sits correctly"}]}`
+{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"imageTruthful":true,"rtlOk":false,"hasFocalPoint":true,"noPlaceholder":true,"labelMatches":true},"verdict":"fail","issues":["body paragraph is left-aligned and reads with mixed direction; the ₪ sign is on the wrong side of the numeral"],"fixes":[{"role":"body","cssPatch":"direction: rtl; text-align: right;","reason":"force right-to-left flow so Hebrew aligns right and the currency sign sits correctly"}]}
+
+EXAMPLE 4 — truth failures (the hero pan carries a fabricated laurel emblem that is not the brand's logo; an influencer card shows the handle "oztelem@@"; the eyebrow reads "INSIGHT" but this is a risk-section slide): three checks fail → fail. The product image gets a swap-image fix; the placeholder and label mismatch are issue-only.
+{"checks":{"legible":true,"noOverlap":true,"noOverflow":true,"imageRelevant":true,"imageTruthful":false,"rtlOk":true,"hasFocalPoint":true,"noPlaceholder":false,"labelMatches":false},"verdict":"fail","issues":["hero product shows a fabricated laurel emblem that is not the brand logo — not a real product shot","influencer handle renders as 'oztelem@@', an unfilled placeholder","eyebrow label 'INSIGHT' does not match this risk-section slide"],"fixes":[{"action":"swap-image","target":"image","reason":"replace with a verified real-product image or a logo-free background"}]}`
 
 const ROLE_RE = /data-role="([^"]+)"/g
 
@@ -278,8 +294,11 @@ function uncheckedCritique(slideIndex: number, note: string): SlideCritique {
       noOverlap: true,
       noOverflow: true,
       imageRelevant: true,
+      imageTruthful: true,
       rtlOk: true,
       hasFocalPoint: true,
+      noPlaceholder: true,
+      labelMatches: true,
     },
     issues: [note],
     fixes: [],
