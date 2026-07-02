@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (docErr || !doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-    if (!isDevMode && doc.user_id !== userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // Documents are platform-shared: any authenticated Leaders user may
+    // (re)generate any deck — ownership gating removed by request.
 
     const data = doc.data as Record<string, unknown>
     const brandName = (data.brandName as string) || ''

@@ -35,8 +35,8 @@ export async function POST(req: NextRequest) {
       const { data: doc } = await supabase
         .from('documents').select('*').eq('id', documentId).single()
       if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-      if (!isDevMode && doc.user_id !== userId)
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      // Documents are platform-shared: any authenticated Leaders user may
+      // export any deck — ownership gating removed by request.
       pres = (doc.data as Record<string, unknown>)?._structuredPresentation as StructuredPresentation
     }
     if (!pres?.slides?.length)

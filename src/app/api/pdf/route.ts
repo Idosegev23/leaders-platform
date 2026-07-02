@@ -42,9 +42,8 @@ export async function POST(request: NextRequest) {
     }
 
     // In dev mode, skip ownership check (user_id might be null)
-    if (!isDevMode && document.user_id !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    // Documents are platform-shared: any authenticated Leaders user may work
+    // on any deck (ownership gating removed by request — auth is still required).
 
     // Get document data
     const documentData = document.data as Record<string, unknown>

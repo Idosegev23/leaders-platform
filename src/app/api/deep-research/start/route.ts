@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
     const { data: doc, error } = await supabase
       .from('documents').select('*').eq('id', body.documentId).single()
     if (error || !doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-    if (!isDevMode && doc.user_id !== userId)
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // Documents are platform-shared: any authenticated Leaders user may work
+    // on any deck (ownership gating removed by request — auth is still required).
 
     const data = doc.data as Record<string, unknown>
     const brandName = (data.brandName as string) || 'Brand'

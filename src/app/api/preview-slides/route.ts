@@ -49,9 +49,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    if (!isDevMode && document.user_id !== userId) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    // Documents are platform-shared: any authenticated Leaders user may work
+    // on any deck (ownership gating removed by request — auth is still required).
 
     const documentData = document.data as Record<string, unknown>
     const isAutoProposal = !!documentData._brandResearch || !!documentData._brandColors || !!documentData.influencerResearch
