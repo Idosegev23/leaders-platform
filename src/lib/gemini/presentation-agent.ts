@@ -18,6 +18,9 @@
 
 import { GoogleGenAI, type GenerateContentConfig } from '@google/genai'
 import { searchIsraeliInfluencers, getAudienceReport } from '@/lib/imai/client'
+import { checkWizardCoverage, type WizardContract, type CoverageResult } from './wizard-contract'
+import { ART_DIRECTOR_RULES, auditDesignSystem } from '@/lib/design/art-director-rules'
+import type { BrandAssets } from '@/lib/brand/types'
 import type { PremiumDesignSystem } from './slide-design'
 
 // ─── Types ──────────────────────────────────────────────
@@ -31,20 +34,29 @@ export interface AgentInput {
   briefFileMime?: string
   /** Pre-existing data from wizard (optional — agent fills gaps) */
   wizardData?: Record<string, unknown>
+  /** Binding wizard requirements (buildWizardContract output) — injected into the prompt and coverage-checked after generation */
+  wizardContract?: WizardContract
   /** Brand research already done (optional — agent will research if missing) */
   brandResearch?: Record<string, unknown>
   /** Images already generated */
   images?: Record<string, string>
+  /** Verified brand assets (logo / product photos / scenes) — preferred imagery */
+  brandAssets?: BrandAssets
   /** Client logo URL */
   clientLogoUrl?: string
   /** Leaders logo URL */
   leadersLogoUrl?: string
+  /** Absolute epoch-ms ceiling for OPTIONAL post-passes (wizard repair).
+   *  Past it, repair is skipped/aborted so the caller keeps time to persist. */
+  deadlineTs?: number
 }
 
 export interface AgentSlide {
   slideType: string
   title: string
   html: string
+  /** The content args the agent passed to generate_slide_html (no designColors) — used for wizard-coverage checks */
+  content?: Record<string, unknown>
 }
 
 export interface AgentOutput {
@@ -55,6 +67,8 @@ export interface AgentOutput {
   research?: Record<string, unknown>
   influencers?: Array<{ username: string; followers: number; rationale: string }>
   kpis?: Record<string, number>
+  /** Post-repair wizard coverage (present only when a contract was supplied) */
+  wizardCoverage?: CoverageResult
   totalToolCalls: number
   durationMs: number
 }
@@ -325,6 +339,15 @@ export async function runPresentationAgent(
     ? `\n\nתמונות זמינות (השתמש ב-URLs האלה בשקפים):\n${Object.entries(input.images).map(([k, v]) => `  - ${k}: ${v}`).join('\n')}`
     : ''
 
+  // Verified real-brand imagery (scenes first — hero-worthy) beats generic AI images.
+  const preferredImageryUrls = [
+    ...(input.brandAssets?.sceneImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url),
+    ...(input.brandAssets?.productImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url),
+  ]
+  const preferredImageryContext = preferredImageryUrls.length
+    ? `\n\nתמונות מותג אמיתיות ומאומתות (המוצר האמיתי של הלקוח — סצנות ותצלומי מוצר). העדף אותן על פני כל תמונה אחרת כשאתה מעביר imageUrl לשקפים ויזואליים (cover, bigIdea, deliverables):\n${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}`
+    : ''
+
   const systemPrompt = `אתה סוכן AI מלא שבונה מצגות הצעת מחיר פרימיום עבור סוכנות שיווק המשפיענים Leaders.
 
 המשימה שלך: מבריף אחד → מצגת מלאה של 11 שקפים.
@@ -365,7 +388,9 @@ ${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. 
 {
   "designSystem": { "colors": {...}, "fonts": {...}, "effects": {...}, "creativeDirection": {...} },
   "summary": "סיכום בעברית של ההצעה"
-}`
+}${input.wizardContract?.promptBlock ? `\n\n${input.wizardContract.promptBlock}` : ''}
+
+${ART_DIRECTOR_RULES}`
 
   const userPrompt = `בנה מצגת הצעת מחיר עבור המותג "${input.brandName}".
 
@@ -374,6 +399,7 @@ ${input.briefText.slice(0, 8000)}
 ${wizardContext}
 ${researchContext}
 ${imagesContext}
+${preferredImageryContext}
 
 התחל עכשיו. חקור → תכנן → צור 11 שקפים.`
 
@@ -501,6 +527,10 @@ ${imagesContext}
         }
       } catch { /* ok — use default */ }
 
+      // Keep the closing model turn in history so the repair pass (if any)
+      // continues a well-formed conversation.
+      if (parts.length) history.push({ role: 'model', parts })
+
       break
     }
 
@@ -569,7 +599,9 @@ ${imagesContext}
             })
 
             const html = buildSlideHtml(args)
-            slides.push({ slideType, title: slideTitle, html })
+            const content: Record<string, unknown> = { ...args }
+            delete content.designColors
+            slides.push({ slideType, title: slideTitle, html, content })
             htmlSlides.push(html)
             slideTypes.push(slideType)
 
@@ -616,6 +648,135 @@ ${imagesContext}
     } as PremiumDesignSystem
   }
 
+  // ── Design-system hardening (art-director rules: contrast floors, Hebrew fonts) ──
+  try {
+    const { issues, corrected } = auditDesignSystem({
+      colors: ((designSystem as PremiumDesignSystem).colors ?? {}) as unknown as Record<string, string>,
+      fonts: (designSystem as PremiumDesignSystem).fonts as unknown as Record<string, string> | undefined,
+    })
+    if (issues.length) {
+      console.warn(
+        `[PresentationAgent][${requestId}] 🎨 Design-system audit corrected ${issues.length} issue(s): ` +
+          issues.map(i => `${i.field}: ${i.problem} → ${i.fix}`).join(' | '),
+      )
+    }
+    designSystem = {
+      ...designSystem,
+      colors: { ...(designSystem as PremiumDesignSystem).colors, ...corrected.colors },
+      ...(corrected.fonts ? { fonts: { ...(designSystem as PremiumDesignSystem).fonts, ...corrected.fonts } } : {}),
+    } as PremiumDesignSystem
+  } catch (auditErr) {
+    console.warn(`[PresentationAgent][${requestId}] ⚠️ Design-system audit failed (using unaudited):`, auditErr instanceof Error ? auditErr.message : auditErr)
+  }
+
+  // ── Wizard-coverage check + ONE targeted repair pass ──
+  // Missing binding items → a single follow-up conversation that regenerates
+  // ONLY the affected slides. Residual misses are returned for editor flags —
+  // coverage failures never block generation.
+  let wizardCoverage: CoverageResult | undefined
+  if (input.wizardContract?.items?.length) {
+    const coverageSlides = () =>
+      slides.map(s => ({ slideType: s.slideType, slots: s.content ?? { title: s.title } }))
+    try {
+      let coverage = checkWizardCoverage(coverageSlides(), input.wizardContract)
+      console.log(`[PresentationAgent][${requestId}] 📋 Wizard coverage:\n${coverage.report}`)
+
+      // Wall-clock guard: repair is OPTIONAL — it must never spend the time the
+      // caller needs to persist the deck. Capped at 120s and at input.deadlineTs.
+      const repairDeadline = Math.min(
+        input.deadlineTs ?? Number.POSITIVE_INFINITY,
+        Date.now() + 120_000,
+      )
+      if (coverage.missing.length > 0 && slides.length > 0 && repairDeadline - Date.now() < 30_000) {
+        console.warn(`[PresentationAgent][${requestId}] 🔧 Repair skipped — under 30s left before deadline`)
+      } else if (coverage.missing.length > 0 && slides.length > 0) {
+        onProgress?.({ stage: 'repair', message: `🔧 משלים ${coverage.missing.length} פריטי ויזארד חסרים...` })
+        // Map contract slide aliases to the generate_slide_html enum and drop
+        // anything the tool can't produce ('stats' → 'metrics', unknown → out).
+        const SLIDE_TYPE_ENUM = ['cover', 'brief', 'goals', 'audience', 'insight', 'strategy', 'bigIdea', 'deliverables', 'influencers', 'metrics', 'closing']
+        const SLIDE_TYPE_ALIASES: Record<string, string> = { stats: 'metrics', numbers: 'metrics', kpis: 'metrics' }
+        const targetTypes = Array.from(new Set(
+          coverage.missing
+            .flatMap(m => m.mustAppearIn)
+            .map(t => SLIDE_TYPE_ALIASES[t] ?? t)
+            .filter(t => SLIDE_TYPE_ENUM.includes(t)),
+        ))
+        const missingLines = coverage.missing.map(m => {
+          const v = Array.isArray(m.value) ? m.value.join(' | ') : m.value
+          return `- ${m.requirement} [שקף: ${m.mustAppearIn.join('/')}]: ${v}`
+        })
+        history.push({
+          role: 'user',
+          parts: [{
+            text:
+              `בקרת איכות אוטומטית: הפריטים המחייבים הבאים מהוויזארד חסרים מהמצגת:\n${missingLines.join('\n')}\n\n` +
+              `תקן עכשיו: קרא ל-generate_slide_html מחדש אך ורק עבור השקפים האלה: ${targetTypes.join(', ')}. ` +
+              `צור כל שקף כזה מחדש בשלמותו — אותם צבעים ואותו סגנון — ושלב את הפריטים החסרים במדויק (מספרים וציטוטים כלשונם). אל תיגע בשקפים אחרים.`,
+          }],
+        })
+
+        const MAX_REPAIR_ITERATIONS = 4
+        for (let iter = 0; iter < MAX_REPAIR_ITERATIONS; iter++) {
+          if (Date.now() >= repairDeadline) {
+            console.warn(`[PresentationAgent][${requestId}] 🔧 Repair aborted at iteration ${iter} — deadline reached`)
+            break
+          }
+          const response: any = await client.models.generateContent({
+            model: 'gemini-3.1-pro-preview',
+            contents: history as any,
+            config: genConfig,
+          })
+          const parts = response.candidates?.[0]?.content?.parts || []
+          const functionCalls = parts.filter((p: any) => p.functionCall)
+          if (functionCalls.length === 0) break
+
+          history.push({ role: 'model', parts })
+          const responseParts: Array<Record<string, unknown>> = []
+          for (const part of functionCalls) {
+            const fc = part.functionCall
+            totalToolCalls++
+            let result: unknown
+            if (fc.name === 'generate_slide_html') {
+              const args = fc.args || {}
+              const slideType = args.slideType as string
+              const html = buildSlideHtml(args)
+              const content: Record<string, unknown> = { ...args }
+              delete content.designColors
+              const idx = slideTypes.indexOf(slideType)
+              if (idx >= 0) {
+                slides[idx] = { slideType, title: (args.title as string) || slides[idx].title, html, content }
+                htmlSlides[idx] = html
+                console.log(`[PresentationAgent][${requestId}]   🔧 Repaired slide ${idx + 1} (${slideType})`)
+                result = { success: true, replaced: true, slideIndex: idx, slideType }
+              } else {
+                // New slide type — insert BEFORE the closing slide so the
+                // deck's narrative order survives the repair (never append
+                // content after the CTA).
+                const closingIdx = slideTypes.indexOf('closing')
+                const insertAt = closingIdx >= 0 ? closingIdx : slides.length
+                slides.splice(insertAt, 0, { slideType, title: (args.title as string) || '', html, content })
+                htmlSlides.splice(insertAt, 0, html)
+                slideTypes.splice(insertAt, 0, slideType)
+                console.log(`[PresentationAgent][${requestId}]   🔧 Repair inserted missing slide (${slideType}) at ${insertAt + 1}`)
+                result = { success: true, replaced: false, slideIndex: insertAt, slideType }
+              }
+            } else {
+              result = { error: `Only generate_slide_html is allowed during repair (got ${fc.name})` }
+            }
+            responseParts.push({ functionResponse: { name: fc.name, response: { result } } })
+          }
+          history.push({ role: 'user', parts: responseParts })
+        }
+
+        coverage = checkWizardCoverage(coverageSlides(), input.wizardContract)
+        console.log(`[PresentationAgent][${requestId}] 📋 Post-repair coverage: ${coverage.missing.length} still missing`)
+      }
+      wizardCoverage = coverage
+    } catch (covErr) {
+      console.warn(`[PresentationAgent][${requestId}] ⚠️ Wizard coverage check failed (continuing):`, covErr instanceof Error ? covErr.message : covErr)
+    }
+  }
+
   // ── Inject logos ──
   // Default to the dark wordmark served from /public on the app origin.
   // Callers can still override via input.leadersLogoUrl.
@@ -654,6 +815,7 @@ ${imagesContext}
     research: researchData,
     influencers: influencerData,
     kpis: kpiData,
+    wizardCoverage,
     totalToolCalls,
     durationMs,
   }
