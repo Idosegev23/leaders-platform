@@ -105,6 +105,14 @@ function stripMarkdown(text: string): string {
 /** Basic structural cleanup */
 function basicCleanup(text: string): string {
   return text
+    // Repair a corrupted array-open: `"key":.` — a period can never follow a
+    // colon in valid JSON, and Gemini occasionally drops the `[` while
+    // truncating the first element, leaving a fragment like `"key":.",`
+    // followed by real `"item"` lines and a closing `]`. Reinsert the `[`.
+    // Scoped to bareword keys so it can't fire on `:.` inside a Hebrew value.
+    .replace(/("[a-zA-Z_][\w]*"\s*:)\s*\.["',]*[ \t]*(\r?\n\s*["[{])/g, '$1 [$2')
+    // Same corruption on a single line: `"key":.", "item", ...`
+    .replace(/("[a-zA-Z_][\w]*"\s*:)\s*\.["',]*[ \t]*(")/g, '$1 [$2')
     // Remove trailing commas before } or ]
     .replace(/,(\s*[}\]])/g, '$1')
     // Remove control characters except \n \r \t
