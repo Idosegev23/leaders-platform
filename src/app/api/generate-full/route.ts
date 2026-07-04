@@ -31,9 +31,13 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
 
-    // Auth
+    // Auth — logged-in Leaders user, dev-mode bypass, OR a server-to-server
+    // trigger carrying the shared internal secret (for ops/QA generation).
+    const internalSecret = request.headers.get('x-internal-secret')
+    const isInternalTrigger =
+      !!process.env.LEADS_TRIGGER_SECRET && internalSecret === process.env.LEADS_TRIGGER_SECRET
     let userId = DEV_AUTH_USER.id
-    if (!isDevMode) {
+    if (!isDevMode && !isInternalTrigger) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       userId = user.id

@@ -21,8 +21,12 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
 
-    // Auth — platform-shared: any authenticated Leaders user may plan any deck.
-    if (!isDevMode) {
+    // Auth — any authenticated Leaders user, dev-mode, or an internal-secret
+    // server-to-server trigger (ops/QA).
+    const internalSecret = request.headers.get('x-internal-secret')
+    const isInternalTrigger =
+      !!process.env.LEADS_TRIGGER_SECRET && internalSecret === process.env.LEADS_TRIGGER_SECRET
+    if (!isDevMode && !isInternalTrigger) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     } else {
