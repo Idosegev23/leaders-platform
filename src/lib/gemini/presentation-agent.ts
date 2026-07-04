@@ -526,15 +526,49 @@ ${preferredImageryContext}
 
   const MAX_ITERATIONS = 45 // up to ~22 slides + IMAI/image/code tool calls + buffer
 
+  // The brief may be attached as a Gemini Files API reference (fileData).
+  // Those files EXPIRE after 48h — regenerating an old deck then 403s
+  // ("permission to access the File …"). If that happens, drop the file and
+  // fall back to the inline briefText so generation still succeeds.
+  let fileFallbackDone = false
+  const looksLikeFileError = (e: unknown): boolean => {
+    const m = (e instanceof Error ? e.message : String(e)).toLowerCase()
+    return m.includes('permission') || m.includes('the file') || m.includes('403') || m.includes('not exist')
+  }
+  const dropBriefFile = (): boolean => {
+    const first = history[0]
+    if (!first || !Array.isArray(first.parts)) return false
+    const hadFile = first.parts.some((p) => (p as Record<string, unknown>).fileData)
+    if (!hadFile) return false
+    first.parts = [{ text: userPrompt }]
+    console.warn(`[PresentationAgent][${requestId}] ⚠️ Brief file expired/inaccessible — falling back to briefText`)
+    return true
+  }
+
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     const iterStart = Date.now()
     console.log(`[PresentationAgent][${requestId}] 🔁 Iteration ${iter + 1}/${MAX_ITERATIONS} (${slides.length} slides, ${totalToolCalls} tool calls)`)
 
-    const response: any = await client.models.generateContent({
-      model: 'gemini-3.1-pro-preview',
-      contents: history as any,
-      config: genConfig,
-    })
+    let response: any
+    try {
+      response = await client.models.generateContent({
+        model: 'gemini-3.1-pro-preview',
+        contents: history as any,
+        config: genConfig,
+      })
+    } catch (callErr) {
+      // One-time recovery: stale brief file → drop it and retry this iteration.
+      if (!fileFallbackDone && looksLikeFileError(callErr) && dropBriefFile()) {
+        fileFallbackDone = true
+        response = await client.models.generateContent({
+          model: 'gemini-3.1-pro-preview',
+          contents: history as any,
+          config: genConfig,
+        })
+      } else {
+        throw callErr
+      }
+    }
 
     const candidate = response.candidates?.[0]
     const parts = candidate?.content?.parts || []
