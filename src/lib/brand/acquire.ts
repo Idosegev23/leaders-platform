@@ -20,6 +20,8 @@
 import { fetchScrape } from '@/lib/apify/fetch-scraper'
 import { resolveBrandLogo } from '@/lib/brand/logo-resolver'
 import { collectProductImages } from '@/lib/brand/product-images'
+import { rehostImage } from '@/lib/brand/rehost-image'
+import { parseGeminiJson } from '@/lib/utils/json-cleanup'
 import type { BrandAssets } from '@/lib/brand/types'
 
 export interface AcquireInput {
@@ -81,6 +83,24 @@ export async function acquireBrandAssets(input: AcquireInput): Promise<AcquireRe
         colorPalette: raw.colorPalette || [],
       }
     }
+
+    // Fallback for scrape-hostile sites: many brand sites (WordPress + Cloudflare)
+    // return a bot-challenge to datacenter IPs, so the direct HTML fetch above
+    // comes back empty. Gemini's URL-context reads the page from Google infra
+    // (not IP-blocked) and returns real image URLs. Only invoked when the direct
+    // scrape found nothing usable.
+    const scrapeEmpty = !scraped?.logoUrl && !(scraped?.images?.length) && !(scraped?.heroImages?.length)
+    if (scrapeEmpty) {
+      const via = await withTimeout(45_000, 'gemini url-context images', geminiSiteImages(url, brandName, input.productContext))
+      if (via && (via.logoUrl || via.productImages.length)) {
+        scraped = {
+          ...(scraped || {}),
+          logoUrl: scraped?.logoUrl || via.logoUrl,
+          images: [...(scraped?.images || []), ...via.productImages],
+        }
+        console.log(`[acquireBrandAssets] gemini url-context fallback: logo=${via.logoUrl ? 'yes' : 'no'}, ${via.productImages.length} product urls`)
+      }
+    }
   }
 
   // ── 2. Logo + 3. products in parallel (both only depend on the scrape) ──
@@ -116,12 +136,70 @@ export async function acquireBrandAssets(input: AcquireInput): Promise<AcquireRe
   if (logo) brandAssets.logo = logo
   if (products && products.length) brandAssets.productImages = products
 
+  // ── Re-host to Supabase so downstream fetches (Nano Banana references, the
+  // editor, PDF/PPTX export) always resolve — the source CDN may be signed,
+  // rate-limited, or IP-block the render/generation environment. Best-effort:
+  // an un-rehostable URL keeps its original (still better than nothing).
+  try {
+    const { createClient } = await import('@/lib/supabase/server')
+    const sb = await createClient()
+    const slug = brandName.replace(/[^a-z0-9]/gi, '').slice(0, 24).toLowerCase() || 'brand'
+    if (brandAssets.logo?.url) {
+      const stable = await rehostImage(brandAssets.logo.url, `brand/${slug}`, 'logo', sb)
+      if (stable) brandAssets.logo = { ...brandAssets.logo, url: stable }
+    }
+    if (brandAssets.productImages?.length) {
+      brandAssets.productImages = await Promise.all(
+        brandAssets.productImages.map(async (p, i) => {
+          const stable = await rehostImage(p.url, `brand/${slug}`, `product-${i}`, sb)
+          return stable ? { ...p, url: stable } : p
+        }),
+      )
+    }
+  } catch (rehostErr) {
+    console.warn('[acquireBrandAssets] re-host step failed (keeping source URLs):', rehostErr instanceof Error ? rehostErr.message : rehostErr)
+  }
+
   const verifiedCount = (products || []).filter((p) => p.status === 'verified').length
   console.log(
     `[acquireBrandAssets] "${brandName}": logo=${logo ? logo.status : 'none'} | products=${verifiedCount} verified / ${(products || []).length} collected`,
   )
 
   return { brandAssets, scraped }
+}
+
+/**
+ * Scrape-hostile-site fallback: ask Gemini (URL-context) to read the brand site
+ * from Google's infrastructure and return real image URLs. Bypasses datacenter
+ * IP blocks that defeat a direct fetch. Returns [] on any failure.
+ */
+async function geminiSiteImages(
+  website: string,
+  brandName: string,
+  productContext?: string,
+): Promise<{ logoUrl?: string; productImages: string[] }> {
+  try {
+    const { callAI } = await import('@/lib/ai-provider')
+    const res = await callAI({
+      model: 'gemini-3.5-flash',
+      prompt:
+        `Visit ${website} and its product/shop pages. Extract REAL image URLs from the HTML.\n` +
+        `Return ONLY minified JSON, no markdown:\n` +
+        `{"logoUrl":"<absolute URL of the official ${brandName} logo image, or empty>",` +
+        `"productImages":["<up to 6 absolute https URLs of actual ${productContext || `${brandName} product`} photos — real product shots, NOT banners, icons, or people>"]}`,
+      useUrlContext: true,
+      callerId: 'acquire-gemini-images',
+      maxOutputTokens: 1024,
+    })
+    const parsed = parseGeminiJson<{ logoUrl?: string; productImages?: string[] }>(res.text || '{}')
+    const clean = (u: unknown) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u.trim() : '')
+    return {
+      logoUrl: clean(parsed.logoUrl) || undefined,
+      productImages: Array.from(new Set((parsed.productImages || []).map(clean).filter(Boolean))).slice(0, 6),
+    }
+  } catch {
+    return { productImages: [] }
+  }
 }
 
 // ─── Doc-field extraction helpers (the wizard stores the site inside the

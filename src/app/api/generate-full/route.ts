@@ -117,6 +117,44 @@ export async function POST(request: NextRequest) {
       console.log(`[${requestId}] 🎨 Brand assets already present (${brandAssets!.productImages?.length || 0} products) — skipping acquisition`)
     }
 
+    // ── Normalize influencer data (clean raw IMAI names + re-host expiring IG
+    // profile photos to Supabase) so profile slides render clean names + stable
+    // faces regardless of which cached field the agent reads. Best-effort.
+    try {
+      const { cleanInfluencerName, rehostImage } = await import('@/lib/brand/rehost-image')
+      const recSets = [data.influencerResearch, data._influencerStrategy]
+        .map((r) => (r as { recommendations?: unknown })?.recommendations)
+        .filter((r): r is Array<Record<string, unknown>> => Array.isArray(r))
+      const stable = new Map<string, { name: string; photo?: string }>()
+      for (const recs of recSets) {
+        await Promise.all(recs.map(async (r) => {
+          const user = String(r.username || r.handle || '')
+          const name = cleanInfluencerName(r.name as string, user)
+          let photo = stable.get(user)?.photo
+          if (!photo && r.profilePicUrl) {
+            photo = (await rehostImage(r.profilePicUrl as string, 'influencers', user || 'inf', supabase)) || undefined
+          }
+          r.name = name
+          if (photo) r.profilePicUrl = photo
+          stable.set(user, { name, photo })
+        }))
+      }
+      const enhanced = data.enhancedInfluencers
+      if (Array.isArray(enhanced)) {
+        for (const e of enhanced as Array<Record<string, unknown>>) {
+          const s = stable.get(String(e.username || e.handle || ''))
+          e.name = s?.name || cleanInfluencerName(e.name as string, e.username as string)
+          if (s?.photo) e.profilePicUrl = s.photo
+        }
+      }
+      if (recSets.length || Array.isArray(enhanced)) {
+        await supabase.from('documents').update({ data, updated_at: new Date().toISOString() }).eq('id', documentId)
+        console.log(`[${requestId}] 🧑‍🎤 Normalized influencer names + re-hosted ${Array.from(stable.values()).filter(v => v.photo).length} photos`)
+      }
+    } catch (infErr) {
+      console.warn(`[${requestId}] ⚠️ Influencer normalize failed (continuing):`, infErr instanceof Error ? infErr.message : infErr)
+    }
+
     // Wizard contract — binding requirements injected into the agent prompt +
     // coverage-checked (with one targeted repair) after generation.
     let wizardContract: WizardContract | undefined
