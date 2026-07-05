@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     const supabase = await createClient()
-    const { documentId, count } = await request.json()
+    const { documentId, count, materialGuidance: materialOverride } = await request.json()
     if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
 
     const { data: doc, error } = await supabase.from('documents').select('*').eq('id', documentId).single()
@@ -69,6 +69,22 @@ export async function POST(request: NextRequest) {
       text: bc.text || '#141414',
     }
 
+    // Material guidance keeps the hero product in the brand's true material —
+    // the #1 audit defect was stainless-steel Soltam rendered as red enamel.
+    // Explicit override wins; otherwise derive from the brief's material cues.
+    const briefBlob = `${(data.brandBrief as string) || ''} ${(data._briefText as string) || ''}`.toLowerCase()
+    let materialGuidance: string | undefined = materialOverride
+    if (!materialGuidance) {
+      if (/נירוסטה|stainless|נירוסטה חרוטה/.test(briefBlob) || /cookware|כלי בישול|סיר/.test(briefBlob)) {
+        materialGuidance =
+          'the cookware is brushed/polished STAINLESS STEEL (nirosta) — bright steel body, tri-ply base, ' +
+          'riveted stainless-steel handles and steel lids. NEVER enameled cast iron, Le Creuset/Staub style, ' +
+          'colored-enamel pots, or black non-stick/granite pans. The brand red appears ONLY as an accent ' +
+          '(silicone grips, trivets, textiles, background, lighting) — never as the pot body colour.'
+      }
+    }
+    console.log(`[${requestId}] material guidance: ${materialGuidance ? 'stainless-steel' : 'none'}`)
+
     const wanted = Math.min(Math.max(1, Number(count) || ART_DIRECTIONS.length), ART_DIRECTIONS.length)
     const jobs = ART_DIRECTIONS.slice(0, wanted)
     console.log(`[${requestId}] 🎬 Generating ${jobs.length} scenes for "${brandName}" from ${productRefs.length} product refs`)
@@ -87,6 +103,7 @@ export async function POST(request: NextRequest) {
           designSystem: { colors },
           productRefs,
           documentId,
+          materialGuidance,
         }).catch(() => null),
       ))
       for (const s of results) if (s) scenes.push(s)

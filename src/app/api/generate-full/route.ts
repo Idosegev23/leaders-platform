@@ -139,15 +139,30 @@ export async function POST(request: NextRequest) {
           stable.set(user, { name, photo })
         }))
       }
-      const enhanced = data.enhancedInfluencers
-      if (Array.isArray(enhanced)) {
-        for (const e of enhanced as Array<Record<string, unknown>>) {
+      // Clean every array that holds influencer objects — including the wizard
+      // `influencers` STEP field, which the wizard-contract reads (inf.influencers)
+      // and injects as binding name requirements. If it keeps raw emoji/English
+      // names + expiring IG photo URLs, the agent renders those onto slides even
+      // though the blueprint has clean Hebrew names. Normalize them all.
+      const rec = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+      const infArrays: Array<Array<Record<string, unknown>>> = []
+      const pushArr = (a: unknown) => { if (Array.isArray(a)) infArrays.push(a as Array<Record<string, unknown>>) }
+      pushArr(data.enhancedInfluencers)
+      pushArr((data.influencers as Record<string, unknown>)?.influencers)
+      pushArr(data.influencers)
+      const sd = data._stepData as Record<string, unknown> | undefined
+      pushArr((sd?.influencers as Record<string, unknown>)?.influencers)
+      const ws = data._wizardState as Record<string, unknown> | undefined
+      pushArr(((ws?.stepData as Record<string, unknown>)?.influencers as Record<string, unknown>)?.influencers)
+      for (const arr of infArrays) {
+        for (const e of arr) {
+          if (!rec(e)) continue
           const s = stable.get(String(e.username || e.handle || ''))
-          e.name = s?.name || cleanInfluencerName(e.name as string, e.username as string)
+          e.name = s?.name || cleanInfluencerName((e.name as string) || (e.fullname as string), e.username as string)
           if (s?.photo) e.profilePicUrl = s.photo
         }
       }
-      if (recSets.length || Array.isArray(enhanced)) {
+      if (recSets.length || infArrays.length) {
         await supabase.from('documents').update({ data, updated_at: new Date().toISOString() }).eq('id', documentId)
         console.log(`[${requestId}] 🧑‍🎤 Normalized influencer names + re-hosted ${Array.from(stable.values()).filter(v => v.photo).length} photos`)
       }

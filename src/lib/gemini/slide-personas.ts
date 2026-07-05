@@ -195,7 +195,7 @@ h1,h2,h3{font-family:${T.headingFont};}
 h1,h2,h3{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;word-break:break-word;text-wrap:balance;}
 p{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;word-break:break-word;}
 li{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;}
-.eyebrow{position:absolute;top:56px;right:100px;z-index:9;font-family:'Heebo',sans-serif;font-size:14px;font-weight:500;letter-spacing:7px;color:${T.muted};direction:ltr;}
+.eyebrow{position:absolute;top:56px;left:100px;z-index:9;font-family:'Heebo',sans-serif;font-size:14px;font-weight:500;letter-spacing:7px;color:${T.muted};direction:ltr;}
 </style></head><body><div class="slide">`
   const foot = `</div></body></html>`
 

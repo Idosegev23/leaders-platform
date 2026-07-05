@@ -36,6 +36,13 @@ export interface SceneRequest {
   designSystem?: { colors?: Record<string, string> }
   productRefs: string[]
   documentId: string
+  /**
+   * Brand-critical material/finish constraint for the depicted product
+   * (e.g. "brushed stainless steel — never enameled cast iron or non-stick;
+   * brand red only as an accent"). Injected with high priority so the model
+   * doesn't drift to a wrong-material look-alike.
+   */
+  materialGuidance?: string
 }
 
 type ContentPart =
@@ -185,14 +192,19 @@ async function collectRefs(urls: string[]): Promise<FetchedRef[]> {
 
 // ─── Prompt construction ────────────────────────────────
 
-// v2 §5 scene-generator: strict text-free + explicit negative prompt.
+// Strict text-free INCLUDING on the products themselves — the image model
+// hallucinates garbled trademark lettering onto handles/lids/utensils, which
+// reads as counterfeit. All product surfaces must be unbranded; the real logo
+// is composited later as a separate flat overlay.
 const NO_TEXT_CLAUSE =
-  'Absolutely no text, no letters, no numbers, no logos overlaid, no watermarks, ' +
-  'no UI elements anywhere in the image — the only branding allowed is what is ' +
-  'natively printed on the product packaging itself.'
+  'Absolutely no text, letters, numbers, logos, brand marks or watermarks ANYWHERE — ' +
+  'and critically, NONE printed or embossed on the products themselves (handles, lids, ' +
+  'bodies, utensils must be completely clean and unbranded). Do NOT invent or letter any ' +
+  'brand name onto props. No ghosted wall watermark. Branding is added later as a separate overlay.'
 
 const NEGATIVE_CLAUSE =
-  'Negative: distorted product, wrong colors, extra limbs, cluttered background, cartoonish.'
+  'Negative: distorted product, wrong material, wrong colors, garbled lettering, fake logos, ' +
+  'extra limbs, cluttered background, cartoonish.'
 
 const STRENGTHENED_FIDELITY_CLAUSE =
   'CRITICAL FIDELITY REQUIREMENT: the product must be an EXACT visual replica of ' +
@@ -209,7 +221,7 @@ function paletteHint(designSystem?: SceneRequest['designSystem']): string {
     .slice(0, 6)
   if (!entries.length) return ''
   const list = entries.map(([k, v]) => `${k}: ${v}`).join(', ')
-  return `Brand palette hints — echo these tones in the environment, props and lighting: ${list}.`
+  return `Brand palette — use these tones ONLY as accents in textiles, props, lighting and background (${list}); do NOT paint the hero product itself in these colours unless the MATERIAL line says so.`
 }
 
 function buildScenePrompt(req: SceneRequest, strengthened: boolean): string {
@@ -217,8 +229,11 @@ function buildScenePrompt(req: SceneRequest, strengthened: boolean): string {
     `A premium editorial lifestyle scene for the "${req.forSlideType}" slide of a brand ` +
       `presentation for ${req.brandName}, featuring the real product from the reference images.`,
     'Photorealistic, magazine-grade lighting and composition, mood matched to the brand.',
-    'The product is the hero and must match the references EXACTLY in shape, color, and label. ' +
-      'Never redesign or substitute the product.',
+    // Material takes priority over the reference colorway — the refs may be
+    // accessories, not the hero cookware, so the material line steers the hero.
+    req.materialGuidance ? `MATERIAL (critical, overrides any other colour cue): ${req.materialGuidance}` : '',
+    'The products must stay faithful to the references in family/branding, unbranded surfaces only. ' +
+      'Never redesign into a different material than the one specified above.',
     `Art direction: ${req.artDirection}.`,
     paletteHint(req.designSystem),
     'Aspect ratio 16:9, full-bleed framing for a 1920x1080 presentation slide.',
