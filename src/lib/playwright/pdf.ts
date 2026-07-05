@@ -268,6 +268,10 @@ export async function generateScreenshotPdf(
           type: 'jpeg',
           quality: 88,
           clip: { x: 0, y: 0, width: 1920, height: 1080 },
+          // captureBeyondViewport:true (the default when `clip` is set) re-renders
+          // the page in a mode that paints WHITE when the root element is dir="rtl"
+          // — every Hebrew slide comes out blank. Pin it off so RTL decks render.
+          captureBeyondViewport: false,
         })
         await page.close()
         shots[i] = Buffer.from(screenshotBuffer)
@@ -443,6 +447,9 @@ export async function renderSlidesToImages(
       const screenshot = await page.screenshot({
         type: 'png',
         clip: { x: 0, y: 0, width: 1920, height: 1080 },
+        // See note in generateMultiPagePdf: dir="rtl" root + default
+        // captureBeyondViewport paints a blank white frame. Keep it off.
+        captureBeyondViewport: false,
       })
       await page.close()
 

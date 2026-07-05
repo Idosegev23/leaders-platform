@@ -19,7 +19,7 @@ import { critiqueSlides } from '@/lib/qa/slide-critic'
 import type { BrandAssets } from '@/lib/brand/types'
 import type { HtmlPresentation } from '@/lib/gemini/slide-designer'
 
-export const maxDuration = 600
+export const maxDuration = 800
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
@@ -72,8 +72,50 @@ export async function POST(request: NextRequest) {
 
     // Build agent input from document data
     const images = (data._generatedImages as Record<string, string>) || {}
-    const scraped = data._scraped as { logoUrl?: string; heroImages?: string[] } | undefined
-    const brandAssets = (data._brandAssets as BrandAssets) || undefined
+    let scraped = data._scraped as { logoUrl?: string; heroImages?: string[] } | undefined
+    let brandAssets = (data._brandAssets as BrandAssets) || undefined
+
+    // ── Brand-asset acquisition (art-director foundation) ──
+    // The blueprint → generate-full path bypasses /api/generate-visual-assets,
+    // so `_brandAssets` is unset and the agent would generate generic off-brand
+    // imagery. Acquire real logo + verified product photos inline (fast subset,
+    // no image-gen) so the agent can reference-condition its scenes on the real
+    // product. Guarded: skips when assets already exist (older flow ran them).
+    const hasUsableAssets = !!(brandAssets && (brandAssets.productImages?.length || brandAssets.logo))
+    if (!hasUsableAssets) {
+      try {
+        const { acquireBrandAssets, extractBrandWebsite, extractProductContext } = await import('@/lib/brand/acquire')
+        const website = extractBrandWebsite(data)
+        console.log(`[${requestId}] 🎨 Acquiring brand assets (website: ${website || 'none'})...`)
+        const wizardReferenceImages = [
+          ...(((data.creative as Record<string, unknown> | undefined)?.referenceImages as Array<{ url?: string } | string>) || []),
+          ...(((data.deliverables as Record<string, unknown> | undefined)?.referenceImages as Array<{ url?: string } | string>) || []),
+        ]
+          .map((r) => (typeof r === 'string' ? r : r?.url || ''))
+          .filter(Boolean)
+        const acq = await acquireBrandAssets({
+          brandName,
+          website,
+          productContext: extractProductContext(data),
+          wizardReferenceImages,
+        })
+        brandAssets = acq.brandAssets
+        if (acq.scraped) scraped = { ...scraped, ...acq.scraped }
+        const verified = brandAssets.productImages?.filter((p) => p.status === 'verified').length || 0
+        console.log(`[${requestId}] 🎨 Assets acquired: logo=${brandAssets.logo?.status || 'none'}, ${verified} verified products`)
+        // Persist so a re-run / the editor sees the assets and we never re-acquire.
+        await supabase.from('documents').update({
+          data: { ...data, _brandAssets: brandAssets, ...(acq.scraped ? { _scraped: scraped } : {}) },
+          updated_at: new Date().toISOString(),
+        }).eq('id', documentId)
+        data._brandAssets = brandAssets
+        if (acq.scraped) data._scraped = scraped
+      } catch (acqErr) {
+        console.warn(`[${requestId}] ⚠️ Brand-asset acquisition failed (continuing with generic imagery):`, acqErr instanceof Error ? acqErr.message : acqErr)
+      }
+    } else {
+      console.log(`[${requestId}] 🎨 Brand assets already present (${brandAssets!.productImages?.length || 0} products) — skipping acquisition`)
+    }
 
     // Wizard contract — binding requirements injected into the agent prompt +
     // coverage-checked (with one targeted repair) after generation.

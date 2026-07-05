@@ -197,12 +197,18 @@ const FUNCTION_DECLARATIONS = [
   {
     name: 'generate_brand_image',
     description:
-      'Nano Banana Pro לרקע/מוד. פרומפט באנגלית, נטול טקסט ונטול לוגו לחלוטין, ' +
-      'תואם למערכת הצבעים והמותג. לעולם אל תייצר את מוצר הלקוח עם לוגו — רקע אווירה בלבד.',
+      'Nano Banana Pro — סצנת לייפסטייל/מוצר קולנועית. המוצר האמיתי של המותג מוזרק אוטומטית ' +
+      'כתמונת רפרנס, אז תאר את הסצנה וההקשר (מטבח חי, שימוש אמיתי, אווירה) והמוצר האמיתי ישולב בה. ' +
+      'פרומפט באנגלית, נטול טקסט ונטול לוגו מומצא. פוטוריאליסטי, on-category, בפלטת המותג.',
     parameters: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'Image generation prompt (English, detailed, cinematic)' },
+        prompt: {
+          type: 'string',
+          description:
+            'English scene prompt (detailed, cinematic). Describe the SCENE/context around the product — the real ' +
+            'brand product is composited from reference photos automatically. No text, no invented logos, on-category.',
+        },
         aspectRatio: { type: 'string', enum: ['16:9', '1:1', '9:16'] },
       },
       required: ['prompt'],
@@ -213,15 +219,54 @@ const FUNCTION_DECLARATIONS = [
 // ─── Function Handlers ──────────────────────────────────
 
 
-async function handleGenerateImage(args: Record<string, unknown>): Promise<{ imageUrl: string } | { error: string }> {
+interface ImageGenOpts {
+  /** Real brand product photos, fed as reference images for on-brand generation. */
+  references?: import('./nano-banana-pro').ReferenceImage[]
+  /** Brand-fidelity text appended to the prompt (real product, material, palette). */
+  brandConstraint?: string
+  /** Physical-product descriptor for the visual-truth QA check. */
+  productDescriptor?: string
+}
+
+async function handleGenerateImage(
+  args: Record<string, unknown>,
+  opts: ImageGenOpts = {},
+): Promise<{ imageUrl: string } | { error: string }> {
   try {
     const { generateWithNanoBanana } = await import('./nano-banana-pro')
-    const result = await generateWithNanoBanana({
-      prompt: (args.prompt as string) || '',
-      aspectRatio: (args.aspectRatio as '16:9' | '1:1' | '9:16') || '16:9',
-      imageSize: '2K',
-    })
+    const basePrompt = ((args.prompt as string) || '') + (opts.brandConstraint || '')
+    const aspectRatio = (args.aspectRatio as '16:9' | '1:1' | '9:16') || '16:9'
+    const refs = opts.references?.length ? opts.references : undefined
+    const gen = (extra: string) =>
+      generateWithNanoBanana({ prompt: basePrompt + extra, aspectRatio, imageSize: '2K', references: refs })
+
+    let result = await gen('')
     if (!result) return { error: 'Image generation returned null' }
+
+    // ── Visual-truth QA: regenerate ONCE if the image is off-brand / off-category.
+    // Infra failures (VLM unreachable) are transient and never trigger a wasteful
+    // regen — same flag-don't-block policy as the rest of the art-director engine.
+    if (opts.productDescriptor) {
+      try {
+        const { vlmBinaryCheck } = await import('@/lib/brand/vlm-verify')
+        const q =
+          `Does this image depict ${opts.productDescriptor} (or a clearly on-category scene for it), ` +
+          'photorealistic — WITHOUT copper/brass/gold-colored cookware, WITHOUT abstract art, and ' +
+          'WITHOUT invented logos or text overlays? Answer "yes" only if genuinely on-brand and on-category.'
+        const check = await vlmBinaryCheck({ imageBase64: result.base64, mimeType: result.mimeType, question: q })
+        const transient = /^(verification unavailable|image fetch failed|invalid model output)/.test(check.reasoning || '')
+        if (check.verdict === 'no' && !transient) {
+          console.log(`[handleGenerateImage] ⚠️ off-brand/off-category (${(check.reasoning || '').slice(0, 90)}) — regenerating once`)
+          const retry = await gen(
+            `\n\nSTRICT CORRECTION: the previous attempt was off-brand or off-category (${(check.reasoning || '').slice(0, 120)}). ` +
+            `Depict ONLY the real ${opts.productDescriptor} from the reference photos — correct material, color and finish, photorealistic, on-category. No copper/brass/gold, no abstract shapes, no text.`,
+          )
+          if (retry) result = retry
+        }
+      } catch {
+        /* QA is best-effort; a check failure must not lose the image */
+      }
+    }
 
     // Upload to Supabase storage
     const { createClient } = await import('@/lib/supabase/server')
@@ -307,10 +352,46 @@ export async function runPresentationAgent(
     ? `\n\nתמונות מותג אמיתיות ומאומתות (המוצר האמיתי של הלקוח — סצנות ותצלומי מוצר). העדף אותן על פני כל תמונה אחרת כשאתה מעביר imageUrl לשקפים ויזואליים (cover, bigIdea, deliverables):\n${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}`
     : ''
 
+  // ── Reference-conditioned image generation (Phase 2) ──
+  // Fetch the REAL brand product photos once and feed them as reference images
+  // to every generate_brand_image call, so Nano Banana depicts the actual
+  // product (correct material/finish) instead of a generic off-brand stand-in.
+  const brandRefUrls = (input.brandAssets?.productImages ?? [])
+    .filter(a => a.status !== 'rejected')
+    .map(a => a.url)
+    .slice(0, 4)
+  const brandProductRefs: import('./nano-banana-pro').ReferenceImage[] = []
+  for (const url of brandRefUrls) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+      if (!res.ok) continue
+      const ct = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim().toLowerCase()
+      if (!ct.startsWith('image/') || ct.includes('svg')) continue
+      const buf = Buffer.from(await res.arrayBuffer())
+      if (buf.length < 1024 || buf.length > 4_000_000) continue
+      brandProductRefs.push({ base64: buf.toString('base64'), mimeType: ct, caption: `real ${input.brandName} product — depict this exact product` })
+    } catch { /* skip unreachable reference */ }
+  }
+  let productDescriptor: string | undefined
+  try {
+    const { extractProductContext } = await import('@/lib/brand/acquire')
+    productDescriptor = extractProductContext((input.wizardData as Record<string, unknown>) || {})
+  } catch { /* descriptor is optional */ }
+  const brandImageConstraint = brandProductRefs.length
+    ? `\n\nBRAND FIDELITY (critical): The attached reference image(s) show the REAL ${input.brandName} product${productDescriptor ? ` (${productDescriptor})` : ''}. The generated scene MUST feature THIS exact product faithfully — same material, form and finish. Photorealistic, on-category. NEVER substitute a different-material look-alike (e.g. no copper/brass/gold/enamel when the real product is stainless steel). No abstract art, no invented logos, no text overlays.`
+    : (productDescriptor
+        ? `\n\nBRAND FIDELITY: Depict the real ${input.brandName} product (${productDescriptor}), photorealistic and on-category. No abstract art, no invented logos, no text overlays.`
+        : '')
+  const imageGenOpts: ImageGenOpts = { references: brandProductRefs, brandConstraint: brandImageConstraint, productDescriptor }
+  console.log(`[PresentationAgent][${requestId}] 🖼️ Reference-conditioning: ${brandProductRefs.length} product refs, descriptor="${productDescriptor || 'none'}"`)
+
+  const currentYear = new Date().getFullYear()
   const systemPrompt = `<role>
 אתה סוכן AI שבונה מצגות הצעת מחיר פרימיום עבור סוכנות שיווק המשפיענים Leaders.
 אתה אסטרטג, אמן ואנליסט בו-זמנית — ואתה עובד עד שהתוצר גורם ללקוח להגיד "וואו".
 </role>
+
+<context>השנה הנוכחית היא ${currentYear}. אל תמציא שנה בשקפים; אם צריך שנה (למשל בשער) — ${currentYear}.</context>
 
 <mission>
 מבריף אחד → מצגת שלמה בעברית שמספרת *סיפור אחד*: מעוצבת, מבוססת נתונים,
@@ -320,11 +401,13 @@ export async function runPresentationAgent(
 <flow>
 שלב 1 — מחקר (אם חסר): Google Search + URL Context + IMAI. בסס כל טענה.
 ${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. אל תחפש שוב.' : 'חקור את המותג וסרוק את האתר שלהם.'}
-שלב 2 — תכנון: קבע Design System (צבעים + פונטים) ואת קשת הסיפור. ה-beats המחייבים,
-        כשכל beat יכול להתפרש על פני כמה שקפים לפי הצורך:
-        cover → brief → goals → audience → INSIGHT → strategy →
-        pillars (שקף לכל pillar) → bigIdea → creative (דוגמאות קונקרטיות) →
-        influencers → deliverables → metrics → closing.
+שלב 2 — תכנון: קבע Design System (צבעים + פונטים) ואת קשת הסיפור. הצעה עשירה ומפורטת
+        (18–24 שקפים בד"כ). ה-beats המחייבים, כשכל beat יכול להתפרש על כמה שקפים:
+        cover → brief → goals → audience → INSIGHT(+נתון תומך) → strategy →
+        pillars (שקף לכל pillar, שלושה צירים שונים) → bigIdea → creative (2–3 יישומים קונקרטיים) →
+        influencers (שקף פרופיל לכל מפתח + why-fit) → competitive (למה אנחנו ולא המתחרים, מהמחקר) →
+        timeline (איך הקמפיין רץ, שבוע-אחר-שבוע/שלבים) → deliverables → metrics →
+        results (תחזית תוצאות מסומנת-כתחזית, נגזרת מ-reach אמיתי) → closing.
 שלב 3 — יצירה: קריאה אחת ל-generate_slide_html לכל שקף, בסדר, עם צבעים ותמונה.
 שלב 4 — KPI: code_execution לחישוב CPE/CPM/reach אמיתיים. אל תנחש מספרים.
 </flow>
@@ -370,6 +453,11 @@ ${input.brandResearch ? 'מחקר מותג כבר בוצע — השתמש בו. 
   [רע: מחבת "סולתם" עם זר-דפנה של מותג אופנה. טוב: מחבת הנירוסטה האמיתית מתמונות המותג.]
 - התאמת קטגוריה: לפני שתעביר imageUrl, אמור לעצמך מה קטגוריית המותג וּודא שהתמונה ממנה.
   [רע: קדרות חרס למותג נירוסטה/סירי-לחץ. טוב: כלי מתכת שמזוהים עם המותג.]
+- תמונת משפיען אמיתית: לשקף פרופיל של משפיען יחיד — imageUrl חייב להיות ה-photoUrl שלו
+  מ-search_influencers (הפנים האמיתיות), אף פעם לא תמונה מיוצרת. השתמש ב-displayName כשם
+  (לא ב-handle גולמי/אמוג'י), וכל פרופיל נושא keyNumber=followers + keyNumberLabel="עוקבים"
+  ומזכיר ER בגוף — עקבי בין כל הפרופילים. [רע: פרופיל "דניאל עמית" עם תמונת מטבח גנרית ובלי מספר.
+  טוב: התצלום האמיתי שלה + 524K עוקבים + ER.]
 - אפס placeholder: אסור לשלוח לשקף ערך חלקי/דמה — @@, TBD, xxx, lorem, "@handle", שם ריק,
   או מספר עגול בלי מקור. כל handle/שם/מספר מגיע מקריאת כלי אמיתית — אחרת האלמנט לא נוצר.
   [רע: oztelem@@ · טוב: ה-handle האמיתי מ-IMAI, או שהכרטיס פשוט לא עולה.]
@@ -622,16 +710,30 @@ ${preferredImageryContext}
               maxFollowers: (args.maxFollowers as number) || 500000,
               limit: (args.limit as number) || 10,
             })
-            result = influencers.slice(0, 10).map(i => ({
-              username: i.username, fullname: i.fullname,
-              followers: i.followers, engagement_rate: i.engagement_rate,
-              avg_likes: i.avg_likes, is_verified: i.is_verified,
+            // Re-host each real profile photo (IMAI/IG CDN URLs expire within
+            // hours) + clean the raw display name, so influencer profile slides
+            // can show the real face with a stable URL and a client-ready name.
+            const { rehostImage, cleanInfluencerName } = await import('@/lib/brand/rehost-image')
+            const { createClient: createSbForPhotos } = await import('@/lib/supabase/server')
+            const sbPhotos = await createSbForPhotos()
+            const enriched = await Promise.all(influencers.slice(0, 10).map(async i => ({
+              username: i.username,
+              displayName: cleanInfluencerName(i.fullname, i.username),
+              followers: i.followers,
+              engagement_rate: i.engagement_rate,
+              avg_likes: i.avg_likes,
+              is_verified: i.is_verified,
+              photoUrl: i.picture
+                ? (await rehostImage(i.picture, 'influencers', i.username || 'inf', sbPhotos)) || undefined
+                : undefined,
+            })))
+            result = enriched
+            influencerData = enriched.slice(0, 8).map(e => ({
+              username: e.username, followers: e.followers,
+              rationale: `${e.displayName} — ${(e.followers ?? 0).toLocaleString()} עוקבים, ER ${e.engagement_rate}%`,
             }))
-            influencerData = influencers.slice(0, 8).map(i => ({
-              username: i.username, followers: i.followers,
-              rationale: `${i.fullname} — ${i.followers.toLocaleString()} followers, ER ${i.engagement_rate}%`,
-            }))
-            console.log(`[PresentationAgent][${requestId}]     → ${(result as any[]).length} influencers found`)
+            const withPhoto = enriched.filter(e => e.photoUrl).length
+            console.log(`[PresentationAgent][${requestId}]     → ${enriched.length} influencers found (${withPhoto} with re-hosted photo)`)
             break
           }
 
@@ -689,7 +791,7 @@ ${preferredImageryContext}
 
           case 'generate_brand_image': {
             onProgress?.({ stage: 'images', message: '🎨 מייצר תמונה...' })
-            result = await handleGenerateImage(args)
+            result = await handleGenerateImage(args, imageGenOpts)
             console.log(`[PresentationAgent][${requestId}]     → Image: ${JSON.stringify(result).slice(0, 100)}`)
             break
           }
@@ -869,16 +971,23 @@ ${preferredImageryContext}
   const leadersLogo = input.leadersLogoUrl || `${appBase}/new_logo.svg`
   const clientLogo = input.clientLogoUrl || ''
 
-  const finalHtml = htmlSlides.map(html => {
+  const finalHtml = htmlSlides.map((html, i) => {
     let patched = html
-    // Leaders logo
+    const slideType = slideTypes[i] || ''
+    const isHero = slideType === 'cover' || slideType === 'closing'
+    // A soft drop-shadow keeps a dark/light logo legible over any photo or scrim.
+    const legible = 'filter:drop-shadow(0 2px 6px rgba(0,0,0,0.45));'
+    // Leaders logo (agency) — bottom-left, subtle everywhere.
     if (leadersLogo && !patched.includes('leaders-logo')) {
-      const logoTag = `<img src="${leadersLogo}" alt="Leaders" style="position:absolute;bottom:30px;left:40px;height:40px;opacity:0.8;z-index:10;" />`
+      const logoTag = `<img src="${leadersLogo}" alt="Leaders" style="position:absolute;bottom:30px;left:40px;height:40px;opacity:0.85;z-index:10;${legible}" />`
       patched = patched.replace('</div></body>', `${logoTag}</div></body>`)
     }
-    // Client logo
+    // Client logo (brand) — a proper lockup on the cover/closing (larger, top-center),
+    // a subtle co-brand mark (top-right) on content slides.
     if (clientLogo && !patched.includes(clientLogo)) {
-      const clientTag = `<img src="${clientLogo}" alt="${input.brandName}" style="position:absolute;top:30px;right:40px;height:50px;opacity:0.9;z-index:10;" />`
+      const clientTag = isHero
+        ? `<img src="${clientLogo}" alt="${input.brandName.replace(/"/g, '&quot;')}" style="position:absolute;top:56px;left:50%;transform:translateX(-50%);height:74px;max-width:420px;object-fit:contain;opacity:0.98;z-index:11;${legible}" />`
+        : `<img src="${clientLogo}" alt="${input.brandName.replace(/"/g, '&quot;')}" style="position:absolute;top:30px;right:40px;height:48px;max-width:220px;object-fit:contain;opacity:0.92;z-index:10;${legible}" />`
       patched = patched.replace('</div></body>', `${clientTag}</div></body>`)
     }
     return patched

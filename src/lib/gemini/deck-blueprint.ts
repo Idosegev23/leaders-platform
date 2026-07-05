@@ -105,10 +105,18 @@ function buildPrompt(input: BlueprintInput): string {
 
 <principles>
 - ה-INSIGHT הוא עמוד השדרה. כל שקף אחריו מפתח אותו — נטען, מוכח, נפרע. אין "שקף אי".
-- אורך נגזר מהסיפור (לרוב 14–22 שקפים). כל pillar מקבל שקף משלו; קריאייטיב מקבל דוגמאות קונקרטיות.
+  שקף ה-INSIGHT נושא נתון תומך אחד (סטטיסטיקה/מגמה) — לא רק אמירה.
+- הצעה עשירה ומפורטת: הסיפור נמסר לעומק (לרוב 18–24 שקפים). כל pillar מקבל שקף משלו;
+  קריאייטיב מקבל 2–3 דוגמאות קונקרטיות (תסריט ריל/סטורי אמיתי); כל משפיען מפתח מקבל שקף פרופיל
+  עם נתונים אמיתיים ונימוק why-fit (למה דווקא הוא למותג הזה).
+- שלושה עמודי תווך = שלושה צירים שונים (מסר / הוכחה / פורמט), לא שניים על אותו ציר.
+  [רע: "אותנטיות" ו"מוצר בפעולה" — שניהם על *איך מצלמים*. טוב: מסר, הוכחת-מוצר, ופורמט-הפצה.]
 - אמת בלבד: אל תמציא מספרים, מתחרים או handles. אין נתון? כתוב מה צריך לברר.
-- קשת: cover → brief → goals → audience → INSIGHT → strategy → pillars → bigIdea →
-  creative → influencers → deliverables → metrics → closing (beat יכול להתפרש על כמה שקפים).
+- קשת מלאה: cover → brief → goals → audience → INSIGHT(+נתון) → strategy → pillars →
+  bigIdea → creative(2–3 יישומים) → influencers(פרופיל לכל מפתח) →
+  competitive(למה אנחנו ולא המתחרים — מתוך המחקר) → timeline(איך הקמפיין רץ, שבוע-אחר-שבוע/שלבים) →
+  deliverables → metrics → results(תחזית תוצאות מסומנת-כתחזית, נגזרת מ-reach אמיתי) → closing.
+  (beat יכול להתפרש על כמה שקפים; competitive/timeline/results הם חלק מ"ההרחבה המשמעותית".)
 </principles>
 
 <brand>${input.brandName}</brand>
@@ -145,7 +153,8 @@ ${compact(pickWizardHighlights(input.wizardData), 4000) || '(אין נתוני �
     }
   ]
 }
-כל השדות בעברית. slidePlan באורך שהסיפור דורש (14–22 בד"כ), בסדר, כשהתובנה מתפתחת לאורכו.
+כל השדות בעברית. slidePlan עשיר ומפורט (18–24 בד"כ, כולל competitive/timeline/results),
+בסדר, כשהתובנה מתפתחת לאורכו. עדיף עומק ופירוט על קיצור.
 </output>`
 }
 
