@@ -1,0 +1,6 @@
+import fs from 'node:fs'; import path from 'node:path'
+const dir = path.join(process.cwd(), '.pptx-verify', 'scenes')
+const files = fs.readdirSync(dir).filter(f => f.endsWith('.png')).sort()
+const cards = files.map(f => { const b64 = fs.readFileSync(path.join(dir,f)).toString('base64'); return `<figure><figcaption>${f.replace('.png','')}</figcaption><img src="data:image/png;base64,${b64}"/></figure>` }).join('\n')
+const html = `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8"><title>סצנות AI — סולתם</title><style>body{margin:0;background:#111;font-family:system-ui;color:#eee}header{position:sticky;top:0;background:#000;padding:14px 24px;border-bottom:1px solid #333}main{max-width:1200px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:24px}figure{margin:0;background:#000;border-radius:10px;overflow:hidden}figcaption{padding:8px 16px;color:#9aa;text-transform:uppercase;letter-spacing:1px;font-size:13px;background:#0a0a0a}img{display:block;width:100%}</style></head><body><header><b>סצנות AI קולנועיות — Nano Banana Pro reference-conditioned על מוצרי סולתם האמיתיים</b></header><main>${cards}</main></body></html>`
+fs.writeFileSync(path.join(dir,'_gallery.html'), html); console.log(path.join(dir,'_gallery.html'))

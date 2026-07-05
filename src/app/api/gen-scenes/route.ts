@@ -27,6 +27,12 @@ const ART_DIRECTIONS: Array<{ forSlideType: string; artDirection: string }> = [
   { forSlideType: 'ingredients-flatlay', artDirection: 'top-down flatlay — the real product surrounded by fresh colorful raw ingredients on a rustic wood board, bright natural light, editorial food styling' },
   { forSlideType: 'product-hero', artDirection: 'clean editorial product hero — the real product on a polished marble surface, soft studio light, premium catalog aesthetic, subtle reflection' },
   { forSlideType: 'craft-closeup', artDirection: 'extreme close-up of the real product — its material, surface and craftsmanship, dramatic side light, texture-forward, premium' },
+  { forSlideType: 'brief-mood', artDirection: 'moody transitional still-life — the real product resting on a weathered rustic counter, one dramatic shaft of light, contemplative and premium, dark negative space' },
+  { forSlideType: 'audience-family', artDirection: 'warm candid family kitchen moment — the real product in everyday use, a home cook and family blurred in the background, golden natural light, aspirational lifestyle' },
+  { forSlideType: 'insight-content', artDirection: 'overhead recipe-in-progress content-creation vibe — the real product mid-cook shot from above as if filming a reel, phone-friendly framing, bright airy modern kitchen' },
+  { forSlideType: 'bigidea-hero', artDirection: 'bold aspirational hero — the real product as the centerpiece on a clean dramatic backdrop with a deep brand-red accent wash, editorial, confident, striking negative space' },
+  { forSlideType: 'creative-reel', artDirection: 'dynamic close action — a sizzle or pour into the real product, motion and energy, splashes frozen, vivid reel aesthetic, shallow focus' },
+  { forSlideType: 'closing-celebration', artDirection: 'celebratory served meal at a beautiful set table — the real product present, glasses raised feel, warm golden hour light, joyful premium closing mood' },
 ]
 
 export async function POST(request: NextRequest) {

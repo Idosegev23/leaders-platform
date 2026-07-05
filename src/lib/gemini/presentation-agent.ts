@@ -349,8 +349,10 @@ export async function runPresentationAgent(
   // references (see brandProductRefs below). Every other visual slide is generated.
   const preferredImageryUrls = (input.brandAssets?.sceneImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url)
   const preferredImageryContext = preferredImageryUrls.length
-    ? `\n\nסצנות מותג קולנועיות שכבר יוצרו (AI, מכילות את המוצר האמיתי של הלקוח). השתמש בהן כ-imageUrl לשקפים הוויזואליים המרכזיים. לכל שקף ויזואלי נוסף שדורש תמונה — קרא ל-generate_brand_image עם prompt של סצנה (המוצר האמיתי משולב אוטומטית כרפרנס). לעולם אל תדביק צילום מוצר/קטלוג גולמי כ-imageUrl — הוא נראה כמו סטוק שנשאב מהאינטרנט:\n${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}`
-    : '\n\nאין סצנות מוכנות — לכל שקף ויזואלי צור תמונה עם generate_brand_image (המוצר האמיתי של הלקוח משולב אוטומטית כרפרנס). אל תשאיר שקפים ויזואליים ללא תמונה, ואל תדביק צילום קטלוג גולמי.'
+    ? `\n\nסצנות מותג קולנועיות מוכנות (AI, מכילות את המוצר האמיתי — העדף אותן כ-imageUrl):
+${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}
+כלל תמונות מחייב: כל שקף נרטיבי — cover, brief, audience, insight, pillar-*, bigIdea, creative, closing — חייב imageUrl של סצנה קולנועית (מהרשימה למעלה; מותר לחזור על סצנה עד פעמיים; אם נגמרו — צור עם generate_brand_image, המוצר האמיתי משולב אוטומטית). שקפי כרטיסים/נתונים — strategy, goals, competitive, timeline, deliverables, metrics, results — יכולים להישאר ללא תמונה (עיצוב כרטיסים נקי). לעולם אל תדביק צילום מוצר/קטלוג גולמי כ-imageUrl — הוא נראה כמו סטוק שנשאב מהאינטרנט.`
+    : '\n\nאין סצנות מוכנות — לכל שקף נרטיבי (cover/brief/audience/insight/pillar/bigIdea/creative/closing) צור תמונה עם generate_brand_image (המוצר האמיתי משולב אוטומטית כרפרנס). אל תשאיר שקף נרטיבי ללא תמונה, ואל תדביק צילום קטלוג גולמי.'
 
   // ── Reference-conditioned image generation (Phase 2) ──
   // Fetch the REAL brand product photos once and feed them as reference images
