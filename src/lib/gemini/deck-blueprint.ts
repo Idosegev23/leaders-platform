@@ -77,7 +77,9 @@ async function callModel(prompt: string): Promise<string> {
     geminiConfig: {
       thinkingConfig: { thinkingLevel: 'MEDIUM' as never },
       responseMimeType: 'application/json',
-      maxOutputTokens: 8000,
+      // 18–24 richly-described slides overflow 8000 → truncated JSON → parse
+      // failure. Give the expanded blueprint room.
+      maxOutputTokens: 16000,
     },
   })
   return result.text || ''
