@@ -232,6 +232,32 @@ li{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-
 </div>${foot}`
   }
 
+  // ── Influencer profile — circular avatar at native scale (no upscaling of a
+  // small IG thumbnail = no distortion/graininess), the natural way to present
+  // a creator. The clashing raw background shrinks to a thin ring. ──
+  const isInfluencerProfile = slideType === 'influencers' && !!imageUrl && !!keyNum
+  if (isInfluencerProfile) {
+    const rowDir = imageSide === 'left' ? 'row' : 'row-reverse'
+    const avatarRing = ctx.persona === 'cinematic-dark' ? 'rgba(255,255,255,0.14)' : mix(T.bg, '#ffffff', 0.6)
+    return `${head}
+<div class="eyebrow">${esc(eyebrow)}</div>
+<div style="position:absolute;inset:0;display:flex;flex-direction:${rowDir};align-items:center;justify-content:center;gap:96px;padding:0 150px;z-index:4;">
+  <div style="flex:0 0 auto;width:400px;height:400px;border-radius:50%;overflow:hidden;background:${mix(T.bg, T.accent, 0.08)};border:8px solid ${avatarRing};box-shadow:0 26px 70px rgba(30,25,15,0.24);">
+    <img src="${esc(imageUrl)}" style="width:100%;height:100%;object-fit:cover;object-position:center 22%;"/>
+  </div>
+  <div style="flex:1;max-width:720px;">
+    <div style="width:52px;height:4px;background:${T.accent};margin-bottom:22px;"></div>
+    <h1 style="font-size:${title.length > 22 ? 52 : 62}px;font-weight:900;line-height:1.04;letter-spacing:-1px;margin-bottom:${subtitle ? 12 : 18}px;">${title}</h1>
+    ${subtitle ? `<h2 style="font-size:24px;font-weight:400;color:${T.muted};margin-bottom:20px;line-height:1.35;">${subtitle}</h2>` : ''}
+    ${body ? `<p style="font-size:21px;line-height:1.62;color:${mix(T.text, T.bg, 0.15)};margin-bottom:30px;">${body}</p>` : ''}
+    <div style="display:flex;align-items:baseline;gap:14px;">
+      <div style="font-family:${T.headingFont};font-size:96px;font-weight:900;line-height:0.9;letter-spacing:-3px;color:${T.primary};">${keyNum}</div>
+      ${keyLabel ? `<div style="font-size:20px;color:${T.muted};">${keyLabel}</div>` : ''}
+    </div>
+  </div>
+</div>${foot}`
+  }
+
   // ── Shared content blocks ──
   const titleBlock = `
   <div style="width:52px;height:4px;background:${T.accent};margin-bottom:26px;"></div>
