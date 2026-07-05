@@ -343,14 +343,14 @@ export async function runPresentationAgent(
     ? `\n\nתמונות זמינות (השתמש ב-URLs האלה בשקפים):\n${Object.entries(input.images).map(([k, v]) => `  - ${k}: ${v}`).join('\n')}`
     : ''
 
-  // Verified real-brand imagery (scenes first — hero-worthy) beats generic AI images.
-  const preferredImageryUrls = [
-    ...(input.brandAssets?.sceneImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url),
-    ...(input.brandAssets?.productImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url),
-  ]
+  // Cinematic AI scenes (reference-conditioned on the real product) are the ONLY
+  // paste-ready brand imagery. Raw product/catalog photos are NOT offered as
+  // paste targets — they read as scraped stock; they serve only as generation
+  // references (see brandProductRefs below). Every other visual slide is generated.
+  const preferredImageryUrls = (input.brandAssets?.sceneImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url)
   const preferredImageryContext = preferredImageryUrls.length
-    ? `\n\nתמונות מותג אמיתיות ומאומתות (המוצר האמיתי של הלקוח — סצנות ותצלומי מוצר). העדף אותן על פני כל תמונה אחרת כשאתה מעביר imageUrl לשקפים ויזואליים (cover, bigIdea, deliverables):\n${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}`
-    : ''
+    ? `\n\nסצנות מותג קולנועיות שכבר יוצרו (AI, מכילות את המוצר האמיתי של הלקוח). השתמש בהן כ-imageUrl לשקפים הוויזואליים המרכזיים. לכל שקף ויזואלי נוסף שדורש תמונה — קרא ל-generate_brand_image עם prompt של סצנה (המוצר האמיתי משולב אוטומטית כרפרנס). לעולם אל תדביק צילום מוצר/קטלוג גולמי כ-imageUrl — הוא נראה כמו סטוק שנשאב מהאינטרנט:\n${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}`
+    : '\n\nאין סצנות מוכנות — לכל שקף ויזואלי צור תמונה עם generate_brand_image (המוצר האמיתי של הלקוח משולב אוטומטית כרפרנס). אל תשאיר שקפים ויזואליים ללא תמונה, ואל תדביק צילום קטלוג גולמי.'
 
   // ── Reference-conditioned image generation (Phase 2) ──
   // Fetch the REAL brand product photos once and feed them as reference images
