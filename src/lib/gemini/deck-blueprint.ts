@@ -119,6 +119,11 @@ function buildPrompt(input: BlueprintInput): string {
   competitive(למה אנחנו ולא המתחרים — מתוך המחקר) → timeline(איך הקמפיין רץ, שבוע-אחר-שבוע/שלבים) →
   deliverables → metrics → results(תחזית תוצאות מסומנת-כתחזית, נגזרת מ-reach אמיתי) → closing.
   (beat יכול להתפרש על כמה שקפים; competitive/timeline/results הם חלק מ"ההרחבה המשמעותית".)
+- metrics ≠ results — לעולם לא אותם מספרים פעמיים:
+  • metrics = הגדרת ה-KPIs שנמדוד (Reach, Views, ER, Saves) + התקציב/CPE/CPM.
+  • results = פירוק ה-reach לפי משפיען (שם + עוקבים של כל אחד → הסכום, ואיך מגיעים ליעד) או benchmark מול הקטגוריה — דאטה שונה, לא חזרה על אותם מספרי תקציב.
+- timeline כולל את כל המשפיענים שהוזכרו (אל תשאיר יוצר בלי שיבוץ). deliverables מתיישבים עם מספר המשפיענים (כמות × יוצרים).
+- שמות משפיענים בעברית (תעתק אם צריך: "Danielle Amit"→"דניאל עמית"), בלי אמוג'י, צורה אחת לכל אדם.
 </principles>
 
 <brand>${input.brandName}</brand>
