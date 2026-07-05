@@ -6,6 +6,7 @@ import {
   getDeepResearch,
   extractFinalText,
   extractSources,
+  extractError,
   estimateCostCents,
 } from "@/lib/research-hub/deep-research";
 import {
@@ -299,7 +300,7 @@ export const { POST } = serve<Init>(
               return { done: true as const, text, sources, cost };
             }
             if (r.status === "failed" || r.status === "cancelled" || r.status === "incomplete") {
-              throw new Error(`Deep Research ${s.bucketId}: ${r.status} — ${r.error ?? "no error"}`);
+              throw new Error(`Deep Research ${s.bucketId}: ${r.status} — ${extractError(r) ?? "no error"}`);
             }
             return { done: false as const };
           },
@@ -485,7 +486,7 @@ export const { POST } = serve<Init>(
                   return { done: true as const, text, sources, cost };
                 }
                 if (r.status === "failed" || r.status === "cancelled" || r.status === "incomplete") {
-                  throw new Error(`Gap research ${s.bucketId}: ${r.status} — ${r.error ?? "no error"}`);
+                  throw new Error(`Gap research ${s.bucketId}: ${r.status} — ${extractError(r) ?? "no error"}`);
                 }
                 return { done: false as const };
               },

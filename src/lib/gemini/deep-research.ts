@@ -1,15 +1,19 @@
 /**
- * Gemini Deep Research Agent — REST wrapper.
+ * Gemini Deep Research Agent — @google/genai SDK wrapper.
  *
  * Background: Google's Deep Research agent (`deep-research-preview-04-2026` /
  * `deep-research-max-preview-04-2026`) runs autonomous multi-step research
  * with built-in Google Search, URL Context, and Code Execution. Tasks take
  * 5-15 minutes typically. The Interactions API is mandatory `background=true`.
  *
- * The @google/genai SDK at v1.34 does not yet expose `interactions`, so this
- * wrapper hits the REST endpoint directly:
- *   POST https://generativelanguage.googleapis.com/v1beta/interactions
- *   GET  https://generativelanguage.googleapis.com/v1beta/interactions/<id>
+ * Schema note (May/June 2026 breaking change):
+ *  - The legacy Interactions request/response schema was removed on
+ *    2026-06-08 (https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026).
+ *    We used to POST the legacy body to /v1beta/interactions by hand; that
+ *    now 400s ("legacy Interactions API schema is no longer supported").
+ *  - We now use @google/genai >= 2.x native `ai.interactions`, which speaks
+ *    the current schema. Results are read from the `steps` array (a
+ *    structured timeline of `model_output` turns) instead of `outputs`.
  *
  * Vercel constraint: max function duration is 600s. We never block a single
  * function for the full research time. Instead callers either:
@@ -21,12 +25,15 @@
  *      "deep research mode" button.
  */
 
-const BASE = 'https://generativelanguage.googleapis.com/v1beta/interactions'
+import { GoogleGenAI } from '@google/genai'
 
-function getApiKey(): string {
-  const k = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
-  if (!k) throw new Error('GEMINI_API_KEY (or GOOGLE_API_KEY) not configured')
-  return k
+let cachedClient: GoogleGenAI | null = null
+function client(): GoogleGenAI {
+  if (cachedClient) return cachedClient
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+  if (!apiKey) throw new Error('GEMINI_API_KEY (or GOOGLE_API_KEY) not configured')
+  cachedClient = new GoogleGenAI({ apiKey })
+  return cachedClient
 }
 
 export type DeepResearchAgent =
@@ -52,12 +59,53 @@ export interface DeepResearchInput {
   thinkingSummaries?: 'auto' | 'none'
 }
 
+/** One text/annotation content part inside a `model_output` step. */
+type DRContentPart = {
+  type?: string
+  text?: string
+  annotations?: Array<{
+    type?: string
+    url?: string
+    title?: string
+    start_index?: number
+    end_index?: number
+  }>
+}
+/** One entry in the interaction step timeline (new 2026 schema). */
+type DRStep = {
+  type?: string
+  content?: DRContentPart[]
+  error?: { message?: string; code?: number | string }
+}
+
 export interface DeepResearchInteraction {
   id: string
-  status: 'in_progress' | 'completed' | 'failed' | 'queued'
-  outputs?: Array<{ type: 'text' | 'image'; text?: string; data?: string }>
+  status:
+    | 'in_progress'
+    | 'requires_action'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'incomplete'
+    | 'budget_exceeded'
+    | 'queued'
+  steps?: DRStep[]
   error?: { code?: string; message?: string }
   createdAt?: string
+}
+
+/** Map an SDK interaction response to our stable wrapper shape. */
+function toInteraction(raw: unknown): DeepResearchInteraction {
+  const r = raw as { id: string; status: DeepResearchInteraction['status']; steps?: DRStep[]; created?: string }
+  const steps = r.steps ?? []
+  const stepError = steps.find((s) => s.error?.message)?.error
+  return {
+    id: r.id,
+    status: r.status,
+    steps,
+    createdAt: r.created,
+    ...(stepError ? { error: { message: stepError.message, code: stepError.code != null ? String(stepError.code) : undefined } } : {}),
+  }
 }
 
 /**
@@ -68,63 +116,38 @@ export async function startDeepResearch(input: DeepResearchInput): Promise<DeepR
   const requestId = `dr-start-${Date.now()}`
   const agent = input.agent || 'deep-research-preview-04-2026'
 
-  // Build multi-modal input array if attachments are provided, otherwise plain text.
-  const bodyInput = input.attachments?.length
-    ? [
-        { type: 'text', text: input.prompt },
-        ...input.attachments.map((a) => ({
-          type: a.type,
-          uri: a.uri,
-          ...(a.mimeType ? { mime_type: a.mimeType } : {}),
-        })),
-      ]
+  // NOTE: multimodal attachments are not wired to the v2 `input` Content
+  // schema yet (no caller passes them today). Fold any provided URIs into the
+  // prompt as plain text so behaviour degrades gracefully rather than 400ing.
+  const promptText = input.attachments?.length
+    ? `${input.prompt}\n\nReference material:\n${input.attachments.map((a) => `- ${a.type}: ${a.uri}`).join('\n')}`
     : input.prompt
 
-  const body: Record<string, unknown> = {
+  console.log(`[DeepResearch][${requestId}] Starting ${agent}, prompt=${promptText.length} chars, tools=${(input.tools || []).map(t => t.type).join('/') || 'default'}`)
+
+  const interaction = await client().interactions.create({
     agent,
-    input: bodyInput,
+    input: promptText,
     background: true,
+    store: true,
+    ...(input.tools?.length ? { tools: input.tools as never } : {}),
+    ...(input.previousInteractionId ? { previous_interaction_id: input.previousInteractionId } : {}),
     agent_config: {
       type: 'deep-research',
       thinking_summaries: input.thinkingSummaries || 'none',
       visualization: 'auto',
     },
-  }
-  if (input.tools?.length) body.tools = input.tools
-  if (input.previousInteractionId) body.previous_interaction_id = input.previousInteractionId
-
-  console.log(`[DeepResearch][${requestId}] Starting ${agent}, prompt=${input.prompt.length} chars, tools=${(input.tools || []).map(t => t.type).join('/') || 'default'}`)
-
-  const res = await fetch(BASE, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': getApiKey(),
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Deep Research start failed: HTTP ${res.status} — ${text.slice(0, 300)}`)
-  }
-  const json = await res.json() as DeepResearchInteraction
-  console.log(`[DeepResearch][${requestId}] ✅ Started: ${json.id} (status=${json.status})`)
-  return json
+
+  const mapped = toInteraction(interaction)
+  console.log(`[DeepResearch][${requestId}] ✅ Started: ${mapped.id} (status=${mapped.status})`)
+  return mapped
 }
 
 /** Single status poll. Returns whatever the server has (in_progress / completed / failed). */
 export async function getDeepResearchStatus(interactionId: string): Promise<DeepResearchInteraction> {
-  const res = await fetch(`${BASE}/${encodeURIComponent(interactionId)}`, {
-    method: 'GET',
-    headers: { 'x-goog-api-key': getApiKey() },
-    signal: AbortSignal.timeout(30_000),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Deep Research status failed: HTTP ${res.status} — ${text.slice(0, 300)}`)
-  }
-  return res.json() as Promise<DeepResearchInteraction>
+  const interaction = await client().interactions.get(interactionId)
+  return toInteraction(interaction)
 }
 
 /**
@@ -152,11 +175,17 @@ export async function pollUntilComplete(
   return last ?? { id: interactionId, status: 'in_progress' }
 }
 
-/** Pull the final text output from a completed interaction (last text delta). */
+/** Pull the final text output from a completed interaction (last model_output text). */
 export function extractText(interaction: DeepResearchInteraction): string {
-  if (!interaction.outputs?.length) return ''
-  const texts = interaction.outputs.filter((o) => o.type === 'text' && o.text)
-  return texts[texts.length - 1]?.text || ''
+  const steps = interaction.steps ?? []
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].type !== 'model_output') continue
+    const parts = steps[i].content ?? []
+    for (let j = parts.length - 1; j >= 0; j--) {
+      if (parts[j].type === 'text' && parts[j].text) return parts[j].text!
+    }
+  }
+  return ''
 }
 
 /* ────────────────────────────────────────────────────────────────────

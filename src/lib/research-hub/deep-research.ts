@@ -6,6 +6,14 @@
  *  - We start with `background: true, store: true`, persist the
  *    interaction id, then poll `interactions.get` from the workflow
  *    after a sleep. Each poll is one short serverless tick.
+ *
+ * Schema note (May/June 2026 breaking change):
+ *  - The legacy Interactions request/response schema was removed on
+ *    2026-06-08 (https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026).
+ *  - We now use @google/genai >= 2.x native `ai.interactions`, which speaks
+ *    the current schema. Results are read from the `steps` array (a
+ *    structured timeline of `model_output` turns) instead of the old
+ *    top-level `outputs` array.
  */
 
 import { geminiClient, MODELS } from "./gemini";
@@ -16,13 +24,46 @@ export type DRStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "incomplete";
+  | "incomplete"
+  | "budget_exceeded";
 
 export type DRSource = {
   url: string;
   title?: string;
   start?: number;
   end?: number;
+};
+
+/**
+ * The subset of the SDK's Interaction response we read. The SDK types these
+ * as large discriminated unions; we narrow structurally on the `type` tag so
+ * this stays resilient to non-breaking additions in the union.
+ */
+type DRAnnotation = {
+  type?: string;
+  url?: string;
+  title?: string;
+  start_index?: number;
+  end_index?: number;
+};
+type DRContent = {
+  type?: string;
+  text?: string;
+  annotations?: DRAnnotation[];
+};
+type DRStep = {
+  type?: string;
+  content?: DRContent[];
+  error?: { message?: string; code?: number | string };
+};
+export type DRInteraction = {
+  id: string;
+  status: DRStatus;
+  steps?: DRStep[];
+  usage?: {
+    total_input_tokens?: number;
+    total_output_tokens?: number;
+  };
 };
 
 export async function startDeepResearch(opts: {
@@ -57,12 +98,6 @@ export async function startDeepResearch(opts: {
     "Where Israel-specific data is not available, fall back to global data and explicitly say so.",
   ].filter(Boolean);
 
-  const client = ai as unknown as {
-    interactions: {
-      create: (params: Record<string, unknown>) => Promise<{ id: string; status: DRStatus }>;
-    };
-  };
-
   const tools: Array<Record<string, unknown>> = [
     { type: "google_search" },
     { type: "url_context" },
@@ -72,90 +107,78 @@ export async function startDeepResearch(opts: {
     tools.push({ type: "file_search", file_search_store_names: opts.fileSearchStores });
   }
 
-  const interaction = await client.interactions.create({
+  const interaction = await ai.interactions.create({
     agent: opts.agent ?? MODELS.deepResearch,
     input: lines.join("\n"),
     background: true,
     store: true,
-    tools,
+    tools: tools as never,
     agent_config: { type: "deep-research", thinking_summaries: "auto" },
   });
 
   return { id: interaction.id, status: interaction.status as DRStatus };
 }
 
-export async function getDeepResearch(interactionId: string) {
+export async function getDeepResearch(interactionId: string): Promise<DRInteraction> {
   const ai = geminiClient();
-  const client = ai as unknown as {
-    interactions: {
-      get: (id: string) => Promise<{
-        id: string;
-        status: DRStatus;
-        outputs?: Array<{
-          type: string;
-          text?: string;
-          annotations?: Array<{
-            type: string;
-            url?: string;
-            title?: string;
-            start_index?: number;
-            end_index?: number;
-          }>;
-        }>;
-        usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
-        error?: string;
-      }>;
-    };
-  };
-  return client.interactions.get(interactionId);
+  const interaction = await ai.interactions.get(interactionId);
+  return interaction as unknown as DRInteraction;
 }
 
 export async function cancelDeepResearch(interactionId: string) {
   const ai = geminiClient();
-  const client = ai as unknown as {
-    interactions: { cancel?: (id: string) => Promise<unknown>; delete?: (id: string) => Promise<unknown> };
-  };
-  if (client.interactions.cancel) return client.interactions.cancel(interactionId);
-  if (client.interactions.delete) return client.interactions.delete(interactionId);
-  throw new Error("interactions.cancel/delete not available on this SDK version");
+  return ai.interactions.cancel(interactionId);
 }
 
-export function extractFinalText(
-  interaction: Awaited<ReturnType<typeof getDeepResearch>>,
-): string {
-  const outs = interaction.outputs ?? [];
-  for (let i = outs.length - 1; i >= 0; i--) {
-    if (outs[i].type === "text" && outs[i].text) return outs[i].text!;
+/** Pull the last `model_output` text from the interaction's step timeline. */
+export function extractFinalText(interaction: DRInteraction): string {
+  const steps = interaction.steps ?? [];
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].type !== "model_output") continue;
+    const parts = steps[i].content ?? [];
+    for (let j = parts.length - 1; j >= 0; j--) {
+      if (parts[j].type === "text" && parts[j].text) return parts[j].text!;
+    }
   }
   return "";
 }
 
-export function extractSources(
-  interaction: Awaited<ReturnType<typeof getDeepResearch>>,
-): DRSource[] {
+/** Collect unique url_citation annotations across all model_output steps. */
+export function extractSources(interaction: DRInteraction): DRSource[] {
   const seen = new Map<string, DRSource>();
-  for (const out of interaction.outputs ?? []) {
-    if (out.type !== "text") continue;
-    for (const a of out.annotations ?? []) {
-      if (a.type === "url_citation" && a.url && !seen.has(a.url)) {
-        seen.set(a.url, {
-          url: a.url,
-          title: a.title,
-          start: a.start_index,
-          end: a.end_index,
-        });
+  for (const step of interaction.steps ?? []) {
+    if (step.type !== "model_output") continue;
+    for (const part of step.content ?? []) {
+      if (part.type !== "text") continue;
+      for (const a of part.annotations ?? []) {
+        if (a.type === "url_citation" && a.url && !seen.has(a.url)) {
+          seen.set(a.url, {
+            url: a.url,
+            title: a.title,
+            start: a.start_index,
+            end: a.end_index,
+          });
+        }
       }
     }
   }
   return Array.from(seen.values());
 }
 
+/** Surface the first step-level error message, if the interaction failed. */
+export function extractError(interaction: DRInteraction): string | undefined {
+  for (const step of interaction.steps ?? []) {
+    if (step.error?.message) return step.error.message;
+  }
+  return undefined;
+}
+
 export function estimateCostCents(usage?: {
-  input_tokens?: number;
-  output_tokens?: number;
+  total_input_tokens?: number;
+  total_output_tokens?: number;
 }): number {
-  const inT = usage?.input_tokens ?? 0;
-  const outT = usage?.output_tokens ?? 0;
+  const inT = usage?.total_input_tokens ?? 0;
+  const outT = usage?.total_output_tokens ?? 0;
   const dollars = (inT * 4) / 1_000_000 + (outT * 18) / 1_000_000;
   return Math.round(dollars * 100);
 }
