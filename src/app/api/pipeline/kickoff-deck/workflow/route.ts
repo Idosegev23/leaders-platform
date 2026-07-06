@@ -153,21 +153,35 @@ export const { POST } = serve<Init>(async (context) => {
   }
   if (!blueprintReady) throw new Error(`blueprint timed out for ${documentId}`)
 
-  // ── 3. GENERATE (fire + poll) ──────────────────────────────────────────
-  await context.run('fire-generate', async () => {
-    await fireForget(`${base}/api/generate-full`, { documentId, useBlueprint: true }, secret)
-    return { fired: true }
+  // ── 3. GENERATE (context.call) ─────────────────────────────────────────
+  // generate-full runs ~10 min and MUST keep its connection open, or Vercel
+  // reaps the long invocation once the caller disconnects (fire-and-forget
+  // works for the short blueprint but not here). context.call has QStash hold
+  // the connection for the whole run. Unlike blueprint, generate-full's
+  // response is small, so it doesn't hit the QStash response-size limit that
+  // broke context.call there. Poll the doc afterwards as a belt-and-suspenders
+  // check (context.call returns before Vercel finishes writing in rare cases).
+  const gen = await context.call('generate-full', {
+    url: `${base}/api/generate-full`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-secret': secret },
+    body: JSON.stringify({ documentId, useBlueprint: true }),
+    timeout: '900s',
+    retries: 0,
   })
+  if (gen.status < 200 || gen.status >= 300) {
+    throw new Error(`generate-full failed (${gen.status}) for ${documentId}`)
+  }
   let deckReady = false
-  for (let i = 0; i < 30 && !deckReady; i++) {
-    await context.sleep(`gen-wait-${i}`, 30)
+  for (let i = 0; i < 6 && !deckReady; i++) {
     deckReady = await context.run(`gen-check-${i}`, async () => {
       const d = await readDeckData(sb, documentId)
       const html = d._htmlPresentation as { htmlSlides?: unknown[] } | undefined
       return (html?.htmlSlides?.length ?? 0) > 0
     })
+    if (!deckReady) await context.sleep(`gen-wait-${i}`, 20)
   }
-  if (!deckReady) throw new Error(`generate-full timed out for ${documentId}`)
+  if (!deckReady) throw new Error(`generate-full produced no slides for ${documentId}`)
 
   // Phase 2: context.run → fire Canva import, poll, then notifySalesforceDeck.
   return { ok: true, documentId }
