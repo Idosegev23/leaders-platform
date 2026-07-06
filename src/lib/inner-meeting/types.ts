@@ -19,6 +19,9 @@ export interface Form {
   title: string | null
   share_token: string
   active_editors_count: number
+  /** Free-form metadata. Salesforce-originated kickoffs stash
+   *  { source, salesforce_ref, project_name } here for correlation. */
+  metadata?: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
