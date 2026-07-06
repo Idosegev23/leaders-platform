@@ -105,18 +105,34 @@ export const { POST } = serve<Init>(async (context) => {
     return { documentId: doc.id as string, reused: false }
   })
 
-  // ── 2. GENERATE (headless deck) ────────────────────────────────────────
+  const secret = process.env.LEADS_TRIGGER_SECRET || ''
+
+  // ── 2. BLUEPRINT — plan the full deck ──────────────────────────────────
+  // The strategic plan (18–24+ slides) that BINDS generate-full to build the
+  // complete structure. Without it, the generator free-plans and trims to a
+  // lean deck. This is the primary lever for deck richness / slide count.
+  const bp = await context.call('blueprint', {
+    url: `${appBaseUrl()}/api/generate-blueprint`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-secret': secret },
+    body: JSON.stringify({ documentId }),
+    timeout: '600s',
+    retries: 0,
+  })
+  if (bp.status < 200 || bp.status >= 300) {
+    throw new Error(`generate-blueprint failed (${bp.status}) for document ${documentId}`)
+  }
+
+  // ── 3. GENERATE (headless deck, bound to the blueprint) ────────────────
   // Durable long call: QStash makes the request and resumes the workflow with
   // the result, so the workflow function isn't held open for the ~13 min run.
-  // retries:0 — a retry would double-generate the same deck.
+  // useBlueprint:true → build every planned slide. retries:0 — a retry would
+  // double-generate the same deck.
   const gen = await context.call('generate-full', {
     url: `${appBaseUrl()}/api/generate-full`,
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '',
-    },
-    body: JSON.stringify({ documentId }),
+    headers: { 'Content-Type': 'application/json', 'x-internal-secret': secret },
+    body: JSON.stringify({ documentId, useBlueprint: true }),
     timeout: '900s',
     retries: 0,
   })
