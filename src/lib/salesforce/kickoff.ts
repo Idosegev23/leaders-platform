@@ -1,9 +1,15 @@
 /**
  * Salesforce kickoff (inner-meeting / פגישת התנעה) outbound push.
  *
- * Fires `kickoff.completed` back to Salesforce when the internal Leaders team
- * finishes filling a kickoff form that originated from Salesforce. Best-effort:
- * never throws, no-ops when no webhook URL is configured.
+ * Fires `kickoff.document_ready` back to Salesforce the moment we create a
+ * kickoff form from a Salesforce request — carrying the fill URL so Salesforce
+ * can surface the link to fill. Best-effort: never throws, no-ops when no
+ * webhook URL is configured.
+ *
+ * Salesforce contract (their /apexrest/projectkickoff endpoint):
+ *   { event: 'kickoff.document_ready', projectId, token, kickoff_document_url }
+ * `token` is the idempotency key (the form's share_token); `kickoff_document_url`
+ * is the /inner-meeting?form=<token> fill link.
  *
  * Mirrors src/lib/salesforce/quote.ts's transport exactly (same auth header,
  * same failure handling) so Salesforce sees a consistent envelope.
@@ -16,7 +22,7 @@
  *   SALESFORCE_OUTBOUND_SECRET     — else sent as `Authorization: Bearer <secret>`.
  */
 
-export type SalesforceKickoffEvent = 'kickoff.completed'
+export type SalesforceKickoffEvent = 'kickoff.document_ready'
 
 export interface KickoffPushResult {
   delivered: boolean

@@ -245,35 +245,6 @@ export async function POST(req: Request) {
     console.warn(`${tag} activity_log error:`, e instanceof Error ? e.message : e)
   }
 
-  // 4. Salesforce push-back (Hub → Salesforce) — only for SF-originated
-  //    kickoffs. The webhook stashed salesforce_ref on forms.metadata at
-  //    creation; manually-created kickoffs have none and simply skip this.
-  //    Best-effort, awaited so Vercel doesn't kill the function mid-POST.
-  try {
-    const { data: formRow } = await service
-      .from('forms')
-      .select('share_token, metadata')
-      .eq('id', formId)
-      .maybeSingle()
-    const meta = (formRow?.metadata as Record<string, unknown> | null) ?? {}
-    const salesforceRef = (meta.salesforce_ref as string | undefined) ?? null
-    if (salesforceRef) {
-      const { notifySalesforceKickoff } = await import('@/lib/salesforce/kickoff')
-      const result = await notifySalesforceKickoff(salesforceRef, 'kickoff.completed', {
-        form_token: (formRow?.share_token as string | undefined) ?? null,
-        client_name: payload.clientName,
-        project_name: (meta.project_name as string | undefined) ?? null,
-        meeting_date: payload.meetingDate,
-      })
-      if (result.delivered) console.log(`${tag} salesforce kickoff push delivered`)
-      else if (result.reason !== 'no_url') console.warn(`${tag} salesforce kickoff push not delivered: ${result.reason}`)
-    } else {
-      console.log(`${tag} no salesforce_ref on form — skipping SF push`)
-    }
-  } catch (e) {
-    console.warn(`${tag} salesforce kickoff push error:`, e instanceof Error ? e.message : e)
-  }
-
   return NextResponse.json({
     ok: true,
     mail: { sent: mailSent, failed: mailFailed },

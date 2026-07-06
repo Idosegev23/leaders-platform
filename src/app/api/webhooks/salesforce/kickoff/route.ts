@@ -115,6 +115,7 @@ export async function POST(request: Request) {
   }
 
   const sb = service()
+  const base = appBaseUrl()
 
   // Idempotency: reuse an existing OPEN (draft) kickoff for this project.
   const { data: existing } = await sb
@@ -127,51 +128,69 @@ export async function POST(request: Request) {
     .limit(1)
     .maybeSingle()
 
+  let shareToken: string
+  let reused: boolean
+
   if (existing?.share_token) {
-    const kickoffUrl = `${appBaseUrl()}/inner-meeting?form=${existing.share_token}`
+    shareToken = existing.share_token as string
+    reused = true
     console.log(`[salesforce-kickoff] reusing existing draft ${existing.id} for ref=${salesforceRef}`)
-    return NextResponse.json(
-      { ok: true, token: existing.share_token, kickoff_url: kickoffUrl, salesforce_ref: salesforceRef, reused: true },
-      { status: 200 },
-    )
+  } else {
+    // Create the form (client name → title + metadata) …
+    const { data: form, error: formErr } = await sb
+      .from('forms')
+      .insert({
+        type: 'inner_meeting',
+        status: 'draft',
+        title: clientName,
+        metadata: {
+          source: 'salesforce',
+          salesforce_ref: salesforceRef,
+          ...(projectName ? { project_name: projectName } : {}),
+        },
+      })
+      .select('id, share_token')
+      .single()
+    if (formErr || !form) {
+      console.error('[salesforce-kickoff] forms insert failed:', formErr)
+      return NextResponse.json({ ok: false, error: formErr?.message || 'Failed to create form' }, { status: 500 })
+    }
+
+    // … and its inner_meeting_forms payload (client_name drives the pre-fill).
+    const { error: innerErr } = await sb
+      .from('inner_meeting_forms')
+      .insert({ form_id: form.id, client_name: clientName })
+    if (innerErr) {
+      console.error('[salesforce-kickoff] inner_meeting_forms insert failed:', innerErr)
+      // Roll back the orphaned form so a retry can cleanly recreate the pair.
+      await sb.from('forms').delete().eq('id', form.id)
+      return NextResponse.json({ ok: false, error: innerErr.message }, { status: 500 })
+    }
+    shareToken = form.share_token as string
+    reused = false
+    console.log(`[salesforce-kickoff] created form ${form.id} for ref=${salesforceRef}`)
   }
 
-  // Create the form (client name → title + metadata) …
-  const { data: form, error: formErr } = await sb
-    .from('forms')
-    .insert({
-      type: 'inner_meeting',
-      status: 'draft',
-      title: clientName,
-      metadata: {
-        source: 'salesforce',
-        salesforce_ref: salesforceRef,
-        ...(projectName ? { project_name: projectName } : {}),
-      },
+  const kickoffUrl = `${base}/inner-meeting?form=${shareToken}`
+
+  // Push kickoff.document_ready back to Salesforce with the fill link, so the
+  // project record gets the kickoff URL. Awaited (Vercel kills the function on
+  // response) + best-effort (never throws). Fires on create AND reuse — the
+  // form's share_token is the idempotency `token`, so Salesforce dedups.
+  try {
+    const { notifySalesforceKickoff } = await import('@/lib/salesforce/kickoff')
+    const result = await notifySalesforceKickoff(salesforceRef, 'kickoff.document_ready', {
+      token: shareToken,
+      kickoff_document_url: kickoffUrl,
     })
-    .select('id, share_token')
-    .single()
-  if (formErr || !form) {
-    console.error('[salesforce-kickoff] forms insert failed:', formErr)
-    return NextResponse.json({ ok: false, error: formErr?.message || 'Failed to create form' }, { status: 500 })
+    if (result.delivered) console.log('[salesforce-kickoff] document_ready push delivered')
+    else if (result.reason !== 'no_url') console.warn(`[salesforce-kickoff] document_ready push not delivered: ${result.reason}`)
+  } catch (e) {
+    console.warn('[salesforce-kickoff] document_ready push error:', e instanceof Error ? e.message : e)
   }
-
-  // … and its inner_meeting_forms payload (client_name drives the pre-fill).
-  const { error: innerErr } = await sb
-    .from('inner_meeting_forms')
-    .insert({ form_id: form.id, client_name: clientName })
-  if (innerErr) {
-    console.error('[salesforce-kickoff] inner_meeting_forms insert failed:', innerErr)
-    // Roll back the orphaned form so a retry can cleanly recreate the pair.
-    await sb.from('forms').delete().eq('id', form.id)
-    return NextResponse.json({ ok: false, error: innerErr.message }, { status: 500 })
-  }
-
-  const kickoffUrl = `${appBaseUrl()}/inner-meeting?form=${form.share_token}`
-  console.log(`[salesforce-kickoff] created form ${form.id} for ref=${salesforceRef} → ${kickoffUrl}`)
 
   return NextResponse.json(
-    { ok: true, token: form.share_token, kickoff_url: kickoffUrl, salesforce_ref: salesforceRef, reused: false },
+    { ok: true, token: shareToken, kickoff_url: kickoffUrl, salesforce_ref: salesforceRef, reused },
     // 200 (not 201): some Salesforce Apex callouts only read the response body
     // when statusCode == 200 (same reason as the brief webhook).
     { status: 200 },
