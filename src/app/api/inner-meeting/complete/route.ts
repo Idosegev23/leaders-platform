@@ -245,6 +245,37 @@ export async function POST(req: Request) {
     console.warn(`${tag} activity_log error:`, e instanceof Error ? e.message : e)
   }
 
+  // 4. Auto deck pipeline — Salesforce-originated kickoffs only. Fire a durable
+  //    QStash workflow that assembles brief + kickoff and generates the deck
+  //    headless (behind the scenes). Best-effort: never blocks completion, and
+  //    dedups on formId so re-completing doesn't spawn a second run.
+  try {
+    const { data: formRow } = await service
+      .from('forms')
+      .select('metadata')
+      .eq('id', formId)
+      .maybeSingle()
+    const salesforceRef =
+      ((formRow?.metadata as Record<string, unknown> | null)?.salesforce_ref as string | undefined) ?? null
+    if (salesforceRef && process.env.QSTASH_TOKEN) {
+      const { Client: WorkflowClient } = await import('@upstash/workflow')
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || new URL(req.url).origin
+      const wf = new WorkflowClient({ token: process.env.QSTASH_TOKEN })
+      const { workflowRunId } = await wf.trigger({
+        url: `${appUrl}/api/pipeline/kickoff-deck/workflow`,
+        body: { formId, salesforceRef },
+        retries: 1,
+        headers: { 'Upstash-Deduplication-Id': `kickoff-deck:${formId}` },
+      })
+      console.log(`${tag} deck pipeline triggered — run ${workflowRunId}`)
+    } else {
+      console.log(`${tag} no salesforce_ref or QSTASH_TOKEN — skipping deck pipeline`)
+    }
+  } catch (e) {
+    console.warn(`${tag} deck pipeline trigger error:`, e instanceof Error ? e.message : e)
+  }
+
   return NextResponse.json({
     ok: true,
     mail: { sent: mailSent, failed: mailFailed },
