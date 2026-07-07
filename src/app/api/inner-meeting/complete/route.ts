@@ -258,17 +258,19 @@ export async function POST(req: Request) {
     const salesforceRef =
       ((formRow?.metadata as Record<string, unknown> | null)?.salesforce_ref as string | undefined) ?? null
     if (salesforceRef && process.env.QSTASH_TOKEN) {
-      const { Client: WorkflowClient } = await import('@upstash/workflow')
+      const { Client: QStashClient } = await import('@upstash/qstash')
       const appUrl =
         process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || new URL(req.url).origin
-      const wf = new WorkflowClient({ token: process.env.QSTASH_TOKEN })
-      const { workflowRunId } = await wf.trigger({
-        url: `${appUrl}/api/pipeline/kickoff-deck/workflow`,
+      const q = new QStashClient({ token: process.env.QSTASH_TOKEN })
+      const pub = await q.publishJSON({
+        url: `${appUrl}/api/pipeline/kickoff-deck/run`,
         body: { formId, salesforceRef },
+        headers: { 'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '' },
+        timeout: '600s',
         retries: 1,
-        headers: { 'Upstash-Deduplication-Id': `kickoff-deck:${formId}` },
+        deduplicationId: `kickoff-deck:${formId}`,
       })
-      console.log(`${tag} deck pipeline triggered — run ${workflowRunId}`)
+      console.log(`${tag} deck pipeline published (${(pub as { messageId?: string }).messageId ?? 'ok'})`)
     } else {
       console.log(`${tag} no salesforce_ref or QSTASH_TOKEN — skipping deck pipeline`)
     }
