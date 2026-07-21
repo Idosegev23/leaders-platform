@@ -205,7 +205,9 @@ function documentsToEvents(
     const owner = userById.get(r.user_id) ?? null
     const isQuote = r.type === 'quote'
     const typeLabel = isQuote ? 'הצעת מחיר' : 'מצגת קריאייטיבית'
-    const href = isQuote ? `/price-quote?id=${r.id}` : `/edit/${r.id}`
+    // The generator ignores ?id= until the Stage-1 loader lands; don't advertise
+    // a link that goes nowhere. Repointed at /price-quote?id= in Stage 3.
+    const href = isQuote ? `/price-quote` : `/edit/${r.id}`
 
     const kind: HubEvent['kind'] =
       r.status === 'completed' || r.status === 'generated' ? 'document_completed' : 'document_created'
