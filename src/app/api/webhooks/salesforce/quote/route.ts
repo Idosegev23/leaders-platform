@@ -36,7 +36,7 @@ function appBaseUrl(): string {
 
 function authorize(request: Request): boolean {
   const secret = process.env.SALESFORCE_WEBHOOK_SECRET
-  if (!secret) return true
+  if (!secret) return false // fail CLOSED: an unconfigured deploy rejects, never accepts
   const auth = request.headers.get('authorization')
   if (!auth?.startsWith('Bearer ')) return false
   try {
