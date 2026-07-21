@@ -44,7 +44,7 @@ function isPageOn(data: PriceQuoteData, page: PageIndex): boolean {
 
 /** Resolve the page-1 services list — prefers the editable `data.services` over the canned constant. */
 function resolveServices(data: PriceQuoteData): QuoteService[] {
-  if (data.services && data.services.length > 0) {
+  if (Array.isArray(data.services) && data.services.length > 0) {
     return data.services
   }
   return PRICE_QUOTE_SERVICES.map(s => ({
