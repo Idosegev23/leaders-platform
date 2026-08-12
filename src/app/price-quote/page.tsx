@@ -20,7 +20,7 @@ export default async function PriceQuotePage({
   const svc = priceQuoteService()
   const { data: quote } = await svc
     .from('price_quotes')
-    .select('id, draft_data, draft_version')
+    .select('id, draft_data, draft_version, published_count')
     .eq('id', id)
     .maybeSingle()
 
@@ -31,6 +31,7 @@ export default async function PriceQuotePage({
       initialData={quote.draft_data as PriceQuoteData}
       quoteId={quote.id as string}
       initialDraftVersion={quote.draft_version as number}
+      initialPublishedCount={quote.published_count as number}
     />
   )
 }

@@ -78,10 +78,12 @@ export default function PriceQuoteEditor({
   initialData,
   quoteId: initialQuoteId,
   initialDraftVersion,
+  initialPublishedCount,
 }: {
   initialData?: PriceQuoteData
   quoteId?: string
   initialDraftVersion?: number
+  initialPublishedCount?: number
 }) {
   const [data, setData] = useState<PriceQuoteData>(initialData ?? defaultData)
   const [previewPage, setPreviewPage] = useState(1)
@@ -498,6 +500,8 @@ export default function PriceQuoteEditor({
         defaultTitle={`הצעת מחיר · ${data.clientName || ''}${data.campaignName ? ' · ' + data.campaignName : ''}`.trim()}
         generatePdfBase64={generatePdfBase64}
         quoteData={data}
+        publishQuoteId={quoteId}
+        alreadySent={(initialPublishedCount ?? 0) > 0}
       />
       {/* Top bar */}
       <div className="bg-white border-b px-6 py-4 flex items-center justify-between sticky top-0 z-50">

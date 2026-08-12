@@ -400,6 +400,11 @@ function headerHtml(data: PriceQuoteData, logoUrl: string): string {
   const campaignLine = data.campaignName ? `<div class="header-subtitle">${escape(data.campaignName)}</div>` : ''
   const contactLine = data.contactName ? `<div class="header-contact">${escape(data.contactName)}</div>` : ''
   const dateLine = data.date ? `<div class="header-meta">${escape(data.date)}</div>` : ''
+  // Stable identifier so two PDFs of the same deal are distinguishable.
+  const numberText = data.quoteNumber
+    ? escape(data.quoteNumber) + (data.revisionNumber ? ` · גרסה ${data.revisionNumber}` : '')
+    : ''
+  const numberLine = numberText ? `<div class="header-meta">${numberText}</div>` : ''
   return `
     <div class="header">
       <div class="header-right">
@@ -409,6 +414,7 @@ function headerHtml(data: PriceQuoteData, logoUrl: string): string {
         ${campaignLine}
         ${contactLine}
         ${dateLine}
+        ${numberLine}
       </div>
       <div class="header-left">
         <img src="${logoUrl}" class="logo" alt="Leaders" />
