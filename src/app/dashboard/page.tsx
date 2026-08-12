@@ -197,6 +197,27 @@ export default async function DashboardPage() {
         })}
       </section>
 
+      {/* Docs library banner */}
+      <section className="-mt-14 md:-mt-20 mb-20 md:mb-28">
+        <Link
+          href="/library"
+          className="group flex items-center gap-5 p-6 ring-1 ring-brand-primary/10 rounded-sm bg-brand-ivory hover:ring-brand-primary/25 hover:-translate-y-[2px] hover:shadow-[0_12px_28px_-18px_rgba(26,26,46,0.18)] transition-all duration-300"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-[17px] md:text-[18px] font-semibold leading-tight">ספריית מסמכים</p>
+            <p className="mt-1 text-[11px] text-brand-primary/55 font-rubik tracking-[0.04em] uppercase font-medium">
+              Library
+            </p>
+            <p className="mt-2 text-[12px] text-brand-primary/65 leading-relaxed">
+              כל הטמפלטים, הנהלים ומסמכי העבודה של לידרס — מסודרים לפי קטגוריה, עם חיפוש
+            </p>
+          </div>
+          <span className="text-brand-primary/35 text-base transition-colors group-hover:text-brand-accent shrink-0">
+            ←
+          </span>
+        </Link>
+      </section>
+
       {/* Live Hub Feed */}
       <section>
         <div className="flex items-center gap-4 mb-6">
