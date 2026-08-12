@@ -125,4 +125,13 @@ export interface PriceQuoteData {
    * + selectedServiceIds combo. `selected` controls which appear on the PDF.
    */
   services?: QuoteService[]
+
+  // ── Persistence identity (set once the quote is saved; all optional so every
+  //    existing snapshot stays valid). Printed on page 1 as "Q-2026-0042 · גרסה 3".
+  /** Stable business number, e.g. "Q-2026-0042". */
+  quoteNumber?: string
+  /** Published revision this data belongs to. */
+  revisionNumber?: number
+  /** price_quotes.id — the draft this data hydrates from. */
+  quoteId?: string
 }

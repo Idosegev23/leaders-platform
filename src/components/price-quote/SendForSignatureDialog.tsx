@@ -25,13 +25,19 @@ type Props = {
   // Untyped on purpose — caller passes whatever should be snapshotted
   // for later regeneration. Server only treats it as JSONB.
   quoteData?: unknown
+  // When the quote is persisted, publishing goes through /publish: it freezes a
+  // revision, cancels any prior live link, and renders the PDF server-side from
+  // the frozen revision. When absent, the legacy request-signature path is used.
+  publishQuoteId?: string
+  // True once at least one revision was already sent — drives the supersede warning.
+  alreadySent?: boolean
 }
 
 const FOLDER_STORAGE_KEY = 'leaders.lastDriveFolder'
 
 type StoredFolder = { id: string; name: string }
 
-export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePdfBase64, quoteData }: Props) {
+export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePdfBase64, quoteData, publishQuoteId, alreadySent }: Props) {
   const [recipientName, setRecipientName] = useState('')
   const [recipientEmail, setRecipientEmail] = useState('')
   const [folder, setFolder] = useState<StoredFolder | null>(null)
@@ -81,24 +87,46 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
         throw new Error('לא נמצא Google access token. התנתק והתחבר מחדש כדי לאפשר גישה ל-Drive.')
       }
 
-      const pdfBase64 = await generatePdfBase64()
-      const res = await fetch('/api/quotes/request-signature', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Google-Access-Token': providerToken,
-        },
-        body: JSON.stringify({
-          title: title.trim(),
-          recipient_email: recipientEmail.trim(),
-          recipient_name: recipientName.trim() || null,
-          drive_folder_id: effectiveFolder.id,
-          drive_folder_name: effectiveFolder.name,
-          pdf_base64: pdfBase64,
-          message: message.trim() || null,
-          quote_data: quoteData ?? null,
-        }),
-      })
+      let res: Response
+      if (publishQuoteId) {
+        // Persisted quote → /publish freezes a revision, cancels any prior live
+        // link, and renders the PDF server-side from the frozen revision (no
+        // client PDF needed, so the client and the signed doc can never diverge).
+        res = await fetch(`/api/price-quotes/${publishQuoteId}/publish`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Google-Access-Token': providerToken,
+          },
+          body: JSON.stringify({
+            drive_folder_id: effectiveFolder.id,
+            drive_folder_name: effectiveFolder.name,
+            recipient_email: recipientEmail.trim(),
+            recipient_name: recipientName.trim() || null,
+            message: message.trim() || null,
+          }),
+        })
+      } else {
+        // Legacy path for an unsaved quote (autosave normally persists first).
+        const pdfBase64 = await generatePdfBase64()
+        res = await fetch('/api/quotes/request-signature', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Google-Access-Token': providerToken,
+          },
+          body: JSON.stringify({
+            title: title.trim(),
+            recipient_email: recipientEmail.trim(),
+            recipient_name: recipientName.trim() || null,
+            drive_folder_id: effectiveFolder.id,
+            drive_folder_name: effectiveFolder.name,
+            pdf_base64: pdfBase64,
+            message: message.trim() || null,
+            quote_data: quoteData ?? null,
+          }),
+        })
+      }
       const j = await res.json()
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`)
       setSuccess({ sign_link: j.sign_link, drive_link: j.drive_link })
@@ -229,6 +257,12 @@ export function SendForSignatureDialog({ open, onClose, defaultTitle, generatePd
             {error && (
               <div className="rounded-sm ring-1 ring-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
                 {error}
+              </div>
+            )}
+
+            {alreadySent && (
+              <div className="rounded-sm ring-1 ring-amber-400/30 bg-amber-400/10 px-3 py-2 text-[12px] text-amber-200">
+                שליחה זו תיצור גרסה חדשה. הקישור של הגרסה הקודמת יבוטל והלקוח יקבל מייל עם הקישור המעודכן.
               </div>
             )}
 

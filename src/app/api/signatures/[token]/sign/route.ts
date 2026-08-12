@@ -84,6 +84,14 @@ export async function POST(
   if (req.status === 'cancelled' || new Date(req.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ error: 'בקשת החתימה פגה תוקף' }, { status: 410 })
   }
+  // Only pending/opened may proceed to signing. Anything else (e.g. superseded
+  // by a newer revision) is rejected here AND by the DB write-once trigger.
+  if (req.status !== 'pending' && req.status !== 'opened') {
+    return NextResponse.json(
+      { error: 'בקשת החתימה עודכנה — התקבל קישור חדש. אנא השתמש/י בקישור העדכני.' },
+      { status: 410 },
+    )
+  }
   if (!req.pdf_drive_file_id) {
     return NextResponse.json({ error: 'PDF המקור חסר ב-Drive' }, { status: 500 })
   }

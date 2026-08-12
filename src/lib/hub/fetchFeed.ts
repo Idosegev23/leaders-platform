@@ -205,7 +205,10 @@ function documentsToEvents(
     const owner = userById.get(r.user_id) ?? null
     const isQuote = r.type === 'quote'
     const typeLabel = isQuote ? 'הצעת מחיר' : 'מצגת קריאייטיבית'
-    const href = isQuote ? `/price-quote?id=${r.id}` : `/edit/${r.id}`
+    // Feed quote rows come from `documents` (legacy deck-wizard drafts), whose
+    // ids are NOT price_quotes ids — so we can't deep-link them into the loader.
+    // The real saved-quotes entry point is /price-quotes.
+    const href = isQuote ? `/price-quotes` : `/edit/${r.id}`
 
     const kind: HubEvent['kind'] =
       r.status === 'completed' || r.status === 'generated' ? 'document_completed' : 'document_created'

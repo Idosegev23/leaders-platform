@@ -60,6 +60,16 @@ export async function POST(request: Request) {
     )
   }
 
+  // Page 4 carries the ONLY signature block. Sending a quote with page 4
+  // disabled produces a document the client physically cannot sign.
+  const qd = body.quote_data as { enabledPages?: Record<number, boolean> } | null
+  if (qd?.enabledPages && qd.enabledPages[4] === false) {
+    return NextResponse.json(
+      { error: 'לא ניתן לשלוח לחתימה: עמוד החתימה (עמוד 4) מבוטל בהצעה.' },
+      { status: 422 },
+    )
+  }
+
   const pdfBuffer = Buffer.from(body.pdf_base64, 'base64')
   if (pdfBuffer.length < 100) {
     return NextResponse.json({ error: 'PDF buffer is empty or too small' }, { status: 400 })
