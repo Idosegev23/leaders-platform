@@ -35,8 +35,8 @@ export const KIND_LABELS: Record<DocKind, string> = {
 export const LIBRARY_DOCS: LibraryDoc[] = [
   // ── תהליך כניסת בריף חדש ──────────────────────────────
   { category: 'תהליך כניסת בריף חדש', name: 'תהליך כניסת בריף חדש', kind: 'sheet', url: 'https://docs.google.com/spreadsheets/d/1j7sRSoH6ZxSMXuuikk05Qxewz3tH0jfQuci_Lw_6lkA/edit?gid=0' },
-  { category: 'תהליך כניסת בריף חדש', name: 'בריף לקוח — שליחה וניהול', kind: 'internal', url: '/briefs' },
-  { category: 'תהליך כניסת בריף חדש', name: 'פגישת התנעה (בריף פנימי)', kind: 'internal', url: '/inner-meeting' },
+  { category: 'תהליך כניסת בריף חדש', name: 'בריף לקוח — שליחה ללקוח', kind: 'internal', url: '/send/client-brief' },
+  { category: 'תהליך כניסת בריף חדש', name: 'פגישת התנעה (בריף פנימי)', kind: 'internal', url: '/inner-meeting#form-section' },
   { category: 'תהליך כניסת בריף חדש', name: 'תיק ניהול לדוגמא', kind: 'sheet', url: 'https://docs.google.com/spreadsheets/d/1nkg6jwjRHSJApLhMU8yO9HidTbZbXo-yIizNRo-3CD4/edit' },
   { category: 'תהליך כניסת בריף חדש', name: 'גאנט לדוגמא', kind: 'sheet', url: 'https://docs.google.com/spreadsheets/d/114pembbc-GDul_q8bxhwaxhYPlmSWsZ9nkS5pOsFufg/edit' },
   { category: 'תהליך כניסת בריף חדש', name: 'מצגת לידרס', kind: 'canva', url: 'https://www.canva.com/design/DAGRGJuLvfk/PKFnAYAhpvhOZtN3YwduWw/edit' },
