@@ -75,6 +75,8 @@ export async function updateSession(request: NextRequest) {
     '/research-hub',
     // Static docs library (employees only)
     '/library',
+    // Smart Brief Engine (employees only; recipient view is /forms/brief/*)
+    '/smart-brief',
     // Note: /forms/* is intentionally public — clients without an account
     // use `/forms/client-brief?token=xxx` to fill the brief.
     // Note: /api/research-hub/workflow is intentionally public — it's

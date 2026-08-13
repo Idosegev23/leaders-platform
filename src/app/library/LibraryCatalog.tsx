@@ -118,14 +118,47 @@ function FilterChip({
 }
 
 function DocRow({ doc }: { doc: LibraryDoc }) {
-  const content = (
+  const main = (
+    <>
+      <KindBadge doc={doc} />
+      <p className="min-w-0 flex-1 text-[15px] font-medium truncate">{doc.name}</p>
+    </>
+  )
+
+  return (
     <div
       className={`flex items-center gap-4 py-3.5 px-2 -mx-2 rounded-sm transition-colors ${
         doc.url ? 'hover:bg-brand-primary/[0.03]' : 'opacity-45'
       }`}
     >
-      <KindBadge doc={doc} />
-      <p className="min-w-0 flex-1 text-[15px] font-medium truncate">{doc.name}</p>
+      {doc.url ? (
+        doc.kind === 'internal' ? (
+          <Link href={doc.url} className="flex items-center gap-4 min-w-0 flex-1">
+            {main}
+          </Link>
+        ) : (
+          <a
+            href={doc.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-4 min-w-0 flex-1"
+          >
+            {main}
+          </a>
+        )
+      ) : (
+        <div className="flex items-center gap-4 min-w-0 flex-1">{main}</div>
+      )}
+
+      {doc.onlineUrl && (
+        <Link
+          href={doc.onlineUrl}
+          className="shrink-0 px-2.5 py-1 text-[11px] font-rubik font-medium rounded-sm ring-1 bg-brand-accent/10 text-brand-accent ring-brand-accent/25 hover:bg-brand-accent hover:text-white transition-colors"
+        >
+          ✦ מילוי מקוון
+        </Link>
+      )}
+
       {doc.url ? (
         <span className="text-brand-primary/35 text-base shrink-0">←</span>
       ) : (
@@ -134,18 +167,6 @@ function DocRow({ doc }: { doc: LibraryDoc }) {
         </span>
       )}
     </div>
-  )
-
-  if (!doc.url) return <div>{content}</div>
-
-  return doc.kind === 'internal' ? (
-    <Link href={doc.url} className="block">
-      {content}
-    </Link>
-  ) : (
-    <a href={doc.url} target="_blank" rel="noopener noreferrer" className="block">
-      {content}
-    </a>
   )
 }
 

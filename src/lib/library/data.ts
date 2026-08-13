@@ -20,6 +20,8 @@ export type LibraryDoc = {
   name: string
   url: string | null
   kind: DocKind | null
+  /** מסלול פנימי למילוי מקוון — מוצג ככפתור נוסף לצד המסמך המקורי */
+  onlineUrl?: string
 }
 
 export const KIND_LABELS: Record<DocKind, string> = {
@@ -70,11 +72,11 @@ export const LIBRARY_DOCS: LibraryDoc[] = [
   { category: 'הפקות וימי צילום', name: 'שוטינג סקריפט', kind: 'doc', url: 'https://docs.google.com/document/d/1Yo1EnNzUjcuSA_iFRjvmSyksqmdzvo5C/edit' },
 
   // ── סושיאל ────────────────────────────────────────────
-  { category: 'סושיאל', name: 'בריף יוצרת תוכן', kind: 'doc', url: 'https://docs.google.com/document/d/1BkqL9nHtwcUIs-ZvEDjBt749TIxUm-PW/edit' },
+  { category: 'סושיאל', name: 'בריף יוצרת תוכן', kind: 'doc', url: 'https://docs.google.com/document/d/1BkqL9nHtwcUIs-ZvEDjBt749TIxUm-PW/edit', onlineUrl: '/smart-brief?template=content-creator' },
   { category: 'סושיאל', name: 'בריף דיוורים', kind: 'doc', url: 'https://docs.google.com/document/d/1JJ62zrLjItlAQ3iV2vDq57ygUo6qXlw-/edit' },
-  { category: 'סושיאל', name: 'בריף סושיאל — פוסטים וסטוריז', kind: 'doc', url: 'https://docs.google.com/document/d/1lCL0o-WUa7mIJ1FMtcO70NswgOCuebgs/edit' },
-  { category: 'סושיאל', name: 'בריף סושיאל — טיקטוק', kind: 'doc', url: 'https://docs.google.com/document/d/1NX4dHreUtyvyhtqpacSK4nn5yWbpY4wb/edit' },
-  { category: 'סושיאל', name: 'בריף באנרים', kind: 'doc', url: 'https://docs.google.com/document/d/1p_2N9hPA8JGUx0kgQTTmXaD1TYrk23PxATMaXhe9MAI/edit' },
+  { category: 'סושיאל', name: 'בריף סושיאל — פוסטים וסטוריז', kind: 'doc', url: 'https://docs.google.com/document/d/1lCL0o-WUa7mIJ1FMtcO70NswgOCuebgs/edit', onlineUrl: '/smart-brief?template=social-posts' },
+  { category: 'סושיאל', name: 'בריף סושיאל — טיקטוק', kind: 'doc', url: 'https://docs.google.com/document/d/1NX4dHreUtyvyhtqpacSK4nn5yWbpY4wb/edit', onlineUrl: '/smart-brief?template=tiktok' },
+  { category: 'סושיאל', name: 'בריף באנרים', kind: 'doc', url: 'https://docs.google.com/document/d/1p_2N9hPA8JGUx0kgQTTmXaD1TYrk23PxATMaXhe9MAI/edit', onlineUrl: '/smart-brief?template=banners' },
   { category: 'סושיאל', name: 'תקנון קבוצת פייסבוק', kind: 'doc', url: 'https://docs.google.com/document/d/1MqyEj7LKxjIQRfMf8HLGUOr3x9qixIt1/edit' },
   { category: 'סושיאל', name: 'תקנון הגרלה אינסטגרם', kind: 'doc', url: 'https://docs.google.com/document/d/1v-F91X9NrwlFEY6EH2L8yl0LBCKfmVts/edit' },
   { category: 'סושיאל', name: 'בריף עיצוב', kind: null, url: null },
