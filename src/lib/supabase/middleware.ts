@@ -73,6 +73,8 @@ export async function updateSession(request: NextRequest) {
     '/briefs',
     // Deep Research Agent (Phase 8)
     '/research-hub',
+    // Static docs library (employees only)
+    '/library',
     // Note: /forms/* is intentionally public — clients without an account
     // use `/forms/client-brief?token=xxx` to fill the brief.
     // Note: /api/research-hub/workflow is intentionally public — it's
