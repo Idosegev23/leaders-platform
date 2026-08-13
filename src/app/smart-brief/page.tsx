@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { Suspense } from 'react'
 import { smartBriefServiceClient } from '@/lib/smart-brief/service'
 import SmartBriefHome, { type BriefListItem } from './SmartBriefHome'
@@ -21,6 +22,12 @@ export default async function SmartBriefPage() {
   return (
     <div dir="rtl" className="max-w-6xl mx-auto px-4 md:px-8 py-12 md:py-16 text-brand-primary">
       <header className="mb-10 md:mb-12">
+        <Link
+          href="/dashboard"
+          className="inline-block mb-6 text-[12px] text-brand-primary/55 hover:text-brand-primary transition-colors"
+        >
+          → חזרה לדשבורד
+        </Link>
         <p className="text-[10px] tracking-[0.5em] uppercase text-brand-primary/55 font-rubik mb-5 font-medium">
           Leaders <span className="mx-1 text-brand-primary/75">x</span> OS
         </p>

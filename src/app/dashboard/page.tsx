@@ -197,25 +197,21 @@ export default async function DashboardPage() {
         })}
       </section>
 
-      {/* Docs library banner */}
-      <section className="-mt-14 md:-mt-20 mb-20 md:mb-28">
-        <Link
+      {/* Docs library + smart brief engine banners */}
+      <section className="-mt-14 md:-mt-20 mb-20 md:mb-28 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <BannerCard
+          href="/smart-brief"
+          title="מנוע בריפים חכם"
+          english="Smart Brief Engine"
+          description="בריף יוצרת תוכן, טיקטוק, פוסטים ובאנרים — ה-AI בונה טיוטה מלאה מהתיאור שלך"
+          accent
+        />
+        <BannerCard
           href="/library"
-          className="group flex items-center gap-5 p-6 ring-1 ring-brand-primary/10 rounded-sm bg-brand-ivory hover:ring-brand-primary/25 hover:-translate-y-[2px] hover:shadow-[0_12px_28px_-18px_rgba(26,26,46,0.18)] transition-all duration-300"
-        >
-          <div className="min-w-0 flex-1">
-            <p className="text-[17px] md:text-[18px] font-semibold leading-tight">ספריית מסמכים</p>
-            <p className="mt-1 text-[11px] text-brand-primary/55 font-rubik tracking-[0.04em] uppercase font-medium">
-              Library
-            </p>
-            <p className="mt-2 text-[12px] text-brand-primary/65 leading-relaxed">
-              כל הטמפלטים, הנהלים ומסמכי העבודה של לידרס — מסודרים לפי קטגוריה, עם חיפוש
-            </p>
-          </div>
-          <span className="text-brand-primary/35 text-base transition-colors group-hover:text-brand-accent shrink-0">
-            ←
-          </span>
-        </Link>
+          title="ספריית מסמכים"
+          english="Library"
+          description="כל הטמפלטים, הנהלים ומסמכי העבודה של לידרס — מסודרים לפי קטגוריה, עם חיפוש"
+        />
       </section>
 
       {/* Live Hub Feed */}
@@ -414,6 +410,45 @@ async function computeBriefStats(service: any): Promise<BriefStats> {
     console.warn('[dashboard] computeBriefStats failed:', e instanceof Error ? e.message : e)
     return empty
   }
+}
+
+function BannerCard({
+  href,
+  title,
+  english,
+  description,
+  accent,
+}: {
+  href: string
+  title: string
+  english: string
+  description: string
+  accent?: boolean
+}) {
+  return (
+    <Link
+      href={href}
+      className={`group flex items-center gap-5 p-6 ring-1 rounded-sm bg-brand-ivory hover:-translate-y-[2px] hover:shadow-[0_12px_28px_-18px_rgba(26,26,46,0.18)] transition-all duration-300 ${
+        accent
+          ? 'ring-brand-accent/30 hover:ring-brand-accent/60'
+          : 'ring-brand-primary/10 hover:ring-brand-primary/25'
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[17px] md:text-[18px] font-semibold leading-tight">
+          {accent && <span className="text-brand-accent ml-1.5">✦</span>}
+          {title}
+        </p>
+        <p className="mt-1 text-[11px] text-brand-primary/55 font-rubik tracking-[0.04em] uppercase font-medium">
+          {english}
+        </p>
+        <p className="mt-2 text-[12px] text-brand-primary/65 leading-relaxed">{description}</p>
+      </div>
+      <span className="text-brand-primary/35 text-base transition-colors group-hover:text-brand-accent shrink-0">
+        ←
+      </span>
+    </Link>
+  )
 }
 
 function StatTile({
