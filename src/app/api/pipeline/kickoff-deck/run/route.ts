@@ -117,6 +117,30 @@ export async function POST(request: Request) {
   }
   console.log(`${tag} assembled deck ${documentId}`)
 
+  // 1.5 CONTENT — headless _stepData so the wizard contract binds the fullest
+  //     data into the slides. Non-fatal: the agent self-researches if it fails.
+  try {
+    const { data: doc } = await sb.from('documents').select('data').eq('id', documentId).single()
+    const docData = (doc?.data ?? {}) as Record<string, unknown>
+    const hasStepData = Boolean(docData._stepData && Object.keys(docData._stepData as object).length)
+    const briefText = (docData._briefText as string) || ''
+    if (!hasStepData && briefText.trim().length >= 20) {
+      const { generateProposal } = await import('@/lib/gemini/proposal-agent')
+      const result = await generateProposal(briefText, (docData._kickoffText as string) || undefined)
+      const { data: fresh } = await sb.from('documents').select('data').eq('id', documentId).single()
+      await sb
+        .from('documents')
+        .update({
+          data: { ...((fresh?.data ?? {}) as Record<string, unknown>), _stepData: result.stepData },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', documentId)
+      console.log(`${tag} _stepData built headlessly`)
+    }
+  } catch (e) {
+    console.warn(`${tag} _stepData build failed (continuing):`, e instanceof Error ? e.message : e)
+  }
+
   // 2. BLUEPRINT (retry — occasionally flaky)
   let blueprintOk = false
   for (let attempt = 0; attempt < 3 && !blueprintOk; attempt++) {

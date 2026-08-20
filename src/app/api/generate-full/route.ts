@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       userId = user.id
     }
 
-    const { documentId, useBlueprint } = await request.json()
+    const { documentId, useBlueprint, autoFinalize } = await request.json()
     if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
 
     // Load document
@@ -328,6 +328,34 @@ export async function POST(request: NextRequest) {
       }
     } catch (criticErr) {
       console.warn(`[${requestId}] ⚠️ Slide critic failed (deck already saved, continuing):`, criticErr)
+    }
+
+    // Auto pipeline: hand the finished deck to Canva (structured derive +
+    // native PPTX import). QStash hop in prod; inline best-effort locally.
+    // Failures never fail the generation — the deck is already saved.
+    if (autoFinalize === true || data._autoPipeline === true) {
+      const base =
+        (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL)?.replace(/\/$/, '') ||
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')
+      try {
+        if (process.env.QSTASH_TOKEN) {
+          const { Client: QStashClient } = await import('@upstash/qstash')
+          const q = new QStashClient({ token: process.env.QSTASH_TOKEN })
+          await q.publishJSON({
+            url: `${base}/api/pipeline/deck-finalize`,
+            body: { documentId },
+            headers: { 'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '' },
+            timeout: '300s',
+            retries: 1,
+          })
+          console.log(`[${requestId}] 🎨 deck-finalize published to QStash`)
+        } else {
+          const { finalizeDeckToCanva } = await import('@/lib/pipeline/deck-finalize')
+          await finalizeDeckToCanva(documentId, requestId)
+        }
+      } catch (finalizeErr) {
+        console.warn(`[${requestId}] ⚠️ deck-finalize failed (deck already saved):`, finalizeErr)
+      }
     }
 
     const elapsed = Date.now() - startTs

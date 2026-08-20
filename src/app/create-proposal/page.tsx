@@ -315,14 +315,14 @@ export default function CreateProposalPage() {
   const geminiFileUriRef = useRef<string | undefined>()
   const geminiFileMimeRef = useRef<string | undefined>()
 
-  const confirmAndCreate = async () => {
+  const confirmAndCreate = async (auto = false) => {
     const extracted = brandInfo
     if (!extracted) return
 
     try {
       // === STEP 3: Create Document ===
       setStage('creating')
-      addLog('info', 'שומר מסמך ומעביר למחקר...')
+      addLog('info', auto ? 'שומר מסמך ומפעיל בנייה אוטומטית מלאה...' : 'שומר מסמך ומעביר למחקר...')
 
       const docRes = await fetch('/api/documents', {
         method: 'POST',
@@ -372,6 +372,22 @@ export default function CreateProposalPage() {
       if (!docRes.ok) throw new Error(docData.error || 'Failed to create document')
 
       const docId = docData.id || docData.document?.id
+
+      if (auto) {
+        // ⚡ Full-auto: content → blueprint → slides → Canva, no wizard.
+        addLog('success', 'המסמך מוכן! מפעיל את הצינור האוטומטי...')
+        const autoRes = await fetch('/api/pipeline/auto-deck', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documentId: docId }),
+        })
+        const autoData = await autoRes.json().catch(() => ({}))
+        if (!autoRes.ok) throw new Error(autoData.error || 'הפעלת הצינור האוטומטי נכשלה')
+        setStage('done')
+        router.push(`/auto/${docId}`)
+        return
+      }
+
       addLog('success', `המסמך מוכן! מעביר ליצירת מצגת (ID: ${docId?.slice(0, 8)}...)`)
 
       setStage('done')
@@ -753,12 +769,18 @@ export default function CreateProposalPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button
-                  onClick={confirmAndCreate}
+                  onClick={() => confirmAndCreate(true)}
+                  className="flex-1 px-6 py-3 rounded-xl bg-gradient-to-l from-[#f2cc0d] to-[#d9b40b] text-[#1a1a2e] font-bold text-lg hover:opacity-90 transition-opacity shadow-lg shadow-[#f2cc0d]/20"
+                >
+                  ⚡ אוטומטי מלא — עד Canva
+                </button>
+                <button
+                  onClick={() => confirmAndCreate(false)}
                   className="flex-1 px-6 py-3 rounded-xl bg-gradient-to-l from-[#e94560] to-[#d63051] text-white font-bold text-lg hover:opacity-90 transition-opacity shadow-lg shadow-[#e94560]/20"
                 >
-                  הכל נכון, המשך למחקר
+                  מסלול מלווה — מחקר ← ויזארד
                 </button>
                 <button
                   onClick={() => { setStage('idle'); setBrandInfo(null); setLogs([]) }}
@@ -767,6 +789,10 @@ export default function CreateProposalPage() {
                   תקן ונסה שוב
                 </button>
               </div>
+              <p className="mt-3 text-xs text-white/40 leading-relaxed">
+                אוטומטי מלא: הסוכן חוקר, כותב, מפצח, בונה את כל השקפים ופותח את המצגת ב-Canva — בלי שאלות באמצע.
+                המסלול המלווה משאיר לך שליטה בכל שלב.
+              </p>
             </div>
           </div>
         )}
