@@ -35,19 +35,19 @@ const RUBRICS: Rubric[] = [
     flowType: 'direct_form',
   },
   {
-    slug: 'price-quote',
-    name: 'הצעת מחיר',
-    english: 'Price Quote',
-    description: 'טבלת שירותים ותמחור',
-    targetUrl: '/price-quote',
-    flowType: 'direct_form',
-  },
-  {
     slug: 'creative-presentation',
     name: 'מצגת קריאייטיבית',
     english: 'Creative Deck',
     description: 'הסוכן בונה הצעה מלאה מהבריף',
     targetUrl: '/create-proposal',
+    flowType: 'direct_form',
+  },
+  {
+    slug: 'price-quote',
+    name: 'הצעת מחיר',
+    english: 'Price Quote',
+    description: 'טבלת שירותים ותמחור',
+    targetUrl: '/price-quote',
     flowType: 'direct_form',
   },
   {
