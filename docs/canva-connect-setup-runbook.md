@@ -51,11 +51,18 @@ Claude-בכרום צריך גישה מחוברת (logged-in) ל:
 
 בעמוד ה-**Configuration / Scopes** של האינטגרציה, סמן **בדיוק** את ה-scopes הבאים (ותו לא):
 
-- ✅ `design:content:write`  (יצירה/ייבוא עיצובים)
+- ✅ `design:content:write`  (יצירה/ייבוא עיצובים + Autofill jobs)
 - ✅ `design:meta:read`  (קריאת מטא-דאטה של עיצוב — לחידוש לינקים)
 - ✅ `design:content:read`  (קריאת תוכן/ייצוא עתידי)
+- ✅ `brandtemplate:meta:read`  (רשימת טמפלטים ממותגים — Phase B)
+- ✅ `brandtemplate:content:read`  (קריאת שדות ה-dataset של טמפלט — Phase B)
+- ✅ `brandtemplate:content:write`  (פרסום עיצוב מתויג כטמפלט ממותג — Phase B)
 
 שמור. (הערה: כל scope חייב להיות מסומן במפורש — סימון write אינו מקנה read.)
+
+**אחרי כל שינוי scopes:** יש לבצע חיבור מחדש פעם אחת — `/api/canva/oauth/start`
+מהדפדפן (מחובר למערכת) ואישור במסך של Canva. טוקן ישן ממשיך לעבוד אך בלי
+ההרשאות החדשות.
 
 ---
 
