@@ -58,6 +58,18 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
   },
   // Claude
   {
+    id: 'claude-opus-5',
+    provider: 'claude',
+    label: 'Claude Opus 5',
+    capabilities: { googleSearch: false, responseSchema: false, maxOutputTokens: 128000 },
+  },
+  {
+    id: 'claude-sonnet-5',
+    provider: 'claude',
+    label: 'Claude Sonnet 5',
+    capabilities: { googleSearch: false, responseSchema: false, maxOutputTokens: 128000 },
+  },
+  {
     id: 'claude-opus-4-6',
     provider: 'claude',
     label: 'Claude Opus 4.6',
