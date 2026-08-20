@@ -112,6 +112,8 @@ interface AutofillJobResponse {
     result?: {
       type: string
       design?: { id: string; title?: string; url?: string; urls?: { edit_url?: string; view_url?: string } }
+      /** Preview feature: non-Enterprise free-trial counter. */
+      trial_information?: { uses_remaining?: number; upgrade_url?: string }
     }
     error?: { code?: string; message?: string }
   }
@@ -152,6 +154,11 @@ export async function autofillFromBrandTemplate(opts: {
     )
   }
 
+  const trial = job.result.trial_information
+  if (typeof trial?.uses_remaining === 'number') {
+    console.log(`[canva-autofill] free-trial uses remaining: ${trial.uses_remaining}`)
+  }
+
   const d = job.result.design
   return {
     designId: d.id,
@@ -166,6 +173,42 @@ export function textData(fields: Record<string, string>): Record<string, Autofil
   const out: Record<string, AutofillFieldValue> = {}
   for (const [k, v] of Object.entries(fields)) out[k] = { type: 'text', text: v }
   return out
+}
+
+/**
+ * Validate raw input against a template dataset and build the autofill payload.
+ * Plain strings on image-type fields are treated as URLs and uploaded as Canva
+ * assets; a failed upload drops the field (template default wins) instead of
+ * failing the whole job. Unknown keys are dropped with a warning.
+ */
+export async function buildAutofillData(
+  dataset: Record<string, { type: DatasetFieldType }>,
+  input: Record<string, string | AutofillFieldValue>,
+): Promise<{ data: Record<string, AutofillFieldValue>; dropped: string[] }> {
+  const data: Record<string, AutofillFieldValue> = {}
+  const dropped: string[] = []
+  for (const [key, value] of Object.entries(input)) {
+    if (!dataset[key]) {
+      dropped.push(key)
+      continue
+    }
+    if (typeof value === 'string') {
+      if (dataset[key].type === 'image') {
+        try {
+          const assetId = await uploadAssetFromUrl(value, key)
+          data[key] = { type: 'image', asset_id: assetId }
+        } catch (e) {
+          console.warn(`[canva-autofill] image upload failed for ${key} (dropping):`, e instanceof Error ? e.message : e)
+          dropped.push(key)
+        }
+      } else {
+        data[key] = { type: 'text', text: value }
+      }
+    } else {
+      data[key] = value
+    }
+  }
+  return { data, dropped }
 }
 
 // ── Asset upload (for image autofill fields) ──────────────────────

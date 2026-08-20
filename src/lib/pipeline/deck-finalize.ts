@@ -18,6 +18,10 @@ function service() {
  *    Canva import gets native editable PPTX instead of a flat screenshot PDF.
  * 2. exportDeckToCanva() — PPTX → signed URL → Canva url-import → links
  *    persisted on documents.data._canva + the linked kickoff row.
+ * 3. autofillCreativeDeckFromDocument() — the AI mapping bridge fills the
+ *    creative-strategy brand template (~86 text+image fields) and persists a
+ *    NATIVE Canva design on documents.data._canva.native. Non-fatal: the PPTX
+ *    import above is still the primary artifact if autofill fails.
  */
 export async function finalizeDeckToCanva(documentId: string, tag = 'deck-finalize'): Promise<CanvaExportResult> {
   const sb = service()
@@ -58,5 +62,14 @@ export async function finalizeDeckToCanva(documentId: string, tag = 'deck-finali
   console.log(`[${tag}] exporting deck ${documentId} to Canva…`)
   const result = await exportDeckToCanva({ documentId })
   console.log(`[${tag}] ✅ Canva design ${result.designId} (${result.mode})`)
+
+  try {
+    const { autofillCreativeDeckFromDocument } = await import('@/lib/canva/autofill-deck')
+    const native = await autofillCreativeDeckFromDocument(documentId, tag)
+    console.log(`[${tag}] ✅ native Canva design ${native.designId} (${native.filledFields} fields)`)
+  } catch (e) {
+    console.warn(`[${tag}] native autofill failed (non-fatal):`, e instanceof Error ? e.message : e)
+  }
+
   return result
 }

@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/auth/api-auth'
 import {
   autofillFromBrandTemplate,
+  buildAutofillData,
   getBrandTemplateDataset,
-  textData,
-  uploadAssetFromUrl,
   type AutofillFieldValue,
 } from '@/lib/canva/brand-templates'
 
@@ -46,31 +45,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const data: Record<string, AutofillFieldValue> = {}
-    const dropped: string[] = []
-    for (const [key, value] of Object.entries(body.data)) {
-      if (!dataset[key]) {
-        dropped.push(key)
-        continue
-      }
-      if (typeof value === 'string') {
-        // Image fields accept a plain URL — we download + upload it as a
-        // Canva asset (e.g. rehosted influencer profile pics from Supabase).
-        if (dataset[key].type === 'image') {
-          try {
-            const assetId = await uploadAssetFromUrl(value, key)
-            data[key] = { type: 'image', asset_id: assetId }
-          } catch (e) {
-            console.warn(`[canva-autofill] image upload failed for ${key} (dropping):`, e instanceof Error ? e.message : e)
-            dropped.push(key)
-          }
-        } else {
-          data[key] = textData({ [key]: value })[key]
-        }
-      } else {
-        data[key] = value
-      }
-    }
+    const { data, dropped } = await buildAutofillData(dataset, body.data)
     if (!Object.keys(data).length) {
       return NextResponse.json(
         { error: `No provided fields match the template dataset (${Object.keys(dataset).join(', ')})` },
