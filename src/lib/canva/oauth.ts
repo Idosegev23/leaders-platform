@@ -22,7 +22,7 @@ const TOKEN_URL = 'https://api.canva.com/rest/v1/oauth/token'
 // tagged designs as brand templates. Requires the same scopes to be enabled
 // on the integration in the Canva Developer Portal + a one-time re-consent.
 const DEFAULT_SCOPES =
-  'design:content:write design:meta:read design:content:read brandtemplate:meta:read brandtemplate:content:read brandtemplate:content:write'
+  'design:content:write design:meta:read design:content:read brandtemplate:meta:read brandtemplate:content:read brandtemplate:content:write asset:read asset:write'
 // Refresh a bit early so an in-flight import never races the 14400s expiry.
 const EXPIRY_SKEW_MS = 60_000
 

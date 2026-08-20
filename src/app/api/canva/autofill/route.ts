@@ -4,6 +4,7 @@ import {
   autofillFromBrandTemplate,
   getBrandTemplateDataset,
   textData,
+  uploadAssetFromUrl,
   type AutofillFieldValue,
 } from '@/lib/canva/brand-templates'
 
@@ -52,7 +53,23 @@ export async function POST(request: Request) {
         dropped.push(key)
         continue
       }
-      data[key] = typeof value === 'string' ? textData({ [key]: value })[key] : value
+      if (typeof value === 'string') {
+        // Image fields accept a plain URL — we download + upload it as a
+        // Canva asset (e.g. rehosted influencer profile pics from Supabase).
+        if (dataset[key].type === 'image') {
+          try {
+            const assetId = await uploadAssetFromUrl(value, key)
+            data[key] = { type: 'image', asset_id: assetId }
+          } catch (e) {
+            console.warn(`[canva-autofill] image upload failed for ${key} (dropping):`, e instanceof Error ? e.message : e)
+            dropped.push(key)
+          }
+        } else {
+          data[key] = textData({ [key]: value })[key]
+        }
+      } else {
+        data[key] = value
+      }
     }
     if (!Object.keys(data).length) {
       return NextResponse.json(

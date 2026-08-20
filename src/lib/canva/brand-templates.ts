@@ -167,3 +167,56 @@ export function textData(fields: Record<string, string>): Record<string, Autofil
   for (const [k, v] of Object.entries(fields)) out[k] = { type: 'text', text: v }
   return out
 }
+
+// ── Asset upload (for image autofill fields) ──────────────────────
+
+interface AssetUploadJobResponse {
+  job: {
+    id: string
+    status: 'in_progress' | 'success' | 'failed'
+    asset?: { id: string }
+    error?: { code?: string; message?: string }
+  }
+}
+
+/**
+ * מוריד תמונה מ-URL (למשל תמונת פרופיל של משפיענית שאוחסנה ב-Supabase)
+ * ומעלה אותה כ-asset לקנבה. מחזיר asset_id לשימוש בשדה image של Autofill.
+ * Scope: asset:write.
+ */
+export async function uploadAssetFromUrl(url: string, name = 'leaders-asset'): Promise<string> {
+  const imgRes = await fetch(url)
+  if (!imgRes.ok) throw new Error(`asset source fetch failed (${imgRes.status}): ${url.slice(0, 120)}`)
+  const buffer = Buffer.from(await imgRes.arrayBuffer())
+
+  const token = await getValidAccessToken()
+  const created = await orThrow<AssetUploadJobResponse>(
+    await fetch(`${BASE}/asset-uploads`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/octet-stream',
+        'Asset-Upload-Metadata': JSON.stringify({
+          name_base64: Buffer.from(name.slice(0, 50)).toString('base64'),
+        }),
+      },
+      body: new Uint8Array(buffer),
+    }),
+    'create asset upload',
+  )
+
+  let job = created.job
+  for (let i = 0; i < 30 && job.status === 'in_progress'; i++) {
+    await new Promise((r) => setTimeout(r, 1500))
+    const polled = await orThrow<AssetUploadJobResponse>(
+      await authed(`/asset-uploads/${job.id}`),
+      'poll asset upload',
+    )
+    job = polled.job
+  }
+
+  if (job.status !== 'success' || !job.asset?.id) {
+    throw new Error(`asset upload ${job.id} ${job.status}: ${job.error?.message ?? 'no asset id'}`)
+  }
+  return job.asset.id
+}
