@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import type { SmartBriefRow } from '@/lib/smart-brief/service'
+import { applyTemplateDefaults } from '@/lib/smart-brief/templates'
 import type { BriefFields, FieldValue, SmartBriefTemplate, TemplateField } from '@/lib/smart-brief/templates'
 
 type SaveState = 'saved' | 'saving' | 'dirty'
@@ -19,7 +20,10 @@ export default function BriefEditor({
     typeof brief.ai_meta?.description === 'string' ? (brief.ai_meta.description as string) : '',
   )
   const [materials, setMaterials] = useState('')
-  const [fields, setFields] = useState<BriefFields>(brief.fields ?? {})
+  // תוכן מוכן מהטמפלט המקורי ממולא מראש בשדות ריקים
+  const [fields, setFields] = useState<BriefFields>(() =>
+    applyTemplateDefaults(template, brief.fields ?? {}),
+  )
   const [generating, setGenerating] = useState(false)
   const [improving, setImproving] = useState<string | null>(null)
   const [checkingGaps, setCheckingGaps] = useState(false)
@@ -90,7 +94,7 @@ export default function BriefEditor({
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
-      const next = { ...fields, ...json.fields }
+      const next = applyTemplateDefaults(template, { ...fields, ...json.fields })
       setFields(next)
       setContextOpen(false)
       setGaps(null)
