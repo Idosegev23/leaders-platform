@@ -67,7 +67,7 @@ export const LIBRARY_DOCS: LibraryDoc[] = [
   { category: 'הפקות וימי צילום', name: 'מצגת תיק הפקה', kind: 'canva', url: 'https://www.canva.com/design/DAGlPkbmq4w/bcz9v2Zcr7I_O8yYvJom8A/edit' },
   { category: 'הפקות וימי צילום', name: "צ'ק ליסט להפקות קטנות עצמאיות", kind: 'sheet', url: 'https://docs.google.com/spreadsheets/d/13pTlI7Fa5KBRmcjWgCRL1QGmH-JtnLFimmu7g50R2eo/edit' },
   { category: 'הפקות וימי צילום', name: 'תיק הפקה לדוגמא', kind: 'sheet', url: 'https://docs.google.com/spreadsheets/d/1o4bHcmvzvSTtE4snev_c0W51VKdyAc4het2_mDD9LhE/edit' },
-  { category: 'הפקות וימי צילום', name: "צ'ק ליסט להפקות", kind: 'doc', url: 'https://docs.google.com/document/d/11d_63KMTGa1Z-gsJSJcXcyCIuRlFJM7r/edit' },
+  { category: 'הפקות וימי צילום', name: "צ'ק ליסט להפקות", kind: 'doc', url: 'https://docs.google.com/document/d/11d_63KMTGa1Z-gsJSJcXcyCIuRlFJM7r/edit', onlineUrl: '/smart-brief?template=production-flow' },
   { category: 'הפקות וימי צילום', name: 'הסכם ספק', kind: 'doc', url: 'https://docs.google.com/document/d/1Hcpk-2iNqageOQ28lZNvZFo-3mV4WXVU/edit' },
   { category: 'הפקות וימי צילום', name: 'שוטינג סקריפט', kind: 'doc', url: 'https://docs.google.com/document/d/1Yo1EnNzUjcuSA_iFRjvmSyksqmdzvo5C/edit' },
 
@@ -120,8 +120,8 @@ export const LIBRARY_DOCS: LibraryDoc[] = [
   { category: 'משאבי אנוש', name: 'מסמכי חברה כלליים למנהל לקוח', kind: 'drive', url: 'https://drive.google.com/drive/folders/1qDZdBMuvRGob8JuWfVa6KHOsSP0vQmRY' },
   { category: 'משאבי אנוש', name: "איזה פגישות יש בכל צוות ומה האג'נדה", kind: 'drive', url: 'https://drive.google.com/drive/folders/1fFqxIVbAeZ7W2vAIsXCsrcpoK6DMlnPx' },
   { category: 'משאבי אנוש', name: 'הגדרות תפקיד', kind: null, url: null },
-  { category: 'משאבי אנוש', name: 'טמפלט סיכום שבועי ימי חמישי — מנהל', kind: 'doc', url: 'https://docs.google.com/document/d/1CtWgfygi2V-OSqeU17gAV9c8bpkwllsQ/edit' },
-  { category: 'משאבי אנוש', name: 'טמפלט סיכום שבועי ימי חמישי — עובד', kind: 'doc', url: 'https://docs.google.com/document/d/1-LdagruQRc1JXNLiPeDFpuC2P31XWkEB/edit' },
+  { category: 'משאבי אנוש', name: 'טמפלט סיכום שבועי ימי חמישי — מנהל', kind: 'doc', url: 'https://docs.google.com/document/d/1CtWgfygi2V-OSqeU17gAV9c8bpkwllsQ/edit', onlineUrl: '/smart-brief?template=monthly-manager' },
+  { category: 'משאבי אנוש', name: 'טמפלט סיכום שבועי ימי חמישי — עובד', kind: 'doc', url: 'https://docs.google.com/document/d/1-LdagruQRc1JXNLiPeDFpuC2P31XWkEB/edit', onlineUrl: '/smart-brief?template=monthly-employee' },
   { category: 'משאבי אנוש', name: 'העברת לקוח בין מנהלים בחברה', kind: null, url: null },
 
   // ── כספים ─────────────────────────────────────────────

@@ -55,34 +55,46 @@ export default function SmartBriefHome({ initialBriefs }: { initialBriefs: Brief
 
   return (
     <div>
-      {/* Template picker */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-16">
-        {SMART_BRIEF_TEMPLATES.map((t, idx) => (
-          <button
-            key={t.slug}
-            type="button"
-            onClick={() => createBrief(t.slug)}
-            disabled={creating !== null}
-            className="group relative text-right h-44 md:h-48 p-6 ring-1 ring-brand-primary/10 rounded-sm bg-brand-ivory transition-all duration-300 hover:ring-brand-primary/25 hover:-translate-y-[2px] hover:shadow-[0_12px_28px_-18px_rgba(26,26,46,0.18)] disabled:opacity-60"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] tracking-[0.32em] uppercase text-brand-primary/55 font-rubik font-medium">
-                {String(idx + 1).padStart(2, '0')}
-              </span>
-              <span className="text-brand-primary/35 text-base transition-colors group-hover:text-brand-accent">
-                {creating === t.slug ? '…' : '+'}
-              </span>
+      {/* Template picker — grouped by category */}
+      <section className="mb-16">
+        {SMART_BRIEF_TEMPLATES.reduce<string[]>((acc, t) => {
+          if (!acc.includes(t.category)) acc.push(t.category)
+          return acc
+        }, []).map((cat) => (
+          <div key={cat} className="mb-8">
+            <div className="flex items-center gap-4 mb-3">
+              <h2 className="text-[10px] tracking-[0.32em] uppercase text-brand-primary/65 font-rubik font-medium">
+                {cat}
+              </h2>
+              <div className="h-px flex-1 bg-brand-primary/10" />
             </div>
-            <div className="absolute bottom-6 start-6 end-6">
-              <p className="text-[17px] md:text-[18px] font-semibold leading-tight">{t.name}</p>
-              <p className="mt-1 text-[11px] text-brand-primary/55 font-rubik tracking-[0.04em] uppercase font-medium">
-                {t.english}
-              </p>
-              <p className="mt-2 text-[12px] text-brand-primary/65 leading-relaxed line-clamp-2">
-                {t.description}
-              </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {SMART_BRIEF_TEMPLATES.filter((t) => t.category === cat).map((t) => (
+                <button
+                  key={t.slug}
+                  type="button"
+                  onClick={() => createBrief(t.slug)}
+                  disabled={creating !== null}
+                  className="group relative text-right h-44 md:h-48 p-6 ring-1 ring-brand-primary/10 rounded-sm bg-brand-ivory transition-all duration-300 hover:ring-brand-primary/25 hover:-translate-y-[2px] hover:shadow-[0_12px_28px_-18px_rgba(26,26,46,0.18)] disabled:opacity-60"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] tracking-[0.32em] uppercase text-brand-primary/55 font-rubik font-medium">
+                      {t.english}
+                    </span>
+                    <span className="text-brand-primary/35 text-base transition-colors group-hover:text-brand-accent">
+                      {creating === t.slug ? '…' : '+'}
+                    </span>
+                  </div>
+                  <div className="absolute bottom-6 start-6 end-6">
+                    <p className="text-[17px] md:text-[18px] font-semibold leading-tight">{t.name}</p>
+                    <p className="mt-2 text-[12px] text-brand-primary/65 leading-relaxed line-clamp-2">
+                      {t.description}
+                    </p>
+                  </div>
+                </button>
+              ))}
             </div>
-          </button>
+          </div>
         ))}
       </section>
 

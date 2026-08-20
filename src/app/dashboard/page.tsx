@@ -201,9 +201,9 @@ export default async function DashboardPage() {
       <section className="-mt-14 md:-mt-20 mb-20 md:mb-28 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <BannerCard
           href="/smart-brief"
-          title="מנוע בריפים חכם"
-          english="Smart Brief Engine"
-          description="בריף יוצרת תוכן, טיקטוק, פוסטים ובאנרים — ה-AI בונה טיוטה מלאה מהתיאור שלך"
+          title="מסמכים חכמים"
+          english="Smart Docs"
+          description="התבניות של לידרס — בריפים, פלואו הפקה וסיכומים חודשיים — עם מילוי AI"
           accent
         />
         <BannerCard
