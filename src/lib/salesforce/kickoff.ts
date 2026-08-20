@@ -1,23 +1,15 @@
 /**
  * Salesforce kickoff (inner-meeting / פגישת התנעה) outbound push.
  *
- * Two events go back to Salesforce, both writing the project's
- * "מסמך לפגישת התנעה" field:
- *
- *   1. `kickoff.document_ready` — fired the moment we create a kickoff form
- *      from a Salesforce request. `kickoff_document_url` is the
- *      /inner-meeting?form=<token> fill link (the blank template).
- *   2. `kickoff.completed` — fired from /api/inner-meeting/complete when the
- *      team submits the form. `kickoff_document_url` is the Google Doc of the
- *      filled kickoff, so the field ends up on the finished document.
- *
- * Best-effort: never throws, no-ops when no webhook URL is configured.
+ * Fires `kickoff.document_ready` back to Salesforce the moment we create a
+ * kickoff form from a Salesforce request — carrying the fill URL so Salesforce
+ * can surface the link to fill. Best-effort: never throws, no-ops when no
+ * webhook URL is configured.
  *
  * Salesforce contract (their /apexrest/projectkickoff endpoint):
- *   { event, projectId, token, kickoff_document_url, ... }
- * `token` is the form's share_token — stable across both events, so Salesforce
- * can correlate them to one record. Salesforce must treat `kickoff.completed`
- * as an UPDATE of the same field, not a duplicate of the create event.
+ *   { event: 'kickoff.document_ready', projectId, token, kickoff_document_url }
+ * `token` is the idempotency key (the form's share_token); `kickoff_document_url`
+ * is the /inner-meeting?form=<token> fill link.
  *
  * Mirrors src/lib/salesforce/quote.ts's transport exactly (same auth header,
  * same failure handling) so Salesforce sees a consistent envelope.
@@ -30,7 +22,7 @@
  *   SALESFORCE_OUTBOUND_SECRET     — else sent as `Authorization: Bearer <secret>`.
  */
 
-export type SalesforceKickoffEvent = 'kickoff.document_ready' | 'kickoff.completed'
+export type SalesforceKickoffEvent = 'kickoff.document_ready'
 
 export interface KickoffPushResult {
   delivered: boolean

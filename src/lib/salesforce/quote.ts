@@ -30,10 +30,8 @@ export interface SalesforceQuoteContract {
   name: string
   start_date: string
   end_date: string
-  /** Null when the field is empty in Salesforce. */
-  cpv: number | null
-  /** Null when the field is empty in Salesforce. */
-  estimated_exposures: number | null
+  cpv: number
+  estimated_exposures: number
   including_influencers: boolean
   services: SalesforceQuoteService[]
 }
@@ -52,14 +50,6 @@ export interface SalesforceQuotePayload {
 /* ───────────────── Mapping ───────────────── */
 
 const money = (n: number) => `${Math.round(n).toLocaleString('en-US')}₪`
-
-/**
- * Stringify an optional numeric SF field for display. Empty fields arrive as
- * null (or absent) and must render as blank — never the literal "null" /
- * "undefined", which is what String() would produce. A real 0 is kept.
- */
-const numText = (n: number | null | undefined): string =>
-  n === null || n === undefined || (n as unknown) === '' ? '' : String(n)
 
 function typeLabel(t: string): string {
   if (t === 'Ongoing') return 'שוטף'
@@ -107,8 +97,8 @@ export function mapSalesforceQuoteToPriceQuoteData(
     totalBudget: money(total),
     contentMix: [],
     kpi: {
-      cpv: numText(c?.cpv),
-      estimatedImpressions: numText(c?.estimated_exposures),
+      cpv: c ? String(c.cpv) : '',
+      estimatedImpressions: c ? String(c.estimated_exposures) : '',
     },
     platform: platform || '',
     contractPeriod: c ? formatPeriod(c.start_date, c.end_date) : '',
