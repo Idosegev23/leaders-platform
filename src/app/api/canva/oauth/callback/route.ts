@@ -26,9 +26,18 @@ export async function GET(request: Request) {
 
   const fail = (reason: string) => {
     console.warn('[canva-callback]', reason)
-    const res = NextResponse.redirect(`${base}/dashboard?canva=error`)
+    const res = NextResponse.redirect(
+      `${base}/dashboard?canva=error&reason=${encodeURIComponent(reason.slice(0, 120))}`,
+    )
     res.cookies.delete(COOKIE)
     return res
+  }
+
+  // Canva reports consent failures (invalid_scope, access_denied…) via
+  // error/error_description query params instead of code/state.
+  const oauthError = searchParams.get('error')
+  if (oauthError) {
+    return fail(`canva: ${oauthError} — ${searchParams.get('error_description') ?? ''}`)
   }
 
   if (!code || !state) return fail('missing code/state')
