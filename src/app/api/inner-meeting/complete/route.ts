@@ -7,7 +7,14 @@
  * Server-side cascade:
  *   1. Mail management with the formatted kickoff brief.
  *   2. Mark forms.status = 'completed'.
+ *   2.5 ClickUp: find-or-create the customer list + one task per picked role.
  *   3. Stamp activity_log so the dashboard ticker picks it up.
+ *   3.5 Salesforce-originated kickoffs: render the filled form to a Google Doc
+ *       and push `kickoff.completed` so the project's "מסמך לפגישת התנעה"
+ *       field moves from the blank template to the finished document.
+ *   4. Salesforce-originated kickoffs: fire the auto deck pipeline via QStash.
+ *
+ * Steps 2.5 onward are all best-effort — none of them can fail the submission.
  *
  * Auth: requires a logged-in employee. The form itself is collaborative —
  * once any participant hits "complete", the cascade fires once.
@@ -245,18 +252,88 @@ export async function POST(req: Request) {
     console.warn(`${tag} activity_log error:`, e instanceof Error ? e.message : e)
   }
 
+  // Read the form once — both the Salesforce cascade and the deck pipeline
+  // below need its metadata, and the push needs the share_token as the
+  // correlation key Salesforce already holds from the create event.
+  let formMeta: Record<string, unknown> = {}
+  let salesforceRef: string | null = null
+  let shareToken: string | null = null
+  try {
+    const { data: formRow } = await service
+      .from('forms')
+      .select('metadata, share_token')
+      .eq('id', formId)
+      .maybeSingle()
+    formMeta = (formRow?.metadata as Record<string, unknown> | null) ?? {}
+    salesforceRef = (formMeta.salesforce_ref as string | undefined) ?? null
+    shareToken = (formRow?.share_token as string | undefined) ?? null
+  } catch (e) {
+    // The form is already marked completed and the user has been served —
+    // losing the Salesforce/deck follow-ups is better than failing the submit.
+    console.warn(`${tag} form metadata read failed:`, e instanceof Error ? e.message : e)
+  }
+
+  // 3.5 Salesforce write-back — Salesforce-originated kickoffs only. Render the
+  //     filled kickoff to a Google Doc in the client's Drive workspace, then push
+  //     `kickoff.completed` with that URL so Salesforce updates the project's
+  //     "מסמך לפגישת התנעה" field from the blank template to the finished
+  //     document. Both halves are best-effort: a Drive or Salesforce outage
+  //     must never fail the submission the user just made.
+  let salesforce: {
+    pushed: boolean
+    reason?: string
+    kickoffDocLink: string | null
+  } = { pushed: false, kickoffDocLink: null }
+  if (salesforceRef) {
+    let kickoffDocLink: string | null = null
+    try {
+      const { uploadKickoffDocToDrive } = await import('@/lib/inner-meeting/upload-kickoff-doc')
+      const doc = await uploadKickoffDocToDrive({
+        payload,
+        senderName: user.user_metadata?.full_name ?? user.email,
+        senderEmail: user.email,
+      })
+      kickoffDocLink = doc.viewLink
+      console.log(`${tag} kickoff doc ${doc.updated ? 'updated' : 'created'}: ${doc.viewLink}`)
+      // Stash on the form so re-runs and the dashboard can reuse the link.
+      await service
+        .from('forms')
+        .update({ metadata: { ...formMeta, kickoff_doc_link: doc.viewLink } })
+        .eq('id', formId)
+    } catch (e) {
+      console.warn(`${tag} kickoff doc build failed:`, e instanceof Error ? e.message : e)
+    }
+
+    // Push even if the doc failed — Salesforce still gets the completion
+    // signal, falling back to the Hub form link so the field is never empty.
+    try {
+      const { notifySalesforceKickoff } = await import('@/lib/salesforce/kickoff')
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || new URL(req.url).origin
+      const fallbackUrl = shareToken ? `${appUrl}/inner-meeting?form=${shareToken}` : null
+      const result = await notifySalesforceKickoff(salesforceRef, 'kickoff.completed', {
+        token: shareToken,
+        kickoff_document_url: kickoffDocLink ?? fallbackUrl,
+        kickoff_form_url: fallbackUrl,
+        client_name: payload.clientName,
+        meeting_date: payload.meetingDate,
+        completed_at: new Date().toISOString(),
+        completed_by: user.email,
+      })
+      salesforce = { pushed: result.delivered, reason: result.reason, kickoffDocLink }
+      if (result.delivered) console.log(`${tag} salesforce kickoff.completed delivered`)
+      else console.warn(`${tag} salesforce kickoff.completed not delivered: ${result.reason}`)
+    } catch (e) {
+      console.warn(`${tag} salesforce kickoff.completed error:`, e instanceof Error ? e.message : e)
+      salesforce = { pushed: false, reason: 'threw', kickoffDocLink }
+    }
+  }
+
   // 4. Auto deck pipeline — Salesforce-originated kickoffs only. Fire a durable
   //    QStash workflow that assembles brief + kickoff and generates the deck
   //    headless (behind the scenes). Best-effort: never blocks completion, and
   //    dedups on formId so re-completing doesn't spawn a second run.
   try {
-    const { data: formRow } = await service
-      .from('forms')
-      .select('metadata')
-      .eq('id', formId)
-      .maybeSingle()
-    const salesforceRef =
-      ((formRow?.metadata as Record<string, unknown> | null)?.salesforce_ref as string | undefined) ?? null
     if (salesforceRef && process.env.QSTASH_TOKEN) {
       const { Client: QStashClient } = await import('@upstash/qstash')
       const appUrl =
@@ -282,6 +359,7 @@ export async function POST(req: Request) {
     ok: true,
     mail: { sent: mailSent, failed: mailFailed },
     clickup,
+    salesforce,
   })
 }
 

@@ -78,9 +78,14 @@ function baseStyles(): string {
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    /* A4 with no printer margin — the template draws its own gutters. Every
+       other A4 template in this repo declares this; without it Chrome falls
+       back to its default margin box and the 794px body stops mapping 1:1
+       onto the sheet. */
+    @page { size: A4; margin: 0; }
+
     html, body {
       width: 794px;
-      height: 1123px;
       font-family: 'Heebo', 'Arial Hebrew', sans-serif;
       direction: rtl;
       color: var(--ink);
@@ -90,20 +95,47 @@ function baseStyles(): string {
       print-color-adjust: exact !important;
     }
 
+    /* The page frame is a <table> on purpose. It puts the header and footer in
+       NORMAL FLOW — the footer used to be position:absolute, so content simply
+       painted on top of it — while .page-body's height:100% still pins the
+       footer to the bottom of a page that has room to spare. It also fragments
+       reliably: a page whose content genuinely doesn't fit now continues onto
+       another sheet, where the old height:1123px + overflow:hidden threw that
+       content away silently.
+       Note: Chrome's print engine does NOT repeat thead/tfoot across sheets
+       (verified against page.pdf()), so a page that spills carries its footer
+       on the last sheet only. Everything is preserved and nothing overlaps —
+       but keep pages inside one sheet where you can. */
     .page {
       width: 794px;
-      height: 1123px;
-      position: relative;
-      overflow: hidden;
-      padding: 0;
+      min-height: 297mm;
+      border-collapse: collapse;
+      table-layout: fixed;
     }
+    .page > thead { display: table-header-group; }
+    .page > tbody { display: table-row-group; }
+    .page > tfoot { display: table-footer-group; }
+    .page > * > tr > td { padding: 0; vertical-align: top; }
+    /* Absorbs the slack so the footer stays pinned to the bottom of a short page. */
+    .page-body { height: 100%; }
+
+    /* When a page genuinely does not fit, it now continues onto another sheet
+       rather than being clipped. These rules make that break land on a sensible
+       boundary instead of slicing through a table or a bullet. */
+    .quote-table,
+    .kpi-table,
+    .signature-fields { break-inside: avoid; }
+    .service-list li { break-inside: avoid; }
+    .section-header,
+    .section-header-dark { break-after: avoid; }
+    .about-text { orphans: 2; widows: 2; }
 
     /* ── Header ── */
     .header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      padding: 48px 56px 24px 56px;
+      padding: 40px 56px 20px 56px;
       border-bottom: 1px solid var(--ink-08);
     }
 
@@ -163,7 +195,7 @@ function baseStyles(): string {
       text-transform: uppercase;
       color: var(--ink-45);
       font-weight: 500;
-      margin-top: 12px;
+      margin-top: 8px;
     }
 
     .header-left {
@@ -180,7 +212,7 @@ function baseStyles(): string {
 
     /* ── Content area ── */
     .content {
-      padding: 24px 56px 0 56px;
+      padding: 20px 56px 16px 56px;
     }
 
     /* ── Section labels — editorial, NOT pills ── */
@@ -194,7 +226,7 @@ function baseStyles(): string {
       letter-spacing: 0.32em;
       text-transform: uppercase;
       color: var(--ink);
-      margin: 32px 0 18px;
+      margin: 26px 0 14px;
       padding: 0;
       background: transparent;
       border-radius: 0;
@@ -229,7 +261,7 @@ function baseStyles(): string {
       font-size: 12.5px;
       line-height: 1.7;
       color: var(--ink);
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       padding-right: 18px;
       position: relative;
     }
@@ -305,6 +337,10 @@ function baseStyles(): string {
     .kpi-table td {
       background: transparent;
       font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+      /* Cormorant defaults to old-style figures, which render "0.14" as "0.I4"
+         and jam the shekel sign against the last digit. Lining figures fix both. */
+      font-variant-numeric: lining-nums;
+      font-feature-settings: 'lnum' 1;
       font-size: 28px;
       font-weight: 500;
       letter-spacing: -0.01em;
@@ -317,13 +353,9 @@ function baseStyles(): string {
 
     /* ── Footer — discreet ── */
     .footer {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
       display: flex;
       justify-content: space-between;
-      padding: 18px 56px;
+      padding: 14px 56px;
       font-size: 9px;
       line-height: 1.7;
       color: var(--ink-45);
@@ -423,8 +455,14 @@ function headerHtml(data: PriceQuoteData, logoUrl: string): string {
   `
 }
 
-/** Wrap page content in full HTML document */
-function wrapPage(bodyContent: string): string {
+/**
+ * Wrap a page's content in the full HTML document.
+ *
+ * The header goes in <thead> and the footer in <tfoot> so both sit in normal
+ * flow, above and below the content rather than layered over it. See the
+ * `.page` rules in baseStyles() for why the frame is a table.
+ */
+function wrapPage(data: PriceQuoteData, logoUrl: string, contentHtml: string): string {
   return `<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -433,9 +471,11 @@ function wrapPage(bodyContent: string): string {
   <style>${baseStyles()}</style>
 </head>
 <body>
-  <div class="page">
-    ${bodyContent}
-  </div>
+  <table class="page">
+    <thead><tr><td>${headerHtml(data, logoUrl)}</td></tr></thead>
+    <tbody><tr><td class="page-body"><div class="content">${contentHtml}</div></td></tr></tbody>
+    <tfoot><tr><td>${footerHtml()}</td></tr></tfoot>
+  </table>
 </body>
 </html>`
 }
@@ -497,14 +537,10 @@ export function generatePage1(data: PriceQuoteData, logoUrl: string): string {
        <ul class="service-list">${serviceItems}</ul>`
     : ''
 
-  return wrapPage(`
-    ${headerHtml(data, logoUrl)}
-    <div class="content">
-      ${aboutBlock}
-      ${servicesBlock}
-      ${renderCustomSectionsForPage(data, 1)}
-    </div>
-    ${footerHtml()}
+  return wrapPage(data, logoUrl, `
+    ${aboutBlock}
+    ${servicesBlock}
+    ${renderCustomSectionsForPage(data, 1)}
   `)
 }
 
@@ -585,15 +621,11 @@ export function generatePage2(data: PriceQuoteData, logoUrl: string): string {
       </table>
     ` : ''
 
-  return wrapPage(`
-    ${headerHtml(data, logoUrl)}
-    <div class="content">
-      ${budgetBlock}
-      ${contentMixBlock}
-      ${kpiBlock}
-      ${renderCustomSectionsForPage(data, 2)}
-    </div>
-    ${footerHtml()}
+  return wrapPage(data, logoUrl, `
+    ${budgetBlock}
+    ${contentMixBlock}
+    ${kpiBlock}
+    ${renderCustomSectionsForPage(data, 2)}
   `)
 }
 
@@ -624,13 +656,9 @@ export function generatePage3(data: PriceQuoteData, logoUrl: string): string {
       </ul>
     ` : ''
 
-  return wrapPage(`
-    ${headerHtml(data, logoUrl)}
-    <div class="content">
-      ${deliverablesBlock}
-      ${renderCustomSectionsForPage(data, 3)}
-    </div>
-    ${footerHtml()}
+  return wrapPage(data, logoUrl, `
+    ${deliverablesBlock}
+    ${renderCustomSectionsForPage(data, 3)}
   `)
 }
 
@@ -661,15 +689,11 @@ export function generatePage4(data: PriceQuoteData, logoUrl: string): string {
 
   const signatureBlock = showSignature ? signatureBlockHtml(data) : ''
 
-  return wrapPage(`
-    ${headerHtml(data, logoUrl)}
-    <div class="content">
-      ${paymentBlock}
-      ${declarationBlock}
-      ${signatureBlock}
-      ${renderCustomSectionsForPage(data, 4)}
-    </div>
-    ${footerHtml()}
+  return wrapPage(data, logoUrl, `
+    ${paymentBlock}
+    ${declarationBlock}
+    ${signatureBlock}
+    ${renderCustomSectionsForPage(data, 4)}
   `)
 }
 

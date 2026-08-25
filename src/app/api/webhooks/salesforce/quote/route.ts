@@ -7,7 +7,7 @@ import {
   type SalesforceQuotePayload,
 } from '@/lib/salesforce/quote'
 import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
-import { generateMultiPagePdf } from '@/lib/playwright/pdf'
+import { generatePaginatedA4Pdf } from '@/lib/playwright/pdf'
 import { uploadBufferToDriveFolder } from '@/lib/google-drive/client'
 import { DRIVE_ANCHORS } from '@/lib/google-drive/client-folders'
 import { sendGmailViaServiceAccount } from '@/lib/gmail'
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
   let pdfBuffer: Buffer
   try {
     const pages = generatePriceQuotePages(quoteData, appBaseUrl())
-    pdfBuffer = await generateMultiPagePdf(pages, { format: 'A4', title, brandName: customerName })
+    pdfBuffer = await generatePaginatedA4Pdf(pages, { format: 'A4', title, brandName: customerName })
   } catch (e) {
     console.error('[salesforce-quote] PDF generation failed:', e)
     return NextResponse.json({ ok: false, error: `PDF generation failed: ${e instanceof Error ? e.message : e}` }, { status: 500 })
