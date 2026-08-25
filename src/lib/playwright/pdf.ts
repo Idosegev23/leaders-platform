@@ -175,6 +175,154 @@ export async function generatePdf(
 }
 
 /**
+ * Split each A4 page into sheet-sized pieces, cloning the page's full frame
+ * (header + footer) around every piece. Exported so the pagination can be
+ * asserted directly, without going through a PDF.
+ */
+export async function splitPagesIntoSheets(
+  browser: Awaited<ReturnType<typeof getBrowser>>,
+  htmlPages: string[],
+): Promise<string[]> {
+  // Measure every page first, so the log below reports the real sheet count.
+  const sheets: string[] = []
+  for (let i = 0; i < htmlPages.length; i++) {
+    const page = await setupPage(browser, htmlPages[i], {
+      width: 794,
+      height: 1123,
+      isFirst: i === 0,
+    })
+    /**
+    * Browser-side splitter for A4 documents.
+    *
+    * Chrome's print engine will happily fragment a page that doesn't fit, but it
+    * repeats neither `thead`/`tfoot` nor `position: fixed` across the resulting
+    * sheets — so the continuation sheet loses its header and its footer floats up
+    * to wherever the content happened to end. Verified against page.pdf(), not
+    * assumed.
+    *
+    * So we paginate before printing instead: measure the page's content blocks,
+    * group them into sheet-sized runs, and clone the full header/footer frame
+    * around each run. Every sheet then renders as a complete, self-contained page.
+    *
+    * Runs inside the browser via page.evaluate — it needs real layout boxes.
+    */
+    const split = await page.evaluate(() => {
+      const SHEET_H = 1122.5 // A4 at 96dpi
+      const content = document.querySelector('.content') as HTMLElement | null
+      const header = document.querySelector('.header') as HTMLElement | null
+      const footer = document.querySelector('.footer') as HTMLElement | null
+      if (!content || !header || !footer) return [document.documentElement.outerHTML]
+
+      const blocks = Array.from(content.children) as HTMLElement[]
+      if (blocks.length === 0) return [document.documentElement.outerHTML]
+
+      const cs = getComputedStyle(content)
+      const padding = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+      const available =
+        SHEET_H - header.getBoundingClientRect().height - footer.getBoundingClientRect().height - padding
+
+      const rects = blocks.map(b => b.getBoundingClientRect())
+      // getBoundingClientRect excludes margins. The gaps *between* blocks are
+      // already baked into the span from the group's first top to a block's
+      // bottom, but the first block's top margin and the last block's bottom
+      // margin reappear once the group is cloned onto its own sheet — so they
+      // have to be added back or the sheet overflows by exactly that much.
+      const marginTop = blocks.map(b => parseFloat(getComputedStyle(b).marginTop) || 0)
+      const marginBottom = blocks.map(b => parseFloat(getComputedStyle(b).marginBottom) || 0)
+      const EPSILON = 2 // absorb sub-pixel rounding rather than spill a sheet
+
+      const groups: number[][] = []
+      let current: number[] = []
+      let first = 0
+
+      blocks.forEach((_, i) => {
+        const height =
+          marginTop[first] + (rects[i].bottom - rects[first].top) + marginBottom[i]
+        if (current.length > 0 && height > available - EPSILON) {
+          groups.push(current)
+          current = [i]
+          first = i
+        } else {
+          current.push(i)
+        }
+      })
+      if (current.length > 0) groups.push(current)
+
+      // A section label stranded at the foot of a sheet belongs with the block it
+      // introduces, so push it forward.
+      const LABELS = ['section-header', 'section-header-dark']
+      for (let g = 0; g < groups.length - 1; g++) {
+        for (;;) {
+          const last = groups[g][groups[g].length - 1]
+          if (groups[g].length <= 1 || !LABELS.some(c => blocks[last].classList.contains(c))) break
+          groups[g + 1].unshift(groups[g].pop() as number)
+        }
+      }
+
+      if (groups.length === 1) return [document.documentElement.outerHTML]
+
+      return groups.map(group => {
+        const clone = document.documentElement.cloneNode(true) as HTMLElement
+        const cloneContent = clone.querySelector('.content') as HTMLElement
+        const keep = new Set(group)
+        Array.from(cloneContent.children).forEach((el, i) => {
+          if (!keep.has(i)) el.remove()
+        })
+        return clone.outerHTML
+      })
+    })
+    await page.close()
+    if (split.length > 1) {
+      console.log(`[PDF] page ${i + 1} overflows — split across ${split.length} sheets`)
+    }
+    sheets.push(...split.map(html => (html.startsWith('<!DOCTYPE') ? html : `<!DOCTYPE html>${html}`)))
+  }
+  return sheets
+}
+
+/**
+ * Generate a multi-page A4 PDF, splitting any page whose content overflows the
+ * sheet so that every sheet keeps its own header and bottom-anchored footer.
+ * Use this for A4 documents; generateMultiPagePdf() is for fixed-size slides.
+ */
+export async function generatePaginatedA4Pdf(
+  htmlPages: string[],
+  options: PdfOptions = {}
+): Promise<Buffer> {
+  const { PDFDocument } = await import('pdf-lib')
+  const browser = await getBrowser()
+
+  try {
+    const mergedPdf = await PDFDocument.create()
+    const pdfOpts = { format: 'A4' as const, printBackground: true, preferCSSPageSize: true }
+
+    const sheets = await splitPagesIntoSheets(browser, htmlPages)
+
+    console.log(`[PDF] Rendering ${sheets.length} A4 sheets from ${htmlPages.length} pages`)
+
+    for (let i = 0; i < sheets.length; i++) {
+      const page = await setupPage(browser, sheets[i], { width: 794, height: 1123 })
+      const buffer = await page.pdf(pdfOpts)
+      await page.close()
+
+      const sheetPdf = await PDFDocument.load(buffer)
+      const copied = await mergedPdf.copyPages(sheetPdf, sheetPdf.getPageIndices())
+      copied.forEach(p => mergedPdf.addPage(p))
+    }
+
+    mergedPdf.setTitle(options.title || 'Document')
+    mergedPdf.setAuthor(options.brandName || 'Leaders')
+    mergedPdf.setCreator('Leaders platform')
+    mergedPdf.setCreationDate(new Date())
+    mergedPdf.setModificationDate(new Date())
+
+    return Buffer.from(await mergedPdf.save())
+  } finally {
+    await browser.close()
+  }
+}
+
+/**
  * Generate multi-page PDF from array of HTML pages.
  * Uses page.pdf() with screen media emulation + sRGB color profile
  * so output is editable AND visually matches the editor.

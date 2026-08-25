@@ -14,7 +14,7 @@ import { existsSync } from 'node:fs'
 import puppeteer, { type Browser } from 'puppeteer-core'
 import { PDFDocument } from 'pdf-lib'
 import { generateAllQuotePages } from './price-quote-template'
-import { generateMultiPagePdf } from '@/lib/playwright/pdf'
+import { generatePaginatedA4Pdf, splitPagesIntoSheets, getBrowser } from '@/lib/playwright/pdf'
 import { PRICE_QUOTE_SERVICES } from '@/lib/constants/price-quote-services'
 import type { PriceQuoteData } from '@/types/price-quote'
 
@@ -193,7 +193,7 @@ describe.skipIf(!chromePath)('price quote — A4 page boundaries', () => {
 describe.skipIf(!chromePath)('price quote — rendered PDF', () => {
   it('renders the standard quote as exactly 4 A4 pages', async () => {
     const pages = generateAllQuotePages(standardQuote(), 'http://localhost:3000')
-    const pdf = await generateMultiPagePdf(pages, { format: 'A4', title: 't', brandName: 'b' })
+    const pdf = await generatePaginatedA4Pdf(pages, { format: 'A4', title: 't', brandName: 'b' })
     const doc = await PDFDocument.load(pdf)
 
     expect(doc.getPageCount()).toBe(4)
@@ -207,11 +207,46 @@ describe.skipIf(!chromePath)('price quote — rendered PDF', () => {
     }
   }, 180_000)
 
-  it('flows genuine overflow onto an extra page instead of dropping it', async () => {
+  it('flows genuine overflow onto an extra sheet instead of dropping it', async () => {
     const pages = generateAllQuotePages(oversizedQuote(), 'http://localhost:3000')
-    const pdf = await generateMultiPagePdf(pages, { format: 'A4', title: 't', brandName: 'b' })
+    const pdf = await generatePaginatedA4Pdf(pages, { format: 'A4', title: 't', brandName: 'b' })
     const doc = await PDFDocument.load(pdf)
 
-    expect(doc.getPageCount()).toBeGreaterThan(4)
+    // 4 quote pages, one of which no longer fits and becomes two sheets.
+    expect(doc.getPageCount()).toBe(5)
   }, 180_000)
+})
+
+describe.skipIf(!chromePath)('price quote — pagination', () => {
+  it('gives every sheet its own header and footer', async () => {
+    const pages = generateAllQuotePages(oversizedQuote(), 'http://localhost:3000')
+    const own = await getBrowser()
+    try {
+      const sheets = await splitPagesIntoSheets(own, pages)
+      expect(sheets.length).toBe(5)
+      sheets.forEach((sheet, i) => {
+        expect(sheet, `sheet ${i + 1} lost its header`).toContain('class="header"')
+        expect(sheet, `sheet ${i + 1} lost its footer`).toContain('class="footer"')
+      })
+    } finally {
+      await own.close()
+    }
+  }, 180_000)
+
+  it('produces sheets that each fit one page, with nothing left to fragment', async () => {
+    // If a sheet still overflowed, Chrome would fragment it and the PDF would
+    // carry more pages than the splitter produced.
+    for (const data of [standardQuote(), oversizedQuote()]) {
+      const pages = generateAllQuotePages(data, 'http://localhost:3000')
+      const own = await getBrowser()
+      let sheetCount: number
+      try {
+        sheetCount = (await splitPagesIntoSheets(own, pages)).length
+      } finally {
+        await own.close()
+      }
+      const pdf = await generatePaginatedA4Pdf(pages, { format: 'A4', title: 't', brandName: 'b' })
+      expect((await PDFDocument.load(pdf)).getPageCount()).toBe(sheetCount)
+    }
+  }, 300_000)
 })

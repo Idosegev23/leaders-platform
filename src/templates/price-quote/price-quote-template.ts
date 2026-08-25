@@ -337,6 +337,10 @@ function baseStyles(): string {
     .kpi-table td {
       background: transparent;
       font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+      /* Cormorant defaults to old-style figures, which render "0.14" as "0.I4"
+         and jam the shekel sign against the last digit. Lining figures fix both. */
+      font-variant-numeric: lining-nums;
+      font-feature-settings: 'lnum' 1;
       font-size: 28px;
       font-weight: 500;
       letter-spacing: -0.01em;

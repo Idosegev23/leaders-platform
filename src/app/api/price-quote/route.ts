@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generatePriceQuotePages, generateAllQuotePages } from '@/templates/price-quote/price-quote-template'
-import { generateMultiPagePdf } from '@/lib/playwright/pdf'
+import { generatePaginatedA4Pdf } from '@/lib/playwright/pdf'
 import type { PriceQuoteData } from '@/types/price-quote'
 
 export const maxDuration = 120
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     const pages = generatePriceQuotePages(data, origin)
 
     console.log(`[${requestId}] Rendering PDF...`)
-    const pdfBuffer = await generateMultiPagePdf(pages, {
+    const pdfBuffer = await generatePaginatedA4Pdf(pages, {
       format: 'A4',
       title: `הצעת מחיר - ${data.clientName}`,
       brandName: data.clientName,

@@ -24,7 +24,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { priceQuoteService } from '@/lib/price-quotes/service'
 import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
-import { generateMultiPagePdf } from '@/lib/playwright/pdf'
+import { generatePaginatedA4Pdf } from '@/lib/playwright/pdf'
 import { uploadBufferToDriveAsUser } from '@/lib/google-drive/client'
 import { sendGmailEmail } from '@/lib/gmail'
 import { buildSignatureRequestEmail } from '@/lib/signatures/email'
@@ -134,7 +134,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
   let pdfBuffer: Buffer
   try {
     const pages = generatePriceQuotePages(frozenData, origin)
-    pdfBuffer = await generateMultiPagePdf(pages, {
+    pdfBuffer = await generatePaginatedA4Pdf(pages, {
       format: 'A4',
       title: `הצעת מחיר - ${frozenData.clientName}`,
       brandName: frozenData.clientName,

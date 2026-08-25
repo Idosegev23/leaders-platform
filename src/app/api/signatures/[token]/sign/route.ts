@@ -15,7 +15,7 @@ import { sendGmailEmail, refreshAccessToken } from '@/lib/gmail'
 import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
 import { notifySalesforceQuote } from '@/lib/salesforce/quote'
 import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
-import { generateMultiPagePdf } from '@/lib/playwright/pdf'
+import { generatePaginatedA4Pdf } from '@/lib/playwright/pdf'
 import type { PriceQuoteData, PriceQuoteSignature } from '@/types/price-quote'
 
 export const dynamic = 'force-dynamic'
@@ -146,7 +146,7 @@ export async function POST(
         process.env.NEXT_PUBLIC_APP_URL ||
           (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app'),
       )
-      const buffer = await generateMultiPagePdf(pages, {
+      const buffer = await generatePaginatedA4Pdf(pages, {
         format: 'A4',
         title: `${req.title} (חתום)`,
         brandName: req.title,
@@ -174,7 +174,7 @@ export async function POST(
         process.env.NEXT_PUBLIC_APP_URL ||
           (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app'),
       )
-      const buffer = await generateMultiPagePdf(pages, {
+      const buffer = await generatePaginatedA4Pdf(pages, {
         format: 'A4',
         title: `${req.title} (חתום)`,
         brandName: req.title,
