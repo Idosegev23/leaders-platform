@@ -101,15 +101,20 @@ describe('allowedRemovals', () => {
     expect(refused.map((r) => r.reason)).toEqual(['protected type cover', 'protected type closing'])
   })
 
-  it('caps removals per round', () => {
+  it('allows one removal per round by default, so the next critique verifies it first', () => {
     const { allowed, refused } = allowedRemovals(twenty, [3, 4, 5, 6])
-    expect(allowed).toEqual([3, 4])
+    expect(allowed).toEqual([3])
     expect(refused.every((r) => r.reason.startsWith('per-round cap'))).toBe(true)
+  })
+
+  it('honours a larger per-round cap when asked', () => {
+    const { allowed } = allowedRemovals(twenty, [3, 4, 5, 6], { minSlides: 12, maxPerRound: 2 })
+    expect(allowed).toEqual([3, 4])
   })
 
   it('holds the deck at the floor', () => {
     const thirteen = deck(['cover', ...Array(11).fill('creative'), 'closing'])
-    const { allowed, refused } = allowedRemovals(thirteen, [3, 4])
+    const { allowed, refused } = allowedRemovals(thirteen, [3, 4], { minSlides: 12, maxPerRound: 2 })
     expect(allowed).toEqual([3]) // 13 → 12 is fine, 12 → 11 is not
     expect(refused[0].reason).toMatch(/floor/)
   })

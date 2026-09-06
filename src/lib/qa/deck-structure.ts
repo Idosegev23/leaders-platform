@@ -125,7 +125,10 @@ export interface RemovalPolicy {
   maxPerRound: number
 }
 
-export const DEFAULT_REMOVAL_POLICY: RemovalPolicy = { minSlides: 12, maxPerRound: 2 }
+/** One structural change per round: the next round's critique verifies it
+ *  before another is allowed. Two removals in one round cut two of three
+ *  influencer profiles before anything could check the result. */
+export const DEFAULT_REMOVAL_POLICY: RemovalPolicy = { minSlides: 12, maxPerRound: 1 }
 
 /**
  * Filter requested removals down to the ones the policy allows, in the order

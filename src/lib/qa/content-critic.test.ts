@@ -5,6 +5,7 @@ import {
   contentGateVerdict,
   uncheckedCritique,
   buildContentPrompt,
+  intersectCritiques,
   CONTENT_CHECK_KEYS,
 } from './content-critic'
 
@@ -176,6 +177,73 @@ describe('contentGateVerdict', () => {
     expect(g.passed).toBe(true) // do no harm — never block on our own outage
     expect(g.summary).toContain('critique unavailable')
     expect(g.summary).toContain('model timeout')
+  })
+})
+
+describe('intersectCritiques', () => {
+  const parse = (slides: unknown[], deck?: Record<string, unknown>) => parseContentCritique(critiqueJson(slides, deck), slides.length)!
+  const ok = (i: number) => ({ slideIndex: i, checks: pass(), verdict: 'pass', issues: [], rewrite: '' })
+  const bad = (i: number, check: string, issue: string, extra: Record<string, unknown> = {}) => ({
+    slideIndex: i, checks: { ...pass(), [check]: false }, verdict: 'fail', issues: [issue], rewrite: 'תקן', ...extra,
+  })
+
+  it('fails a slide only when both critiques fail the same check', () => {
+    const a = parse([bad(0, 'grounded', 'מספר מומצא'), bad(1, 'concrete', 'מעורפל')])
+    const b = parse([bad(0, 'grounded', 'נתון ללא מקור'), ok(1)])
+    const m = intersectCritiques(a, b)
+    expect(m.slides[0].verdict).toBe('fail')
+    expect(m.slides[0].checks.grounded).toBe(false)
+    expect(m.slides[1].verdict).toBe('pass') // one critic's one-off objection
+  })
+
+  it('treats two critics failing on different checks as disagreement, not failure', () => {
+    // Observed: the same slide flipped between rounds with no content change.
+    const a = parse([bad(0, 'grounded', 'x')])
+    const b = parse([bad(0, 'notRedundant', 'y')])
+    expect(intersectCritiques(a, b).slides[0].verdict).toBe('pass')
+  })
+
+  it('merges the issues of an agreed failure and keeps a rewrite directive', () => {
+    const a = parse([bad(0, 'grounded', 'מספר מומצא')])
+    const b = parse([bad(0, 'grounded', 'אין מקור לנתון')])
+    const s = intersectCritiques(a, b).slides[0]
+    expect(s.issues).toEqual(['מספר מומצא', 'אין מקור לנתון'])
+    expect(s.rewrite).toBe('תקן')
+  })
+
+  it('removes only when both critiques call the slide a structural duplicate', () => {
+    const dup = (extra: Record<string, unknown>) => bad(1, 'notRedundant', 'חוזר על שקף 0', extra)
+    const both = intersectCritiques(parse([ok(0), dup({ disposition: 'remove' })]), parse([ok(0), dup({ disposition: 'remove' })]))
+    expect(both.slides[1].disposition).toBe('remove')
+    // One says remove, the other says rewrite → rewrite. Two of three
+    // influencer profiles were deleted in one round on a single reading.
+    const one = intersectCritiques(parse([ok(0), dup({ disposition: 'remove' })]), parse([ok(0), dup({})]))
+    expect(one.slides[1].verdict).toBe('fail')
+    expect(one.slides[1].disposition).toBe('rewrite')
+  })
+
+  it('requires both critiques for a deck-level flag', () => {
+    const arcBad = { arcHolds: false, noContradictions: true, issues: ['אין קשת'] }
+    const fine = { arcHolds: true, noContradictions: true, issues: [] }
+    expect(intersectCritiques(parse([ok(0)], arcBad), parse([ok(0)], fine)).deck.arcHolds).toBe(true)
+    const m = intersectCritiques(parse([ok(0)], arcBad), parse([ok(0)], { ...arcBad, issues: ['הסיפור לא נסגר'] }))
+    expect(m.deck.arcHolds).toBe(false)
+    expect(m.deck.issues).toEqual(['אין קשת', 'הסיפור לא נסגר'])
+  })
+
+  it('lets one critique stand alone when the other never ran, and says so', () => {
+    const a = parse([bad(0, 'grounded', 'x')])
+    const m = intersectCritiques(a, uncheckedCritique(1, 'timed out'))
+    expect(m.unchecked).toBe(false)
+    expect(m.slides[0].verdict).toBe('fail')
+    expect(m.note).toContain('single critique')
+  })
+
+  it('is unchecked only when both critiques failed to run', () => {
+    const m = intersectCritiques(uncheckedCritique(2, 'a down'), uncheckedCritique(2, 'b down'))
+    expect(m.unchecked).toBe(true)
+    expect(m.note).toContain('a down')
+    expect(m.note).toContain('b down')
   })
 })
 

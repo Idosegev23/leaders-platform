@@ -242,7 +242,12 @@ export async function POST(request: Request) {
   const gate = contentGateVerdict(critique)
   console.log(`${tag} ${gate.summary}`)
 
-  if (!critique.unchecked && (!best || gate.failingIndexes.length < best.failures)) {
+  // Ties go to the LATER verified state. A later round embodies structural
+  // fixes the earlier one lacked (a duplicate removed, order corrected); an
+  // equal score means no regression, so preferring the older snapshot would
+  // undo a correct fix — which is exactly how a rightly-removed duplicate
+  // slide came back on restore.
+  if (!critique.unchecked && (!best || gate.failingIndexes.length <= best.failures)) {
     best = { failures: gate.failingIndexes.length, slides: [...slides], slideTypes: [...slideTypes] }
   }
 

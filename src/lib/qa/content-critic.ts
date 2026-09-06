@@ -107,12 +107,25 @@ to the same yardstick produces false failures that waste a repair round.
 </judge-by-slide-type>
 
 <conventions>
-Every slide opens with an eyebrow of the form "LABEL // NN" — e.g. "COVER // 01",
-"יעדים // 03", "CLOSING // 22". This is a design element, not copy:
-- The LABEL may be an English section word in capitals (COVER, BRIEF, GOALS,
-  CLOSING). That is the renderer's convention. Never fail hebrewQuality for it.
-- NN is the slide's 1-based position. It is a placeholder failure ONLY when it
-  does not equal (SLIDE index + 1) for that slide. A matching number is fine.
+- Eyebrows. Most slides open with "LABEL // NN" — "COVER // 01", "יעדים // 03",
+  "CLOSING // 22" — where the number AFTER "//" is the slide's 1-based position
+  and LABEL may be an English section word in capitals (COVER, BRIEF, CLOSING).
+  That is the renderer's convention: never fail hebrewQuality for the label, and
+  fail noPlaceholder on the number ONLY when the number after "//" does not equal
+  (SLIDE index + 1). Pillar slides use a DIFFERENT shape — "עמוד תווך 01 // מקור",
+  "עמוד תווך 02 // רובד הטקס" — where the number is the pillar's ordinal (first,
+  second, third pillar), NOT a slide position. Never judge it as a slide number.
+- The agency. This deck is presented by Leaders, rendered "LEADERS". The
+  agency's name, its lockup ("BRAND × LEADERS"), and "we / our proposal"
+  framing are never ungrounded — they identify the author, not a claim about
+  the client.
+- Structure. A deck may introduce a pillar as strategy and later show that
+  pillar's creative EXECUTION (script, format, example) on its own slide, and
+  may give each influencer profile its own slide after naming the profiles in
+  the strategy. That progression is not redundancy. notRedundant fails only
+  when a slide restates the SAME point at the SAME level of detail as another —
+  not when it advances from principle to execution, or from a summary to a
+  profile.
 </conventions>
 
 <deck-level>
@@ -399,39 +412,108 @@ export async function critiqueDeckContent(
   const texts = htmlSlides.map(extractSlideText)
   const prompt = buildContentPrompt(texts, opts.sourceMaterial, opts.brandName, opts.slideTypes ?? [])
   const deadline = Date.now() + (opts.budgetMs ?? 180_000)
+  const slideCount = htmlSlides.length
 
-  // One retry: an unparseable response is a transient model failure, and
-  // silently degrading a real critique to "unchecked" costs a whole round of
-  // quality review. Only retried while budget remains.
-  let lastNote = 'unparseable critic response'
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const remaining = deadline - Date.now()
-    if (remaining < 15_000) break
+  const critiqueOnce = async (label: string, remaining: number): Promise<DeckContentCritique | null> => {
     try {
       const res = await Promise.race([
         callAI({
           model: opts.model || 'gemini-3.1-pro-preview',
           prompt,
-          callerId: 'content-critic',
+          callerId: `content-critic-${label}`,
           maxOutputTokens: CRITIQUE_MAX_OUTPUT_TOKENS,
           geminiConfig: {
             responseMimeType: 'application/json',
             responseSchema: CRITIQUE_SCHEMA as never,
             maxOutputTokens: CRITIQUE_MAX_OUTPUT_TOKENS,
+            // A judge, not a writer: pin sampling so the same deck gets the
+            // same verdict. At default temperature the same slides flipped
+            // pass→fail between rounds with no content change.
+            temperature: 0,
+            thinkingConfig: { thinkingLevel: 'LOW' } as never,
           },
         }),
         new Promise<never>((_, rej) =>
           setTimeout(() => rej(new Error('content critique timed out')), remaining),
         ),
       ])
-      const parsed = parseContentCritique(res?.text || '', htmlSlides.length)
-      if (parsed) return parsed
-      lastNote = `unparseable critic response (attempt ${attempt + 1})`
-      console.warn(`[content-critic] ${lastNote} — ${(res?.text || '').length} chars returned`)
+      const parsed = parseContentCritique(res?.text || '', slideCount)
+      if (!parsed) console.warn(`[content-critic] ${label}: unparseable response — ${(res?.text || '').length} chars`)
+      return parsed
     } catch (e) {
-      lastNote = e instanceof Error ? e.message : String(e)
-      console.warn(`[content-critic] attempt ${attempt + 1} failed: ${lastNote}`)
+      console.warn(`[content-critic] ${label} failed: ${e instanceof Error ? e.message : e}`)
+      return null
     }
   }
-  return uncheckedCritique(htmlSlides.length, lastNote)
+
+  // Two independent critiques, intersected: a slide fails only when both fail
+  // the same check. One critic's one-off objection cannot fail a slide, and a
+  // removal needs both to call the slide a structural duplicate. Run in
+  // parallel, so this costs tokens, not wall-clock. One retry of the pair if
+  // neither parses — degrading a real critique to "unchecked" costs a round.
+  let lastNote = 'unparseable critic response'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const remaining = deadline - Date.now()
+    if (remaining < 15_000) break
+    const [a, b] = await Promise.all([critiqueOnce('a', remaining), critiqueOnce('b', remaining)])
+    if (a || b) {
+      return intersectCritiques(
+        a ?? uncheckedCritique(slideCount, 'critic a failed'),
+        b ?? uncheckedCritique(slideCount, 'critic b failed'),
+      )
+    }
+    lastNote = `both critiques unavailable (attempt ${attempt + 1})`
+  }
+  return uncheckedCritique(slideCount, lastNote)
+}
+
+/**
+ * Combine two independent critiques of the same deck into one verdict that
+ * both agree on.
+ *
+ *  - A check fails only if BOTH critiques failed it; a slide fails only if some
+ *    check fails after that. Two critics failing a slide on different checks
+ *    is disagreement about what is wrong, not agreement that it is.
+ *  - Removal requires both to say remove. Deleting a slide on one critic's
+ *    reading is how two of three influencer profiles were cut in one round.
+ *  - Deck-level flags need both. Issues are merged for whatever survives.
+ *  - If one side is unchecked, the other stands alone (with a note); if both
+ *    are, the result is unchecked.
+ */
+export function intersectCritiques(a: DeckContentCritique, b: DeckContentCritique): DeckContentCritique {
+  if (a.unchecked && b.unchecked) return { ...a, note: `${a.note ?? 'unchecked'}; ${b.note ?? 'unchecked'}` }
+  if (a.unchecked) return { ...b, note: `single critique (${a.note ?? 'other unavailable'})` }
+  if (b.unchecked) return { ...a, note: `single critique (${b.note ?? 'other unavailable'})` }
+
+  const slides: SlideContentCritique[] = a.slides.map((sa, i) => {
+    const sb = b.slides[i] ?? sa
+    const checks = Object.fromEntries(
+      CONTENT_CHECK_KEYS.map((k) => [k, sa.checks[k] || sb.checks[k]]),
+    ) as Record<ContentCheckKey, boolean>
+    const failed = CONTENT_CHECK_KEYS.some((k) => !checks[k])
+    if (!failed) {
+      return { slideIndex: sa.slideIndex, checks, verdict: 'pass', issues: [], rewrite: '', disposition: 'rewrite' }
+    }
+    return {
+      slideIndex: sa.slideIndex,
+      checks,
+      verdict: 'fail',
+      issues: Array.from(new Set([...sa.issues, ...sb.issues])),
+      rewrite: sa.rewrite || sb.rewrite,
+      disposition: sa.disposition === 'remove' && sb.disposition === 'remove' ? 'remove' : 'rewrite',
+    }
+  })
+
+  const arcHolds = a.deck.arcHolds || b.deck.arcHolds
+  const noContradictions = a.deck.noContradictions || b.deck.noContradictions
+  return {
+    slides,
+    deck: {
+      arcHolds,
+      noContradictions,
+      issues: arcHolds && noContradictions ? [] : Array.from(new Set([...a.deck.issues, ...b.deck.issues])),
+    },
+    unchecked: false,
+    note: 'intersection of two independent critiques',
+  }
 }
