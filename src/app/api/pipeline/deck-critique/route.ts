@@ -222,7 +222,7 @@ export async function POST(request: Request) {
     // Eyebrow numbers are baked in at generation; after a reorder — or for a
     // deck built before generate-full started renumbering — they point at old
     // positions and the critic (rightly) fails them as placeholders.
-    const { htmlSlides: numbered, renumbered } = renumberEyebrows(ordered.htmlSlides)
+    const { htmlSlides: numbered, renumbered } = renumberEyebrows(ordered.htmlSlides, ordered.slideTypes)
     if (report.changed || renumbered > 0) {
       slides = numbered
       slideTypes = ordered.slideTypes
@@ -368,11 +368,14 @@ export async function POST(request: Request) {
     }
   }
   const afterRemoval = removeSlides({ htmlSlides: working, slideTypes: workingTypes }, toRemove)
-  // Removal shifts every later slide's position — renumber so the eyebrows
-  // don't become the next round's "placeholder" failures.
-  const finalDeck = toRemove.length
-    ? { htmlSlides: renumberEyebrows(afterRemoval.htmlSlides).htmlSlides, slideTypes: afterRemoval.slideTypes }
-    : afterRemoval
+  // Always renumber after a repair round, not only after removals: a removal
+  // shifts every later position, and a rewrite can return an eyebrow in the
+  // wrong form or blank it. Deterministic and idempotent, so it is cheap to
+  // run every time.
+  const finalDeck = {
+    htmlSlides: renumberEyebrows(afterRemoval.htmlSlides, afterRemoval.slideTypes).htmlSlides,
+    slideTypes: afterRemoval.slideTypes,
+  }
   console.log(`${tag} repaired ${repaired.length}/${targets.length} slides, removed ${toRemove.length}`)
   rounds.push({ round, summary: gate.summary, repaired, removed: toRemove, findings })
 

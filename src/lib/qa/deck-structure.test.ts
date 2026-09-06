@@ -169,9 +169,26 @@ describe('renumberEyebrows', () => {
     expect(htmlSlides[1]).toContain('CLOSING // 02')
   })
 
-  it('handles a number-first eyebrow', () => {
-    const { htmlSlides } = renumberEyebrows(['<div class="eyebrow">07 // COVER</div>'])
-    expect(htmlSlides[0]).toContain('01 // COVER')
+  it('normalizes a number-first eyebrow to the label-first form every other slide uses', () => {
+    // A repair returned "19 // לוח זמנים" on a deck of "LABEL // NN" eyebrows.
+    const { htmlSlides, renumbered } = renumberEyebrows(['<div class="eyebrow">07 // COVER</div>'])
+    expect(htmlSlides[0]).toContain('COVER // 01')
+    expect(renumbered).toBe(1)
+  })
+
+  it('fills an empty eyebrow from a sibling slide of the same type', () => {
+    // A repair blanked the eyebrow while removing a fabricated influencer name.
+    const { htmlSlides } = renumberEyebrows(
+      [slide('משפיענים', '01'), '<html><body><div class="eyebrow"></div><h1>x</h1></body></html>', slide('CLOSING', '03')],
+      ['influencers', 'influencers', 'closing'],
+    )
+    expect(htmlSlides[1]).toContain('משפיענים // 02')
+  })
+
+  it('falls back to the slide type, then to SLIDE, when no sibling carries a label', () => {
+    const empty = '<div class="eyebrow">  </div>'
+    expect(renumberEyebrows([empty], ['timeline']).htmlSlides[0]).toContain('timeline // 01')
+    expect(renumberEyebrows([empty]).htmlSlides[0]).toContain('SLIDE // 01')
   })
 
   it('leaves an eyebrow without a number, and the rest of the slide, untouched', () => {

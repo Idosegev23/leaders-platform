@@ -202,8 +202,44 @@ const EYEBROW_RE = /(<div\b[^>]*\bclass="eyebrow"[^>]*>)([\s\S]*?)(<\/div>)/i
 const NUMBER_AFTER_SEP_RE = /(\/\/\s*)(\d{1,2})\b/
 const NUMBER_BEFORE_SEP_RE = /^(\s*)(\d{1,2})(\s*\/\/)/
 
-export function renumberEyebrows(htmlSlides: string[]): { htmlSlides: string[]; renumbered: number } {
+/**
+ * Renumber — and normalize — every slide's first eyebrow.
+ *
+ *  - `LABEL // NN`  → NN becomes the slide's position.
+ *  - `NN // LABEL`  → rewritten to `LABEL // NN`. A content repair once
+ *    returned `19 // לוח זמנים` on a deck where every other slide read
+ *    `LABEL // NN`; correct number, inconsistent form.
+ *  - empty eyebrow  → filled with `LABEL // NN`, the label taken from another
+ *    slide of the same type (an influencer slide learns "משפיענים" from its
+ *    siblings) or, failing that, the slide type itself. A repair once blanked
+ *    the eyebrow while fixing a fabricated name.
+ *  - an eyebrow with text but no number is left alone.
+ *
+ * `slideTypes` is optional; without it, empty eyebrows fall back to "SLIDE".
+ */
+export function renumberEyebrows(
+  htmlSlides: string[],
+  slideTypes: string[] = [],
+): { htmlSlides: string[]; renumbered: number } {
   let renumbered = 0
+
+  // Pre-pass: learn each type's label from slides that already carry one.
+  const labelByType = new Map<string, string>()
+  htmlSlides.forEach((html, i) => {
+    const type = slideTypes[i]
+    if (!type || labelByType.has(type)) return
+    const m = html.match(EYEBROW_RE)
+    if (!m) return
+    const inner = m[2]
+    if (NUMBER_AFTER_SEP_RE.test(inner)) {
+      const label = inner.replace(NUMBER_AFTER_SEP_RE, '').replace(/<[^>]+>/g, '').trim()
+      if (label) labelByType.set(type, label)
+    } else if (NUMBER_BEFORE_SEP_RE.test(inner)) {
+      const label = inner.replace(NUMBER_BEFORE_SEP_RE, '').replace(/<[^>]+>/g, '').trim()
+      if (label) labelByType.set(type, label)
+    }
+  })
+
   const out = htmlSlides.map((html, i) => {
     const target = String(i + 1).padStart(2, '0')
     return html.replace(EYEBROW_RE, (_m, open: string, inner: string, close: string) => {
@@ -214,10 +250,14 @@ export function renumberEyebrows(htmlSlides: string[]): { htmlSlides: string[]; 
           return sep + target
         })
       } else if (NUMBER_BEFORE_SEP_RE.test(inner)) {
-        fixed = inner.replace(NUMBER_BEFORE_SEP_RE, (_mm, lead: string, num: string, sep: string) => {
-          if (num.padStart(2, '0') !== target) renumbered++
-          return lead + target + sep
-        })
+        const label = inner.replace(NUMBER_BEFORE_SEP_RE, '').trim()
+        fixed = `${label} // ${target}`
+        renumbered++
+      } else if (!inner.replace(/<[^>]+>/g, '').trim()) {
+        const type = slideTypes[i] || ''
+        const label = labelByType.get(type) || type || 'SLIDE'
+        fixed = `${label} // ${target}`
+        renumbered++
       }
       return open + fixed + close
     })

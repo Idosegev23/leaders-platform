@@ -94,6 +94,7 @@ Return JSON only: {"html": "<!DOCTYPE html>..."}`
 }
 
 const IMG_SRC_RE = /<img[^>]+src="([^"]+)"/g
+const EYEBROW_RE = /(<div\b[^>]*\bclass="eyebrow"[^>]*>)([\s\S]*?)(<\/div>)/i
 
 function imageSrcs(html: string): string[] {
   return Array.from(html.matchAll(IMG_SRC_RE)).map((m) => m[1])
@@ -129,7 +130,7 @@ export async function repairSlideInContext(input: RepairInput): Promise<string |
       ),
     ])
 
-    const html = (JSON.parse(res?.text || '{}') as { html?: string }).html
+    let html = (JSON.parse(res?.text || '{}') as { html?: string }).html
     if (!html || !/<html[\s>]/i.test(html)) {
       console.warn(`[slide-repair] slide ${input.slideIndex}: model returned no usable document`)
       return null
@@ -151,6 +152,24 @@ export async function repairSlideInContext(input: RepairInput): Promise<string |
     if (beforeLen > 200 && afterLen < beforeLen * 0.4) {
       console.warn(`[slide-repair] slide ${input.slideIndex}: text collapsed ${beforeLen}→${afterLen} chars — rejecting`)
       return null
+    }
+
+    // Keep the eyebrow. It is a design element the critique never asked to
+    // change, yet a rewrite blanked one while fixing a fabricated name. Restore
+    // the original when the repair emptied or dropped it; the renumbering pass
+    // corrects its number afterwards.
+    const originalEyebrow = input.slideHtml.match(EYEBROW_RE)
+    if (originalEyebrow && originalEyebrow[2].replace(/<[^>]+>/g, '').trim()) {
+      const repairedEyebrow = html.match(EYEBROW_RE)
+      if (!repairedEyebrow) {
+        const restored = originalEyebrow[0]
+        html = html.replace(/<body[^>]*>/i, (bodyTag) => bodyTag + restored)
+        console.log(`[slide-repair] slide ${input.slideIndex}: eyebrow dropped by repair — restored`)
+      } else if (!repairedEyebrow[2].replace(/<[^>]+>/g, '').trim()) {
+        const inner = originalEyebrow[2]
+        html = html.replace(EYEBROW_RE, (_m, open: string, _inner: string, close: string) => open + inner + close)
+        console.log(`[slide-repair] slide ${input.slideIndex}: eyebrow blanked by repair — restored`)
+      }
     }
 
     return html

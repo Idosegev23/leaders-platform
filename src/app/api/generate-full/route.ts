@@ -353,7 +353,7 @@ export async function POST(request: NextRequest) {
     }
     // Eyebrow numbers were baked in at generation position; a reorder leaves
     // them pointing at the old slots (COVER // 08 on slide 1).
-    const { htmlSlides: numberedSlides, renumbered } = renumberEyebrows(ordered.htmlSlides)
+    const { htmlSlides: numberedSlides, renumbered } = renumberEyebrows(ordered.htmlSlides, ordered.slideTypes)
     if (renumbered) console.log(`[${requestId}] 🔢 Renumbered ${renumbered} eyebrow(s) to match position`)
 
     // Build HtmlPresentation object

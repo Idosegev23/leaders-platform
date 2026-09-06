@@ -126,4 +126,33 @@ describe('repairSlideInContext', () => {
     callAI.mockResolvedValue({ text: 'not json at all' })
     expect(await repairSlideInContext(baseInput())).toBeNull()
   })
+
+  describe('eyebrow preservation', () => {
+    const LONG =
+      'טקסט מתוקן שנשען על המקור בלבד: אסטרטגיית המדיה נשענת על שלוש שכבות — מקור החומר, הטקס היומי ' +
+      'והתוצאה על העור. הוסרו הנתונים שלא הופיעו בבריף, והניסוח נשאר עברי לכל אורכו כולל הכותרות ' +
+      'והתוויות, בלי לחזור על נקודה שכבר נאמרה בשקף אחר במצגת.'
+    const withEyebrow = (eyebrow: string, body: string) =>
+      `<!DOCTYPE html><html><body><div class="eyebrow" style="opacity:.7">${eyebrow}</div><h1>כותרת</h1><p>${body}</p><img src="${IMG}"></body></html>`
+    const original = withEyebrow('משפיענים // 14', LONG)
+
+    it('restores an eyebrow the repair blanked — the observed regression', async () => {
+      callAI.mockResolvedValue(reply(withEyebrow('', LONG)))
+      const out = await repairSlideInContext(baseInput({ slideHtml: original }))
+      expect(out).toContain('<div class="eyebrow" style="opacity:.7">משפיענים // 14</div>')
+    })
+
+    it('re-inserts an eyebrow the repair dropped entirely', async () => {
+      callAI.mockResolvedValue(reply(`<!DOCTYPE html><html><body><h1>כותרת</h1><p>${LONG}</p><img src="${IMG}"></body></html>`))
+      const out = await repairSlideInContext(baseInput({ slideHtml: original }))
+      expect(out).toMatch(/<body><div class="eyebrow" style="opacity:\.7">משפיענים \/\/ 14<\/div>/)
+    })
+
+    it('leaves a repair that kept a non-empty eyebrow alone', async () => {
+      callAI.mockResolvedValue(reply(withEyebrow('משפיענים // 99', LONG)))
+      const out = await repairSlideInContext(baseInput({ slideHtml: original }))
+      // Not this guard's job to fix the number — renumbering does that.
+      expect(out).toContain('משפיענים // 99')
+    })
+  })
 })
