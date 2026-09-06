@@ -120,6 +120,10 @@ export async function POST(request: Request) {
   const rounds: Array<{ round: number; summary: string; repaired: number[] }> = []
   let gate: ContentGate | null = null
   let stoppedBecause = 'passed'
+  // The gate deliberately returns passed=true when the critique could not run,
+  // so our own outage never blocks a deck. That must NOT be recorded as a
+  // clean bill of health — "we did not check" is not "it passed".
+  let lastCritiqueUnchecked = false
 
   try {
     for (let round = 1; round <= MAX_ROUNDS; round++) {
@@ -139,6 +143,7 @@ export async function POST(request: Request) {
         budgetMs: Math.max(30_000, Math.min(180_000, deadline - Date.now())),
       })
       gate = contentGateVerdict(critique)
+      lastCritiqueUnchecked = critique.unchecked
       console.log(`${tag} round ${round}: ${gate.summary}`)
 
       if (gate.passed) {
@@ -197,7 +202,8 @@ export async function POST(request: Request) {
   }
 
   // ── Persist the verdict alongside the deck ──
-  const passed = !!gate?.passed
+  // Only a critique that actually ran can pass a deck.
+  const passed = !!gate?.passed && !lastCritiqueUnchecked
   try {
     const { data: fresh } = await sb.from('documents').select('data').eq('id', documentId).maybeSingle()
     await sb
@@ -208,6 +214,7 @@ export async function POST(request: Request) {
           _contentCritique: {
             checkedAt: new Date().toISOString(),
             passed,
+            reviewed: !lastCritiqueUnchecked,
             stoppedBecause,
             rounds,
             failingSlides: gate?.failingIndexes ?? [],

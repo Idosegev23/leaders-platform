@@ -290,6 +290,52 @@ export interface CritiqueOptions {
 }
 
 /**
+ * Structured-output schema. Without it the critic free-forms its JSON, and a
+ * 22-slide deck produced a response that ran past the token budget and came
+ * back truncated — unparseable, which silently degraded a real critique into
+ * "unchecked". A schema plus a raised ceiling keeps long decks well-formed.
+ */
+const CHECKS_SCHEMA = {
+  type: 'object',
+  required: [...CONTENT_CHECK_KEYS],
+  properties: Object.fromEntries(CONTENT_CHECK_KEYS.map((k) => [k, { type: 'boolean' }])),
+} as Record<string, unknown>
+
+const CRITIQUE_SCHEMA = {
+  type: 'object',
+  required: ['deck', 'slides'],
+  properties: {
+    deck: {
+      type: 'object',
+      required: ['arcHolds', 'noContradictions', 'issues'],
+      properties: {
+        arcHolds: { type: 'boolean' },
+        noContradictions: { type: 'boolean' },
+        issues: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    slides: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['slideIndex', 'checks', 'verdict', 'issues', 'rewrite'],
+        properties: {
+          slideIndex: { type: 'integer' },
+          checks: CHECKS_SCHEMA,
+          verdict: { type: 'string', enum: ['pass', 'fail'] },
+          issues: { type: 'array', items: { type: 'string' } },
+          rewrite: { type: 'string' },
+        },
+      },
+    },
+  },
+} as Record<string, unknown>
+
+/** Output ceiling. Thinking tokens count against this on Gemini, and the
+ *  16k default silently truncated a long deck's critique. */
+const CRITIQUE_MAX_OUTPUT_TOKENS = 48_000
+
+/**
  * Review a deck's content. Never throws — an outage degrades to `unchecked`,
  * which the gate reports honestly rather than passing off as a clean bill.
  */
@@ -301,22 +347,40 @@ export async function critiqueDeckContent(
 
   const texts = htmlSlides.map(extractSlideText)
   const prompt = buildContentPrompt(texts, opts.sourceMaterial, opts.brandName)
+  const deadline = Date.now() + (opts.budgetMs ?? 180_000)
 
-  try {
-    const res = await Promise.race([
-      callAI({
-        model: opts.model || 'gemini-3.1-pro-preview',
-        prompt,
-        callerId: 'content-critic',
-        geminiConfig: { responseMimeType: 'application/json' },
-      }),
-      new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new Error('content critique timed out')), opts.budgetMs ?? 180_000),
-      ),
-    ])
-    const parsed = parseContentCritique(res?.text || '', htmlSlides.length)
-    return parsed ?? uncheckedCritique(htmlSlides.length, 'unparseable critic response')
-  } catch (e) {
-    return uncheckedCritique(htmlSlides.length, e instanceof Error ? e.message : String(e))
+  // One retry: an unparseable response is a transient model failure, and
+  // silently degrading a real critique to "unchecked" costs a whole round of
+  // quality review. Only retried while budget remains.
+  let lastNote = 'unparseable critic response'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const remaining = deadline - Date.now()
+    if (remaining < 15_000) break
+    try {
+      const res = await Promise.race([
+        callAI({
+          model: opts.model || 'gemini-3.1-pro-preview',
+          prompt,
+          callerId: 'content-critic',
+          maxOutputTokens: CRITIQUE_MAX_OUTPUT_TOKENS,
+          geminiConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: CRITIQUE_SCHEMA as never,
+            maxOutputTokens: CRITIQUE_MAX_OUTPUT_TOKENS,
+          },
+        }),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error('content critique timed out')), remaining),
+        ),
+      ])
+      const parsed = parseContentCritique(res?.text || '', htmlSlides.length)
+      if (parsed) return parsed
+      lastNote = `unparseable critic response (attempt ${attempt + 1})`
+      console.warn(`[content-critic] ${lastNote} — ${(res?.text || '').length} chars returned`)
+    } catch (e) {
+      lastNote = e instanceof Error ? e.message : String(e)
+      console.warn(`[content-critic] attempt ${attempt + 1} failed: ${lastNote}`)
+    }
   }
+  return uncheckedCritique(htmlSlides.length, lastNote)
 }
