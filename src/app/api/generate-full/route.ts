@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { isDevMode, DEV_AUTH_USER } from '@/lib/auth/dev-mode'
-import { runPresentationAgent, type AgentInput } from '@/lib/gemini/presentation-agent'
+import { runPresentationAgent, type AgentInput, type AgentCheckpoint } from '@/lib/gemini/presentation-agent'
 import { buildWizardContract, type WizardContract } from '@/lib/gemini/wizard-contract'
 import { critiqueSlides } from '@/lib/qa/slide-critic'
 import type { BrandAssets } from '@/lib/brand/types'
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       userId = user.id
     }
 
-    const { documentId, useBlueprint, autoFinalize } = await request.json()
+    const { documentId, useBlueprint, autoFinalize, resume } = await request.json()
     if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
 
     // Load document
@@ -215,15 +215,74 @@ export async function POST(request: NextRequest) {
     console.log(`[${requestId}]    brandResearch: ${agentInput.brandResearch ? 'YES' : 'NO'}`)
     console.log(`[${requestId}]    images: ${Object.keys(images).length}`)
 
-    // Hard wall-clock ceiling for the agent's OPTIONAL post-passes (wizard
-    // repair). The route must have room left to persist the deck — QA stages
-    // never get to spend the save's time budget.
-    agentInput.deadlineTs = startTs + maxDuration * 1000 - 120_000
+    // Continue a generation that checkpointed in an earlier invocation.
+    const savedCheckpoint = data._generationCheckpoint as (AgentCheckpoint & { part?: number }) | undefined
+    if (resume && savedCheckpoint?.history?.length) {
+      agentInput.resumeFrom = savedCheckpoint
+      console.log(`[${requestId}] ⏩ Resuming part ${(savedCheckpoint.part ?? 0) + 1} — ${savedCheckpoint.htmlSlides.length} slides already built`)
+    } else if (resume) {
+      console.warn(`[${requestId}] resume requested but no checkpoint on the document — generating from scratch`)
+    }
+
+    // Wall-clock ceiling for the slide loop. Past it the agent checkpoints
+    // instead of pushing on into a 504 that loses everything. The reserve must
+    // cover one full in-flight iteration plus persisting the checkpoint and
+    // publishing the continuation — an image generation with its VLM check can
+    // run past a minute. Also caps the optional wizard-repair post-pass.
+    agentInput.deadlineTs = startTs + maxDuration * 1000 - 150_000
 
     // Run the agent
     const result = await runPresentationAgent(agentInput, (event) => {
       console.log(`[${requestId}] 📊 Progress: [${event.stage}] ${event.message}${event.slideIndex !== undefined ? ` (${event.slideIndex + 1}/${event.totalSlides})` : ''}`)
     })
+
+    // ── Checkpointed: persist and continue in a fresh invocation ──
+    // A full deck sits right at the 800s ceiling (776s on a good run, 504 on a
+    // bad one), and until now a timeout lost the whole run. Save the
+    // conversation + slides so far and re-invoke ourselves via QStash.
+    if (result.partial && result.checkpoint) {
+      const part = Number(savedCheckpoint?.part ?? 0) + 1
+      const { data: fresh } = await supabase.from('documents').select('data').eq('id', documentId).maybeSingle()
+      await supabase
+        .from('documents')
+        .update({
+          data: {
+            ...((fresh?.data ?? data) as Record<string, unknown>),
+            _generationCheckpoint: { ...result.checkpoint, part, savedAt: new Date().toISOString() },
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', documentId)
+      console.log(`[${requestId}] 💾 Checkpoint part ${part} saved (${result.htmlSlides.length} slides) — publishing continuation`)
+
+      const base =
+        (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL)?.replace(/\/$/, '') ||
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://leaders-platform.vercel.app')
+      if (process.env.QSTASH_TOKEN) {
+        const { Client: QStashClient } = await import('@upstash/qstash')
+        const q = new QStashClient({ token: process.env.QSTASH_TOKEN })
+        await q.publishJSON({
+          url: `${base}/api/generate-full`,
+          body: { documentId, useBlueprint, autoFinalize, resume: true },
+          headers: { 'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '' },
+          timeout: '900s',
+          retries: 1,
+          // Must differ from the initial `deck-generate-<id>` publish or QStash
+          // dedups the continuation away. Dashes only — ':' is rejected.
+          deduplicationId: `deck-generate-${documentId}-part${part}`,
+        })
+      } else {
+        throw new Error('generation checkpointed but QSTASH_TOKEN is unset — cannot schedule continuation')
+      }
+
+      return NextResponse.json({
+        success: true,
+        partial: true,
+        part,
+        slidesSoFar: result.htmlSlides.length,
+        durationMs: Date.now() - startTs,
+      })
+    }
 
     // Residual wizard-coverage misses → editor flags (lite CoverageResult).
     const wizardCoverage = result.wizardCoverage
@@ -277,6 +336,8 @@ export async function POST(request: NextRequest) {
         influencers: result.influencers,
         kpis: result.kpis,
       },
+      // The deck is complete — a leftover checkpoint would resume a finished run.
+      _generationCheckpoint: null,
       _pipelineStatus: {
         textGeneration: 'complete',
         research: 'complete',

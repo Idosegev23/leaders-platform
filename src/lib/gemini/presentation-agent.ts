@@ -53,6 +53,35 @@ export interface AgentInput {
   /** Approved deck blueprint ("הפיצוח") — when present, the agent renders the
    *  slides EXACTLY to this plan instead of planning on its own. */
   blueprintMandate?: string
+  /** Continue a generation that checkpointed at `deadlineTs` in an earlier
+   *  invocation. Research and prompt construction are skipped; the loop picks
+   *  up exactly where it stopped, with the same conversation. */
+  resumeFrom?: AgentCheckpoint
+}
+
+/**
+ * Everything the slide loop needs to continue in a fresh invocation.
+ *
+ * The whole generation runs as one long function-calling conversation, and a
+ * full deck sits right at Vercel's 800s ceiling — 776s on a good run, a 504
+ * on a bad one, with the entire run lost because slides were only persisted
+ * at the end. The conversation is plain JSON (text, file URIs, function calls
+ * and responses — no inline bytes), so it can be saved at a deadline and
+ * resumed by re-invoking the route. Model turns keep their thoughtSignature
+ * fields intact through the round-trip, which multi-turn tool calling needs.
+ */
+export interface AgentCheckpoint {
+  history: Array<{ role: string; parts: Array<Record<string, unknown>> }>
+  slides: AgentSlide[]
+  htmlSlides: string[]
+  slideTypes: string[]
+  totalToolCalls: number
+  imageUse: Array<[string, number]>
+  researchData?: Record<string, unknown>
+  influencerData?: Array<{ username: string; followers: number; rationale: string }>
+  kpiData?: Record<string, number>
+  /** Loop index to resume at. */
+  iter: number
 }
 
 export interface AgentSlide {
@@ -75,6 +104,11 @@ export interface AgentOutput {
   wizardCoverage?: CoverageResult
   totalToolCalls: number
   durationMs: number
+  /** True when the loop stopped at `deadlineTs` before finishing. The caller
+   *  must persist `checkpoint` and re-invoke with `resumeFrom` — the slides in
+   *  this result are incomplete and must NOT be treated as a finished deck. */
+  partial?: boolean
+  checkpoint?: AgentCheckpoint
 }
 
 export type AgentProgressCallback = (event: {
@@ -341,16 +375,17 @@ export async function runPresentationAgent(
   onProgress?.({ stage: 'init', message: 'מאתחל סוכן AI...' })
 
   const client = getClient()
-  const slides: AgentSlide[] = []
-  const htmlSlides: string[] = []
-  const slideTypes: string[] = []
+  // Seeded from the checkpoint when resuming — see AgentCheckpoint.
+  const slides: AgentSlide[] = [...(input.resumeFrom?.slides ?? [])]
+  const htmlSlides: string[] = [...(input.resumeFrom?.htmlSlides ?? [])]
+  const slideTypes: string[] = [...(input.resumeFrom?.slideTypes ?? [])]
   // Per-brand visual language — deterministic, so the same brand regenerates
   // consistently but different brands stop looking identical.
   const persona = pickPersona(input.brandName)
   console.log(`[PresentationAgent][${requestId}] 🎭 Visual persona: ${persona}`)
   // Image-variety enforcement: a URL may appear on at most 2 slides; the 3rd
   // use is rejected back to the model with the unused pool.
-  const imageUse = new Map<string, number>()
+  const imageUse = new Map<string, number>(input.resumeFrom?.imageUse ?? [])
   // Explicitly-offered imagery, checked before the origin test in the
   // provenance gate below.
   const allowedImageUrls = new Set<string>()
@@ -375,11 +410,12 @@ export async function runPresentationAgent(
     `\n\nתזכורת מקור — אל תסטה ממנה:\n${anchorSource}\n` +
     'אל תמציא מסגרות, שכבות, טירים, מערכות או שירותים שאינם במקור. כתוב בעברית, כולל כותרות ותוויות.'
   const ANCHOR_EVERY = 4
-  let totalToolCalls = 0
+  let totalToolCalls = input.resumeFrom?.totalToolCalls ?? 0
   let designSystem: PremiumDesignSystem | null = null
-  let researchData: Record<string, unknown> | undefined
-  let influencerData: Array<{ username: string; followers: number; rationale: string }> | undefined
-  let kpiData: Record<string, number> | undefined
+  let researchData: Record<string, unknown> | undefined = input.resumeFrom?.researchData
+  let influencerData: Array<{ username: string; followers: number; rationale: string }> | undefined =
+    input.resumeFrom?.influencerData
+  let kpiData: Record<string, number> | undefined = input.resumeFrom?.kpiData
 
   // ── Two-phase tool strategy ──
   // SDK 1.34.0 doesn't support combining built-in tools with function declarations.
@@ -612,11 +648,17 @@ ${preferredImageryContext}
 
   // ── Agent Loop ──────────────────────────────────────────
 
-  const history: Array<{ role: string; parts: Array<Record<string, unknown>> }> = []
-  if (Array.isArray(contents)) {
-    history.push(contents[0] as any)
-  } else {
-    history.push({ role: 'user', parts: [{ text: contents as string }] })
+  // On resume the saved conversation IS the history — the opening prompt,
+  // research, and every slide turn so far are already in it.
+  const history: Array<{ role: string; parts: Array<Record<string, unknown>> }> = input.resumeFrom
+    ? [...input.resumeFrom.history]
+    : []
+  if (!input.resumeFrom) {
+    if (Array.isArray(contents)) {
+      history.push(contents[0] as any)
+    } else {
+      history.push({ role: 'user', parts: [{ text: contents as string }] })
+    }
   }
 
   // ════════════════════════════════════════════════════════════
@@ -626,7 +668,12 @@ ${preferredImageryContext}
   // ════════════════════════════════════════════════════════════
 
   const needsResearch = !input.brandResearch
-  if (needsResearch) {
+  if (input.resumeFrom) {
+    console.log(
+      `[PresentationAgent][${requestId}] ⏩ Resuming from checkpoint — ${input.resumeFrom.htmlSlides.length} slides, ` +
+        `${input.resumeFrom.history.length} history turns, iteration ${input.resumeFrom.iter}`,
+    )
+  } else if (needsResearch) {
     console.log(`[PresentationAgent][${requestId}] 📚 Phase 1: Research (built-in tools)`)
     onProgress?.({ stage: 'research', message: '🔍 חוקר את המותג...' })
 
@@ -706,7 +753,47 @@ ${preferredImageryContext}
     return true
   }
 
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+  for (let iter = input.resumeFrom?.iter ?? 0; iter < MAX_ITERATIONS; iter++) {
+    // ── Checkpoint before the ceiling ──
+    // Checked before each model call, never mid-call, so the reserve the
+    // caller leaves after deadlineTs must cover one full iteration (an image
+    // generation with its VLM check can run past a minute). Everything needed
+    // to continue is returned; the caller persists it and re-invokes.
+    if (input.deadlineTs && Date.now() > input.deadlineTs) {
+      const checkpoint: AgentCheckpoint = {
+        history,
+        slides,
+        htmlSlides,
+        slideTypes,
+        totalToolCalls,
+        imageUse: Array.from(imageUse.entries()),
+        researchData,
+        influencerData,
+        kpiData,
+        iter,
+      }
+      console.log(
+        `[PresentationAgent][${requestId}] 💾 Checkpoint at iteration ${iter} — ${htmlSlides.length} slides so far, ` +
+          `${Math.round((Date.now() - startTs) / 1000)}s elapsed; handing back for resume`,
+      )
+      onProgress?.({ stage: 'checkpoint', message: `💾 נשמרה נקודת המשך (${htmlSlides.length} שקפים)`, totalSlides: htmlSlides.length })
+      return {
+        partial: true,
+        checkpoint,
+        // Placeholder only — a partial result is never rendered; the resumed
+        // run computes the real design system when the loop completes.
+        designSystem: (designSystem ?? {}) as PremiumDesignSystem,
+        slides,
+        htmlSlides,
+        slideTypes,
+        research: researchData,
+        influencers: influencerData,
+        kpis: kpiData,
+        totalToolCalls,
+        durationMs: Date.now() - startTs,
+      }
+    }
+
     const iterStart = Date.now()
     console.log(`[PresentationAgent][${requestId}] 🔁 Iteration ${iter + 1}/${MAX_ITERATIONS} (${slides.length} slides, ${totalToolCalls} tool calls)`)
 
