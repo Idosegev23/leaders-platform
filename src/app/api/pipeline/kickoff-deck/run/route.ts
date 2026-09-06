@@ -97,8 +97,12 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { formId?: string; salesforceRef?: string }
+    | { formId?: string; salesforceRef?: string; checkpointAfterMs?: number }
     | null
+  // Test hook forwarded to generate-full: forces an early checkpoint so the
+  // resume seam can be exercised on demand. Internal callers only (this route
+  // already requires the internal secret).
+  const checkpointAfterMs = Number(body?.checkpointAfterMs) > 0 ? Number(body!.checkpointAfterMs) : undefined
   if (!body?.formId || !body.salesforceRef) {
     return NextResponse.json({ ok: false, error: 'formId and salesforceRef required' }, { status: 400 })
   }
@@ -169,10 +173,13 @@ export async function POST(request: Request) {
     const q = new QStashClient({ token: process.env.QSTASH_TOKEN! })
     const pub = await q.publishJSON({
       url: `${base}/api/generate-full`,
-      body: { documentId, useBlueprint: true },
+      body: { documentId, useBlueprint: true, ...(checkpointAfterMs ? { checkpointAfterMs } : {}) },
       headers: { 'x-internal-secret': secret },
       timeout: '900s',
-      retries: 0,
+      // One automatic re-invocation after a hard failure (504/5xx). generate-full
+      // resumes from its last checkpoint by default, so the retry continues the
+      // run instead of restarting it.
+      retries: 1,
       // QStash rejects a deduplicationId containing ':' — keep the separator a dash.
       deduplicationId: `deck-generate-${documentId}`,
     })

@@ -21,6 +21,9 @@ import type { BrandAssets } from '@/lib/brand/types'
 import type { HtmlPresentation } from '@/lib/gemini/slide-designer'
 
 export const maxDuration = 800
+/** Continuations per generation before we stop and report. Eight parts at
+ *  ~11 min each is far beyond any deck; hitting it means a loop, not a deck. */
+const MAX_GENERATION_PARTS = 8
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
       userId = user.id
     }
 
-    const { documentId, useBlueprint, autoFinalize, resume } = await request.json()
+    const { documentId, useBlueprint, autoFinalize, resume, fresh, checkpointAfterMs } = await request.json()
     if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
 
     // Load document
@@ -217,10 +220,18 @@ export async function POST(request: NextRequest) {
     console.log(`[${requestId}]    images: ${Object.keys(images).length}`)
 
     // Continue a generation that checkpointed in an earlier invocation.
+    // Resume is the DEFAULT whenever a checkpoint exists: a checkpoint is
+    // cleared on completion, so a lingering one always means an unfinished
+    // run — and a QStash retry after a hard kill must pick it up without
+    // anyone asking. `fresh: true` discards it deliberately.
     const savedCheckpoint = data._generationCheckpoint as (AgentCheckpoint & { part?: number }) | undefined
-    if (resume && savedCheckpoint?.history?.length) {
+    const priorPart = Number(savedCheckpoint?.part ?? 0)
+    if (!fresh && savedCheckpoint?.history?.length) {
       agentInput.resumeFrom = savedCheckpoint
-      console.log(`[${requestId}] ⏩ Resuming part ${(savedCheckpoint.part ?? 0) + 1} — ${savedCheckpoint.htmlSlides.length} slides already built`)
+      console.log(
+        `[${requestId}] ⏩ Resuming (part ${priorPart + 1}, reason: ${savedCheckpoint.reason ?? 'unknown'}) — ` +
+          `${savedCheckpoint.htmlSlides.length} slides already built`,
+      )
     } else if (resume) {
       console.warn(`[${requestId}] resume requested but no checkpoint on the document — generating from scratch`)
     }
@@ -230,7 +241,29 @@ export async function POST(request: NextRequest) {
     // cover one full in-flight iteration plus persisting the checkpoint and
     // publishing the continuation — an image generation with its VLM check can
     // run past a minute. Also caps the optional wizard-repair post-pass.
-    agentInput.deadlineTs = startTs + maxDuration * 1000 - 150_000
+    //
+    // `checkpointAfterMs` (internal callers only) forces an early checkpoint so
+    // the resume seam can be exercised on demand instead of waiting for a run
+    // long enough to hit it naturally.
+    const forcedMs = isInternalTrigger && Number(checkpointAfterMs) > 0 ? Number(checkpointAfterMs) : null
+    agentInput.deadlineTs = startTs + (forcedMs ?? maxDuration * 1000 - 150_000)
+    if (forcedMs) console.log(`[${requestId}] ⏱ forced checkpoint after ${Math.round(forcedMs / 1000)}s (test mode)`)
+
+    // Periodic checkpoints: persisted in place, no continuation published —
+    // they exist so a hard kill resumes from the last few slides, not zero.
+    agentInput.onCheckpoint = async (cp) => {
+      const { data: fresh } = await supabase.from('documents').select('data').eq('id', documentId).maybeSingle()
+      await supabase
+        .from('documents')
+        .update({
+          data: {
+            ...((fresh?.data ?? data) as Record<string, unknown>),
+            _generationCheckpoint: { ...cp, part: priorPart, savedAt: new Date().toISOString() },
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', documentId)
+    }
 
     // Run the agent
     const result = await runPresentationAgent(agentInput, (event) => {
@@ -242,7 +275,15 @@ export async function POST(request: NextRequest) {
     // bad one), and until now a timeout lost the whole run. Save the
     // conversation + slides so far and re-invoke ourselves via QStash.
     if (result.partial && result.checkpoint) {
-      const part = Number(savedCheckpoint?.part ?? 0) + 1
+      const part = priorPart + 1
+      // A run that keeps checkpointing without finishing is not making
+      // progress; stop scheduling continuations and say so. The checkpoint
+      // stays on the document for manual inspection.
+      if (part > MAX_GENERATION_PARTS) {
+        throw new Error(
+          `generation checkpointed ${part} times without completing (last reason: ${result.checkpoint.reason ?? 'unknown'}) — giving up`,
+        )
+      }
       const { data: fresh } = await supabase.from('documents').select('data').eq('id', documentId).maybeSingle()
       await supabase
         .from('documents')
@@ -264,7 +305,7 @@ export async function POST(request: NextRequest) {
         const q = new QStashClient({ token: process.env.QSTASH_TOKEN })
         await q.publishJSON({
           url: `${base}/api/generate-full`,
-          body: { documentId, useBlueprint, autoFinalize, resume: true },
+          body: { documentId, useBlueprint, autoFinalize, resume: true, ...(forcedMs ? { checkpointAfterMs: forcedMs } : {}) },
           headers: { 'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '' },
           timeout: '900s',
           retries: 1,

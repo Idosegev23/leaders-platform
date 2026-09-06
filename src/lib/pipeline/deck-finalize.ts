@@ -13,9 +13,8 @@ function service() {
  * Final step of the automatic deck pipeline: make the finished deck land in
  * Canva with maximum fidelity.
  *
- * 1. Derive `_structuredPresentation` 1:1 from `_agentSlides` if it's missing
- *    (same faithful path as /api/gamma-prototype — no regeneration), so the
- *    Canva import gets native editable PPTX instead of a flat screenshot PDF.
+ * 1. (removed) A structured/PPTX draft used to be derived here from the raw
+ *    agent slides; it went stale the moment the critique changed anything.
  * 2. exportDeckToCanva() — HTML (one page per current slide) → signed URL →
  *    Canva url-import → links. The derived structured/PPTX form is only a
  *    fallback now: it reflects the agent's first draft, not the critiqued deck.
@@ -32,34 +31,12 @@ export async function finalizeDeckToCanva(documentId: string, tag = 'deck-finali
 
   const data = (doc.data ?? {}) as Record<string, unknown>
 
-  const hasStructured = Boolean(
-    (data._structuredPresentation as { slides?: unknown[] } | undefined)?.slides?.length,
-  )
-  const agentSlides = data._agentSlides as
-    | Array<{ slideType: string; title: string; content?: Record<string, unknown> }>
-    | undefined
-
-  if (!hasStructured && agentSlides?.length) {
-    console.log(`[${tag}] deriving _structuredPresentation from ${agentSlides.length} agent slides`)
-    const { agentSlidesToStructured } = await import('@/lib/gemini/html-to-structured')
-    const htmlPres = data._htmlPresentation as { designSystem?: Record<string, unknown> } | undefined
-    const brandAssets = data._brandAssets as { logo?: { url?: string } } | undefined
-    const scraped = data._scraped as { logoUrl?: string } | undefined
-    const presentation = agentSlidesToStructured({
-      slides: agentSlides,
-      designSystem: htmlPres?.designSystem,
-      brandName: (data.brandName as string) || (data.brand as string) || 'Brand',
-      brandLogoUrl: brandAssets?.logo?.url || scraped?.logoUrl || undefined,
-      enhancedInfluencers: (data.enhancedInfluencers as Array<Record<string, unknown>> | undefined) as never,
-    })
-    await sb
-      .from('documents')
-      .update({
-        data: { ...data, _structuredPresentation: presentation },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', documentId)
-  }
+  // No structured draft is derived here any more. It was built once from the
+  // agent's raw `_agentSlides` and reused forever, so Canva received the first
+  // draft regardless of what the critique later fixed. The export now imports
+  // the CURRENT HTML slides directly (see exportDeckToCanva); if that fails it
+  // falls back to a screenshot of those same slides — never a stale draft.
+  void data
 
   console.log(`[${tag}] exporting deck ${documentId} to Canva…`)
   const result = await exportDeckToCanva({ documentId })

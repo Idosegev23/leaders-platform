@@ -57,6 +57,10 @@ export interface AgentInput {
    *  invocation. Research and prompt construction are skipped; the loop picks
    *  up exactly where it stopped, with the same conversation. */
   resumeFrom?: AgentCheckpoint
+  /** Called with a consistent checkpoint every few slides, so a hard kill
+   *  (a 504, an OOM) loses at most a few slides instead of the whole run. The
+   *  caller persists it; a later invocation resumes from it. */
+  onCheckpoint?: (checkpoint: AgentCheckpoint) => Promise<void> | void
 }
 
 /**
@@ -82,6 +86,8 @@ export interface AgentCheckpoint {
   kpiData?: Record<string, number>
   /** Loop index to resume at. */
   iter: number
+  /** Why it was taken: 'deadline' | 'periodic' | 'error: …'. */
+  reason?: string
 }
 
 export interface AgentSlide {
@@ -753,45 +759,61 @@ ${preferredImageryContext}
     return true
   }
 
+  // ── Checkpointing ──
+  // A checkpoint is only ever taken between iterations, when the history is
+  // consistent (every model turn has its function responses). It carries
+  // everything the loop needs to continue in a fresh invocation.
+  const CHECKPOINT_EVERY_SLIDES = 5
+  let lastCheckpointedSlides = input.resumeFrom?.htmlSlides.length ?? 0
+  let currentIter = input.resumeFrom?.iter ?? 0
+
+  const buildCheckpoint = (resumeIter: number, reason: string): AgentCheckpoint => ({
+    history,
+    slides,
+    htmlSlides,
+    slideTypes,
+    totalToolCalls,
+    imageUse: Array.from(imageUse.entries()),
+    researchData,
+    influencerData,
+    kpiData,
+    iter: resumeIter,
+    reason,
+  })
+
+  // Hand the run back to the caller to persist and re-invoke. A partial result
+  // is never rendered — the resumed run computes the real design system when
+  // the loop completes — so the designSystem here is a placeholder.
+  const partialReturn = (resumeIter: number, reason: string): AgentOutput => {
+    console.log(
+      `[PresentationAgent][${requestId}] 💾 Checkpoint (${reason}) at iteration ${resumeIter} — ` +
+        `${htmlSlides.length} slides so far, ${Math.round((Date.now() - startTs) / 1000)}s elapsed; handing back for resume`,
+    )
+    onProgress?.({ stage: 'checkpoint', message: `💾 נשמרה נקודת המשך (${htmlSlides.length} שקפים)`, totalSlides: htmlSlides.length })
+    return {
+      partial: true,
+      checkpoint: buildCheckpoint(resumeIter, reason),
+      designSystem: (designSystem ?? {}) as PremiumDesignSystem,
+      slides,
+      htmlSlides,
+      slideTypes,
+      research: researchData,
+      influencers: influencerData,
+      kpis: kpiData,
+      totalToolCalls,
+      durationMs: Date.now() - startTs,
+    }
+  }
+
+  try {
   for (let iter = input.resumeFrom?.iter ?? 0; iter < MAX_ITERATIONS; iter++) {
+    currentIter = iter
     // ── Checkpoint before the ceiling ──
     // Checked before each model call, never mid-call, so the reserve the
     // caller leaves after deadlineTs must cover one full iteration (an image
-    // generation with its VLM check can run past a minute). Everything needed
-    // to continue is returned; the caller persists it and re-invokes.
+    // generation with its VLM check can run past a minute).
     if (input.deadlineTs && Date.now() > input.deadlineTs) {
-      const checkpoint: AgentCheckpoint = {
-        history,
-        slides,
-        htmlSlides,
-        slideTypes,
-        totalToolCalls,
-        imageUse: Array.from(imageUse.entries()),
-        researchData,
-        influencerData,
-        kpiData,
-        iter,
-      }
-      console.log(
-        `[PresentationAgent][${requestId}] 💾 Checkpoint at iteration ${iter} — ${htmlSlides.length} slides so far, ` +
-          `${Math.round((Date.now() - startTs) / 1000)}s elapsed; handing back for resume`,
-      )
-      onProgress?.({ stage: 'checkpoint', message: `💾 נשמרה נקודת המשך (${htmlSlides.length} שקפים)`, totalSlides: htmlSlides.length })
-      return {
-        partial: true,
-        checkpoint,
-        // Placeholder only — a partial result is never rendered; the resumed
-        // run computes the real design system when the loop completes.
-        designSystem: (designSystem ?? {}) as PremiumDesignSystem,
-        slides,
-        htmlSlides,
-        slideTypes,
-        research: researchData,
-        influencers: influencerData,
-        kpis: kpiData,
-        totalToolCalls,
-        durationMs: Date.now() - startTs,
-      }
+      return partialReturn(iter, 'deadline')
     }
 
     const iterStart = Date.now()
@@ -813,6 +835,13 @@ ${preferredImageryContext}
           contents: history as any,
           config: genConfig,
         })
+      } else if (slides.length > 0) {
+        // The model call failed after real progress. Losing everything built
+        // so far to one 5xx is the worst outcome; checkpoint instead so the
+        // continuation retries this iteration from here.
+        const msg = callErr instanceof Error ? callErr.message : String(callErr)
+        console.warn(`[PresentationAgent][${requestId}] ⚠️ Model call failed after ${slides.length} slides — checkpointing: ${msg.slice(0, 200)}`)
+        return partialReturn(iter, `error: ${msg.slice(0, 200)}`)
       } else {
         throw callErr
       }
@@ -997,6 +1026,33 @@ ${preferredImageryContext}
     }
 
     history.push({ role: 'user', parts: responseParts })
+
+    // ── Periodic checkpoint ──
+    // The history is consistent here (this turn's responses are pushed), so a
+    // hard kill of the function loses at most CHECKPOINT_EVERY_SLIDES slides.
+    if (
+      input.onCheckpoint &&
+      slides.length > 0 &&
+      slides.length % CHECKPOINT_EVERY_SLIDES === 0 &&
+      slides.length !== lastCheckpointedSlides
+    ) {
+      lastCheckpointedSlides = slides.length
+      try {
+        await input.onCheckpoint(buildCheckpoint(iter + 1, 'periodic'))
+        console.log(`[PresentationAgent][${requestId}] 💾 Periodic checkpoint saved at ${slides.length} slides`)
+      } catch (cpErr) {
+        console.warn(`[PresentationAgent][${requestId}] periodic checkpoint failed (continuing):`, cpErr instanceof Error ? cpErr.message : cpErr)
+      }
+    }
+  }
+  } catch (loopErr) {
+    // Anything unexpected inside the loop: keep the progress if there is any.
+    if (slides.length > 0) {
+      const msg = loopErr instanceof Error ? loopErr.message : String(loopErr)
+      console.warn(`[PresentationAgent][${requestId}] ⚠️ Loop failed after ${slides.length} slides — checkpointing: ${msg.slice(0, 200)}`)
+      return partialReturn(currentIter, `error: ${msg.slice(0, 200)}`)
+    }
+    throw loopErr
   }
 
   // ── Default Design System if agent didn't provide one ──

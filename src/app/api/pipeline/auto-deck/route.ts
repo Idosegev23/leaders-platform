@@ -140,7 +140,7 @@ export async function POST(request: Request) {
         body: { documentId, useBlueprint: true, autoFinalize: true },
         headers: { 'x-internal-secret': secret },
         timeout: '900s',
-        retries: 0,
+        retries: 1, // resume-by-default in generate-full turns a retry into a continuation
         // QStash rejects a deduplicationId containing ':' — keep the separator a dash.
         deduplicationId: `deck-generate-${documentId}`,
       })

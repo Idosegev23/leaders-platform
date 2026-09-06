@@ -122,7 +122,16 @@ export async function exportDeckToCanva(opts: {
   }
 
   if (!result) {
-  if (structured?.slides?.length) {
+  // Fallback order matters: the CURRENT slides first, flat, before any
+  // structured form. `_structuredPresentation` is derived from the agent's
+  // first draft and can be stale; a screenshot of the real slides is always
+  // the right deck, even if it is not editable.
+  if (htmlPres?.htmlSlides?.length) {
+    const pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {
+      format: '16:9', title: htmlPres.title || brandName, brandName,
+    })
+    artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
+  } else if (structured?.slides?.length) {
     const structuredHtml = structured.slides.map((s) =>
       renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
     )
@@ -153,11 +162,6 @@ export async function exportDeckToCanva(opts: {
         artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
       }
     }
-  } else if (htmlPres?.htmlSlides?.length) {
-    const pdfBuffer = await generateScreenshotPdf(htmlPres.htmlSlides, {
-      format: '16:9', title: htmlPres.title || brandName, brandName,
-    })
-    artifact = { buffer: pdfBuffer, contentType: 'application/pdf', ext: 'pdf', mode: 'screenshot-pdf' }
   } else if (astPres?.slides?.length) {
     const pages = presentationToHtmlSlides(astPres, true)
     const pdfBuffer = await generateMultiPagePdf(pages, {
