@@ -45,6 +45,10 @@ export const maxDuration = 800
 const MAX_ROUNDS = 4
 /** Stop starting new work with less than this left, so results can be saved. */
 const RESERVE_MS = 90_000
+/** A 22-slide critique needs real time. Starting one with less than this left
+ *  just burns a round on a guaranteed timeout — observed as a phantom round 4
+ *  that reported "0 failures" purely because it never ran. */
+const MIN_CRITIQUE_MS = 100_000
 
 function service() {
   return createServiceClient(
@@ -146,11 +150,19 @@ export async function POST(request: Request) {
       // tell a claim that traces to real input from one the model invented.
       const sourceMaterial = [loaded.data._briefText, loaded.data._kickoffText].filter(Boolean).join('\n\n')
 
+      // Don't start a critique that cannot finish — see MIN_CRITIQUE_MS.
+      const critiqueBudget = deadline - Date.now()
+      if (critiqueBudget < MIN_CRITIQUE_MS) {
+        stoppedBecause = 'time budget exhausted before critique'
+        console.log(`${tag} stopping before round ${round}: only ${Math.round(critiqueBudget / 1000)}s left`)
+        break
+      }
+
       const critique = await critiqueDeckContent(loaded.slides, {
         brandName: loaded.data.brandName || '',
         sourceMaterial,
         slideTypes: loaded.data._htmlPresentation?.slideTypes ?? [],
-        budgetMs: Math.max(30_000, Math.min(180_000, deadline - Date.now())),
+        budgetMs: Math.min(180_000, critiqueBudget),
       })
       gate = contentGateVerdict(critique)
       lastCritiqueUnchecked = critique.unchecked
@@ -238,10 +250,19 @@ export async function POST(request: Request) {
   // can leave a deck worse than it found it.
   let restoredBest = false
   try {
-    if (best && gate && !lastCritiqueUnchecked && gate.failingIndexes.length > best.failures) {
+    // Restore when the final round scored worse, and ALSO when the final
+    // critique never ran: an unverified deck is not evidence of improvement,
+    // and the last repairs may well have made it worse. Falling back to the
+    // best VERIFIED state is the only honest choice.
+    const finalUnverified = lastCritiqueUnchecked || !gate
+    const finalWorse = !!best && !!gate && !lastCritiqueUnchecked && gate.failingIndexes.length > best.failures
+    if (best && (finalUnverified || finalWorse)) {
       await saveSlides(sb, documentId, best.slides)
       restoredBest = true
-      console.log(`${tag} restored best round (${best.failures} failures) over final (${gate.failingIndexes.length})`)
+      console.log(
+        `${tag} restored best verified round (${best.failures} failures) — ` +
+          (finalUnverified ? 'final critique never ran' : `final had ${gate!.failingIndexes.length}`),
+      )
     }
   } catch (e) {
     console.warn(`${tag} could not restore best round:`, e instanceof Error ? e.message : e)
