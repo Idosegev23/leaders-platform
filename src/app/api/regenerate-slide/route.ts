@@ -12,8 +12,13 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
 
-    // Auth check
-    if (!isDevMode) {
+    // Auth — a signed-in Leaders user, dev-mode, or an internal trigger. The
+    // content-critique repair loop calls this headlessly, so it needs the same
+    // internal-secret path generate-blueprint and generate-full already accept.
+    const internalSecret = request.headers.get('x-internal-secret')
+    const isInternalTrigger =
+      !!process.env.LEADS_TRIGGER_SECRET && internalSecret === process.env.LEADS_TRIGGER_SECRET
+    if (!isDevMode && !isInternalTrigger) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

@@ -36,8 +36,15 @@
       "memory": 1024
     },
     "src/app/api/generate-full/route.ts": {
-      "maxDuration": 600,
+      "maxDuration": 800,
       "memory": 1024
+    },
+    "src/app/api/pipeline/deck-critique/route.ts": {
+      "maxDuration": 800,
+      "memory": 1024
+    },
+    "src/app/api/regenerate-slide/route.ts": {
+      "maxDuration": 120
     }
   },
   "crons": [
@@ -55,5 +62,3 @@
     }
   ]
 }
-
-

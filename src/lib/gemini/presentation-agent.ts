@@ -219,6 +219,47 @@ const FUNCTION_DECLARATIONS = [
 // ─── Function Handlers ──────────────────────────────────
 
 
+/**
+ * May this URL be used as a slide image?
+ *
+ * Everything the agent is allowed to show is served from our own infrastructure:
+ * generated Nano Banana scenes and re-hosted influencer photos are uploaded to
+ * Supabase storage, prepared scenes live there too, and static brand marks are
+ * served from the app itself. So origin is a sufficient and much sturdier test
+ * than tracking every URL we handed out — anything from the open web is, by
+ * definition, stock the model found or invented.
+ *
+ * `allowed` carries explicitly-offered URLs for the case where prepared scenes
+ * are ever hosted somewhere else.
+ */
+export function isAllowedImageUrl(url: string, allowed: ReadonlySet<string>): boolean {
+  const u = (url || '').trim()
+  if (!u) return true // no image is always fine — the gate is about foreign ones
+  if (allowed.has(u)) return true
+  if (u.startsWith('/') || u.startsWith('data:')) return true
+
+  let host: string
+  try {
+    host = new URL(u).host.toLowerCase()
+  } catch {
+    return false // unparseable → not something we served
+  }
+
+  const ownHosts = new Set<string>()
+  for (const raw of [process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_APP_URL, process.env.APP_URL]) {
+    if (!raw) continue
+    try {
+      ownHosts.add(new URL(raw.trim()).host.toLowerCase())
+    } catch {
+      /* a malformed env var must not open the gate */
+    }
+  }
+  // Vercel preview/prod deployments of this app.
+  if (/(^|\.)leaders-platform.*\.vercel\.app$/.test(host)) return true
+
+  return ownHosts.has(host)
+}
+
 interface ImageGenOpts {
   /** Real brand product photos, fed as reference images for on-brand generation. */
   references?: import('./nano-banana-pro').ReferenceImage[]
@@ -310,6 +351,9 @@ export async function runPresentationAgent(
   // Image-variety enforcement: a URL may appear on at most 2 slides; the 3rd
   // use is rejected back to the model with the unused pool.
   const imageUse = new Map<string, number>()
+  // Explicitly-offered imagery, checked before the origin test in the
+  // provenance gate below.
+  const allowedImageUrls = new Set<string>()
   let totalToolCalls = 0
   let designSystem: PremiumDesignSystem | null = null
   let researchData: Record<string, unknown> | undefined
@@ -348,6 +392,8 @@ export async function runPresentationAgent(
   // paste targets — they read as scraped stock; they serve only as generation
   // references (see brandProductRefs below). Every other visual slide is generated.
   const preferredImageryUrls = (input.brandAssets?.sceneImages ?? []).filter(a => a.status !== 'rejected').map(a => a.url)
+  for (const u of preferredImageryUrls) allowedImageUrls.add(u)
+  for (const u of Object.values(input.images ?? {})) if (u) allowedImageUrls.add(u)
   const preferredImageryContext = preferredImageryUrls.length
     ? `\n\nסצנות מותג קולנועיות מוכנות (AI, מכילות את המוצר האמיתי — העדף אותן כ-imageUrl):
 ${preferredImageryUrls.map(u => `  - ${u}`).join('\n')}
@@ -762,9 +808,29 @@ ${preferredImageryContext}
             const slideTitle = args.title as string
             const slideIndex = slides.length
 
+            const imgUrl = ((args.imageUrl as string) || '').trim()
+
+            // Provenance gate: the imagery rules live in the prompt, but nothing
+            // used to check they were followed — so the model skipped
+            // generate_brand_image entirely and pasted invented stock-photo URLs
+            // (observed: 17/17 slides on images.unsplash.com, one of them a 404).
+            // Only imagery we produced or verified may reach a slide; anything
+            // else bounces back through the same retry channel as a reused image.
+            if (imgUrl && !isAllowedImageUrl(imgUrl, allowedImageUrls)) {
+              const unused = preferredImageryUrls.filter(u => !imageUse.has(u)).slice(0, 10)
+              console.log(`[PresentationAgent][${requestId}]     ✋ Rejected foreign image on ${slideType}: ${imgUrl.slice(0, 80)}`)
+              result = {
+                success: false,
+                error:
+                  'אסור להשתמש ב-URL חיצוני לתמונה (סטוק/אינטרנט). מותר רק: סצנה מהרשימה שסופקה, תמונה שיצרת עם generate_brand_image, או photoUrl של משפיען מ-search_influencers. ' +
+                  'קרא שוב ל-generate_slide_html לאותו שקף — עדיף ליצור תמונה עם generate_brand_image, או להשמיט imageUrl לגמרי.',
+                unusedImages: unused,
+              }
+              break
+            }
+
             // Image-variety gate: reject the 3rd use of the same URL and hand
             // the model the still-unused pool so it can retry immediately.
-            const imgUrl = ((args.imageUrl as string) || '').trim()
             if (imgUrl && (imageUse.get(imgUrl) ?? 0) >= 2) {
               const unused = preferredImageryUrls.filter(u => !imageUse.has(u)).slice(0, 10)
               console.log(`[PresentationAgent][${requestId}]     ✋ Rejected reused image on ${slideType} (already used twice)`)

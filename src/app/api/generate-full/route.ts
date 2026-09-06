@@ -341,14 +341,17 @@ export async function POST(request: NextRequest) {
         if (process.env.QSTASH_TOKEN) {
           const { Client: QStashClient } = await import('@upstash/qstash')
           const q = new QStashClient({ token: process.env.QSTASH_TOKEN })
+          // Hand off to the content-critique gate, which repairs weak slides
+          // and then fires deck-finalize itself. It runs as its own hop because
+          // this route has no budget left for a critique that rebuilds slides.
           await q.publishJSON({
-            url: `${base}/api/pipeline/deck-finalize`,
+            url: `${base}/api/pipeline/deck-critique`,
             body: { documentId },
             headers: { 'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '' },
-            timeout: '300s',
+            timeout: '900s',
             retries: 1,
           })
-          console.log(`[${requestId}] 🎨 deck-finalize published to QStash`)
+          console.log(`[${requestId}] 🔍 deck-critique published to QStash`)
         } else {
           const { finalizeDeckToCanva } = await import('@/lib/pipeline/deck-finalize')
           await finalizeDeckToCanva(documentId, requestId)
