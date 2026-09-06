@@ -71,6 +71,10 @@ interface RoundRecord {
 /** Persisted between hops on documents.data._contentCritique. */
 interface CritiqueState {
   inProgress?: boolean
+  /** Identifies one chain of rounds. Baked into each hop's dedup id so a QStash
+   *  retry of the same hop is idempotent, while a later re-run of the critique
+   *  on the same document is not silently dropped as a duplicate. */
+  runId?: string
   rounds?: RoundRecord[]
   bestFailures?: number | null
   /** Snapshot of the best VERIFIED slides — transient, stripped at finalize.
@@ -116,7 +120,14 @@ async function patchDoc(sb: Sb, documentId: string, mutate: (data: DocShape) => 
     .eq('id', documentId)
 }
 
-async function publishNextRound(base: string, secret: string, documentId: string, round: number, tag: string) {
+async function publishNextRound(
+  base: string,
+  secret: string,
+  documentId: string,
+  round: number,
+  runId: string,
+  tag: string,
+) {
   const { Client: QStashClient } = await import('@upstash/qstash')
   const q = new QStashClient({ token: process.env.QSTASH_TOKEN! })
   await q.publishJSON({
@@ -125,8 +136,10 @@ async function publishNextRound(base: string, secret: string, documentId: string
     headers: { 'x-internal-secret': secret },
     timeout: '900s',
     retries: 1,
-    // QStash rejects ':' in a deduplicationId — dashes only.
-    deduplicationId: `deck-critique-${documentId}-r${round}`,
+    // Idempotent per hop within a run, unique across runs. Without the runId a
+    // re-run on the same document reuses ids QStash may still remember and the
+    // chain stalls silently after round 1. QStash rejects ':' — dashes only.
+    deduplicationId: `deck-critique-${documentId}-${runId}-r${round}`,
   })
   console.log(`${tag} round ${round} published as next hop`)
 }
@@ -185,6 +198,10 @@ export async function POST(request: Request) {
     prior.bestSlides && prior.bestSlideTypes && typeof prior.bestFailures === 'number'
       ? { failures: prior.bestFailures, slides: prior.bestSlides, slideTypes: prior.bestSlideTypes }
       : null
+
+  // One token per chain — see CritiqueState.runId. Round 1 mints it; later
+  // rounds carry it forward from the previous hop's state.
+  const runId = round === 1 || !prior.runId ? Date.now().toString(36) : prior.runId
 
   // ── 0. Structure (round 1 only) ──
   // generate-full normalizes order at save time; this catches decks built
@@ -266,6 +283,7 @@ export async function POST(request: Request) {
         failedChecks: restoredBest ? {} : gate.failedChecks,
         summary: gate.summary,
         inProgress: false,
+        runId,
         bestSlides: null,
         bestSlideTypes: null,
       }
@@ -349,6 +367,7 @@ export async function POST(request: Request) {
         failedChecks: restoredBest ? {} : gate.failedChecks,
         summary: gate.summary,
         inProgress: false,
+        runId,
         bestSlides: null,
         bestSlideTypes: null,
       }
@@ -363,6 +382,7 @@ export async function POST(request: Request) {
     d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: finalDeck.htmlSlides, slideTypes: finalDeck.slideTypes }
     d._contentCritique = {
       inProgress: true,
+      runId,
       rounds,
       structure: structureMoves,
       bestFailures: bestSnapshot?.failures ?? null,
@@ -377,7 +397,7 @@ export async function POST(request: Request) {
   })
 
   try {
-    await publishNextRound(base, secret, documentId, round + 1, tag)
+    await publishNextRound(base, secret, documentId, round + 1, runId, tag)
   } catch (e) {
     // If the next hop cannot be scheduled, do not leave the deck in limbo:
     // the current slides are the last repaired state, and the best verified
@@ -387,6 +407,7 @@ export async function POST(request: Request) {
       d._contentCritique = {
         ...(d._contentCritique ?? {}),
         inProgress: false,
+        runId,
         bestSlides: null,
         bestSlideTypes: null,
         reviewed: false,
