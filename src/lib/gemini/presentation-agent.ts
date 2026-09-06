@@ -354,6 +354,21 @@ export async function runPresentationAgent(
   // Explicitly-offered imagery, checked before the origin test in the
   // provenance gate below.
   const allowedImageUrls = new Set<string>()
+
+  // ── Anti-drift anchor ──
+  // The brief and the blueprint are injected once, into the opening prompt,
+  // and the agent then writes 20+ slides in one long conversation. Measured on
+  // a 22-slide deck: every one of the last 7 slides failed content review while
+  // only 4 of the first 15 did. The tail had drifted into generic agency
+  // boilerplate — an ERP integration, a "VIP club", a luxury-ambassador tier
+  // system, English headings — none of which appear anywhere in the brief.
+  // Re-stating the source with every slide result puts it back in front of the
+  // model immediately before it writes the next one, where it still counts.
+  const anchorSource = [input.briefText, input.kickoffText].filter(Boolean).join('\n\n').slice(0, 2200)
+  const driftAnchor =
+    `\n\nתזכורת מקור (אל תסטה ממנה):\n${anchorSource}\n\n` +
+    'כל שקף הבא חייב להיגזר מהמקור הזה בלבד. אל תמציא מסגרות, שכבות, טירים, מערכות או שירותים ' +
+    'שלא מופיעים בו. כתוב בעברית — גם הכותרות והתוויות.'
   let totalToolCalls = 0
   let designSystem: PremiumDesignSystem | null = null
   let researchData: Record<string, unknown> | undefined
@@ -857,7 +872,14 @@ ${preferredImageryContext}
             slideTypes.push(slideType)
 
             console.log(`[PresentationAgent][${requestId}]     → Slide ${slideIndex + 1}: ${slideType} "${slideTitle}" (${html.length} chars)`)
-            result = { success: true, slideIndex, slideType, htmlLength: html.length }
+            result = {
+              success: true,
+              slideIndex,
+              slideType,
+              htmlLength: html.length,
+              // Re-anchor before the next slide — see driftAnchor above.
+              reminder: driftAnchor,
+            }
             break
           }
 

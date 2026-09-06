@@ -79,6 +79,24 @@ Per slide, return true/false on each:
 - hebrewQuality: fluent, native Hebrew. No machine-translation artifacts, no English left untranslated mid-sentence, no broken grammar.
 </checks>
 
+<judge-by-slide-type>
+Judge each slide against what its TYPE is supposed to do. Holding every slide
+to the same yardstick produces false failures that waste a repair round.
+
+- cover / closing: a title, the brand, maybe one line. Being SHORT is correct —
+  never fail these for thin content or for lacking a number. Fail a cover only
+  for a placeholder, wrong brand, or broken Hebrew.
+- brief / insight / bigIdea: judged on sharpness. One real idea beats five
+  vague ones. Length is not the measure.
+- audience / strategy / creative / pillar-*: must be brand-specific and
+  traceable to the source.
+- goals / metrics / timeline / deliverables / budget / competitive: must carry
+  concrete figures, names or dates. Vague verbs here are a real failure.
+- influencer slides: profiles must match the source brief's profiles. Inventing
+  a tier system or ambassador hierarchy that the brief never described is an
+  ungrounded failure, not a creative liberty.
+</judge-by-slide-type>
+
 <deck-level>
 Also judge the deck as a whole:
 - arcHolds: the deck builds an argument — the insight sets up a tension, the strategy answers it, the idea expresses it, and something closes the loop. A pile of unrelated slides is false.
@@ -114,9 +132,12 @@ export function buildContentPrompt(
   slideTexts: string[],
   sourceMaterial: string,
   brandName: string,
+  slideTypes: string[] = [],
 ): string {
+  // The type drives the standard applied — see <judge-by-slide-type>. Without
+  // it a cover slide gets failed for being short, which is what a cover is.
   const slides = slideTexts
-    .map((t, i) => `--- SLIDE ${i} ---\n${t || '(empty slide)'}`)
+    .map((t, i) => `--- SLIDE ${i} (type: ${slideTypes[i] || 'unknown'}) ---\n${t || '(empty slide)'}`)
     .join('\n\n')
   return `${CRITIC_PROMPT}
 
@@ -285,6 +306,8 @@ export function contentGateVerdict(critique: DeckContentCritique): ContentGate {
 export interface CritiqueOptions {
   brandName: string
   sourceMaterial: string
+  /** Per-slide type, so each slide is judged by its own standard. */
+  slideTypes?: string[]
   model?: string
   budgetMs?: number
 }
@@ -346,7 +369,7 @@ export async function critiqueDeckContent(
   if (!htmlSlides.length) return uncheckedCritique(0, 'no slides')
 
   const texts = htmlSlides.map(extractSlideText)
-  const prompt = buildContentPrompt(texts, opts.sourceMaterial, opts.brandName)
+  const prompt = buildContentPrompt(texts, opts.sourceMaterial, opts.brandName, opts.slideTypes ?? [])
   const deadline = Date.now() + (opts.budgetMs ?? 180_000)
 
   // One retry: an unparseable response is a transient model failure, and

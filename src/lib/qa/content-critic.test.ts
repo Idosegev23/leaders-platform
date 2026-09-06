@@ -154,4 +154,17 @@ describe('buildContentPrompt', () => {
   it('marks an empty slide rather than silently sending a blank', () => {
     expect(buildContentPrompt(['', 'טקסט'], 'src', 'B')).toContain('(empty slide)')
   })
+
+  it('labels each slide with its type so a cover is not judged as a content slide', () => {
+    // A cover failed earnsItsPlace for being short — which is what a cover is.
+    const p = buildContentPrompt(['שער', 'גוף'], 'src', 'B', ['cover', 'strategy'])
+    expect(p).toContain('SLIDE 0 (type: cover)')
+    expect(p).toContain('SLIDE 1 (type: strategy)')
+  })
+
+  it('falls back to "unknown" when types are missing, without shifting them', () => {
+    const p = buildContentPrompt(['a', 'b'], 'src', 'B', ['cover'])
+    expect(p).toContain('SLIDE 0 (type: cover)')
+    expect(p).toContain('SLIDE 1 (type: unknown)')
+  })
 })

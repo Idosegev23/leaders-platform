@@ -60,7 +60,7 @@ interface DocShape {
   brandName?: string
   _briefText?: string
   _kickoffText?: string
-  _htmlPresentation?: { htmlSlides?: string[] }
+  _htmlPresentation?: { htmlSlides?: string[]; slideTypes?: string[] }
 }
 
 async function loadSlides(
@@ -117,7 +117,15 @@ export async function POST(request: Request) {
   const base = appBaseUrl()
 
   const deadline = startTs + (maxDuration * 1000 - RESERVE_MS)
-  const rounds: Array<{ round: number; summary: string; repaired: number[] }> = []
+  const rounds: Array<{
+    round: number
+    summary: string
+    repaired: number[]
+    // The reasons, not just the tally. Without these, improving the engine is
+    // guesswork — the first pass stored only counts and we could not tell WHY
+    // any given slide failed.
+    findings: Array<{ slide: number; failed: string[]; issues: string[]; rewrite: string }>
+  }> = []
   let gate: ContentGate | null = null
   let stoppedBecause = 'passed'
   // The gate deliberately returns passed=true when the critique could not run,
@@ -140,25 +148,35 @@ export async function POST(request: Request) {
       const critique = await critiqueDeckContent(loaded.slides, {
         brandName: loaded.data.brandName || '',
         sourceMaterial,
+        slideTypes: loaded.data._htmlPresentation?.slideTypes ?? [],
         budgetMs: Math.max(30_000, Math.min(180_000, deadline - Date.now())),
       })
       gate = contentGateVerdict(critique)
       lastCritiqueUnchecked = critique.unchecked
       console.log(`${tag} round ${round}: ${gate.summary}`)
 
+      const findings = critique.slides
+        .filter((sl) => sl.verdict === 'fail')
+        .map((sl) => ({
+          slide: sl.slideIndex,
+          failed: Object.entries(sl.checks).filter(([, ok]) => !ok).map(([k]) => k),
+          issues: sl.issues,
+          rewrite: sl.rewrite,
+        }))
+
       if (gate.passed) {
-        rounds.push({ round, summary: gate.summary, repaired: [] })
+        rounds.push({ round, summary: gate.summary, repaired: [], findings })
         stoppedBecause = critique.unchecked ? 'critique unavailable' : 'passed'
         break
       }
 
       if (round === MAX_ROUNDS) {
-        rounds.push({ round, summary: gate.summary, repaired: [] })
+        rounds.push({ round, summary: gate.summary, repaired: [], findings })
         stoppedBecause = `round cap (${MAX_ROUNDS}) reached without passing`
         break
       }
       if (Date.now() > deadline) {
-        rounds.push({ round, summary: gate.summary, repaired: [] })
+        rounds.push({ round, summary: gate.summary, repaired: [], findings })
         stoppedBecause = 'time budget exhausted'
         break
       }
@@ -187,7 +205,7 @@ export async function POST(request: Request) {
         results.forEach((ok, j) => { if (ok) repaired.push(batch[j].slideIndex) })
       }
       console.log(`${tag} round ${round}: repaired ${repaired.length}/${targets.length} slides`)
-      rounds.push({ round, summary: gate.summary, repaired })
+      rounds.push({ round, summary: gate.summary, repaired, findings })
 
       // Nothing could be repaired — another round would critique the same deck
       // and reach the same verdict, so stop instead of burning the budget.
