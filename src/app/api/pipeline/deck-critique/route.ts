@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { critiqueDeckContent, contentGateVerdict, extractSlideText } from '@/lib/qa/content-critic'
 import { repairSlideInContext } from '@/lib/qa/slide-repair'
-import { normalizeDeckStructure, removeSlides, allowedRemovals } from '@/lib/qa/deck-structure'
+import {
+  normalizeDeckStructure,
+  removeSlides,
+  allowedRemovals,
+  renumberEyebrows,
+  removalsTrustworthy,
+} from '@/lib/qa/deck-structure'
 import { isDevMode } from '@/lib/auth/dev-mode'
 
 export const dynamic = 'force-dynamic'
@@ -210,14 +216,18 @@ export async function POST(request: Request) {
   let structureMoves: string[] = prior.structure ?? []
   if (round === 1 && slideTypes.length === slides.length) {
     const { deck: ordered, report } = normalizeDeckStructure({ htmlSlides: slides, slideTypes })
-    if (report.changed) {
-      slides = ordered.htmlSlides
+    // Eyebrow numbers are baked in at generation; after a reorder — or for a
+    // deck built before generate-full started renumbering — they point at old
+    // positions and the critic (rightly) fails them as placeholders.
+    const { htmlSlides: numbered, renumbered } = renumberEyebrows(ordered.htmlSlides)
+    if (report.changed || renumbered > 0) {
+      slides = numbered
       slideTypes = ordered.slideTypes
       structureMoves = report.moves
       await patchDoc(sb, documentId, (d) => {
         d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: slides, slideTypes }
       })
-      console.log(`${tag} 🧭 reordered ${report.moves.length} slide(s): ${report.moves.join(', ')}`)
+      console.log(`${tag} 🧭 reordered ${report.moves.length} slide(s), renumbered ${renumbered} eyebrow(s)${report.moves.length ? `: ${report.moves.join(', ')}` : ''}`)
     }
   }
 
@@ -305,7 +315,15 @@ export async function POST(request: Request) {
   const removalRequests = critique.slides
     .filter((s) => s.verdict === 'fail' && s.disposition === 'remove')
     .map((s) => s.slideIndex)
-  const { allowed: toRemove, refused } = allowedRemovals({ htmlSlides: slides, slideTypes }, removalRequests)
+  // A round that fails most of the deck is reporting a systematic problem, not
+  // picking slides to delete — see removalsTrustworthy. Rewrites still run.
+  const trustRemovals = removalsTrustworthy(gate.failingIndexes.length, slides.length)
+  if (!trustRemovals && removalRequests.length) {
+    console.log(`${tag} ${removalRequests.length} removal request(s) ignored — ${gate.failingIndexes.length}/${slides.length} slides failed, critique not trusted for deletions`)
+  }
+  const { allowed: toRemove, refused } = trustRemovals
+    ? allowedRemovals({ htmlSlides: slides, slideTypes }, removalRequests)
+    : { allowed: [] as number[], refused: [] as Array<{ index: number; reason: string }> }
   for (const r of refused) console.log(`${tag} removal of slide ${r.index} refused: ${r.reason}`)
   if (toRemove.length) console.log(`${tag} removing slide(s) ${toRemove.join(', ')} as structural duplicates`)
 
@@ -341,7 +359,12 @@ export async function POST(request: Request) {
       repaired.push(target.slideIndex)
     }
   }
-  const finalDeck = removeSlides({ htmlSlides: working, slideTypes: workingTypes }, toRemove)
+  const afterRemoval = removeSlides({ htmlSlides: working, slideTypes: workingTypes }, toRemove)
+  // Removal shifts every later slide's position — renumber so the eyebrows
+  // don't become the next round's "placeholder" failures.
+  const finalDeck = toRemove.length
+    ? { htmlSlides: renumberEyebrows(afterRemoval.htmlSlides).htmlSlides, slideTypes: afterRemoval.slideTypes }
+    : afterRemoval
   console.log(`${tag} repaired ${repaired.length}/${targets.length} slides, removed ${toRemove.length}`)
   rounds.push({ round, summary: gate.summary, repaired, removed: toRemove, findings })
 

@@ -106,6 +106,15 @@ to the same yardstick produces false failures that waste a repair round.
   ungrounded failure, not a creative liberty.
 </judge-by-slide-type>
 
+<conventions>
+Every slide opens with an eyebrow of the form "LABEL // NN" — e.g. "COVER // 01",
+"יעדים // 03", "CLOSING // 22". This is a design element, not copy:
+- The LABEL may be an English section word in capitals (COVER, BRIEF, GOALS,
+  CLOSING). That is the renderer's convention. Never fail hebrewQuality for it.
+- NN is the slide's 1-based position. It is a placeholder failure ONLY when it
+  does not equal (SLIDE index + 1) for that slide. A matching number is fine.
+</conventions>
+
 <deck-level>
 Also judge the deck as a whole:
 - arcHolds: the deck builds an argument — the insight sets up a tension, the strategy answers it, the idea expresses it, and something closes the loop. A pile of unrelated slides is false.

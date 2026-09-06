@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeDeckStructure, removeSlides, allowedRemovals } from './deck-structure'
+import {
+  normalizeDeckStructure,
+  removeSlides,
+  allowedRemovals,
+  renumberEyebrows,
+  removalsTrustworthy,
+} from './deck-structure'
 
 /** Build a deck whose HTML is just a marker for its original position. */
 function deck(types: string[]) {
@@ -112,5 +118,67 @@ describe('allowedRemovals', () => {
     const { allowed, refused } = allowedRemovals(twenty, [7, 7, 99])
     expect(allowed).toEqual([7])
     expect(refused).toEqual([{ index: 99, reason: 'out of range' }])
+  })
+})
+
+describe('removalsTrustworthy', () => {
+  it('trusts a round that fails a minority of the deck', () => {
+    expect(removalsTrustworthy(2, 22)).toBe(true)
+    expect(removalsTrustworthy(8, 21)).toBe(true) // 38%
+  })
+
+  it('refuses a round that fails most of the deck — the 19/21 eyebrow incident', () => {
+    expect(removalsTrustworthy(19, 21)).toBe(false)
+    expect(removalsTrustworthy(11, 22)).toBe(false)
+  })
+
+  it('never trusts an empty deck', () => {
+    expect(removalsTrustworthy(0, 0)).toBe(false)
+  })
+})
+
+describe('renumberEyebrows', () => {
+  // Real markup from a generated slide — the number is the generation-time position.
+  const slide = (label: string, num: string) =>
+    `<html><body><div class="eyebrow" style="color:rgba(255,255,255,0.75);">${label} // ${num}</div><h1>x</h1></body></html>`
+
+  it('renumbers eyebrows to the slide position after a reorder', () => {
+    // After moving the cover from slide 8 to slide 1 it still read COVER // 08.
+    const { htmlSlides, renumbered } = renumberEyebrows([slide('COVER', '08'), slide('יעדים', '09'), slide('CLOSING', '03')])
+    expect(htmlSlides[0]).toContain('COVER // 01')
+    expect(htmlSlides[1]).toContain('יעדים // 02')
+    expect(htmlSlides[2]).toContain('CLOSING // 03')
+    expect(renumbered).toBe(2) // the closing already matched
+  })
+
+  it('is a no-op on a correctly numbered deck', () => {
+    const { htmlSlides, renumbered } = renumberEyebrows([slide('COVER', '01'), slide('BRIEF', '02')])
+    expect(renumbered).toBe(0)
+    expect(htmlSlides[1]).toContain('BRIEF // 02')
+  })
+
+  it('closes the gap left by a removal', () => {
+    // Slides 19, 20, 21 with 20 removed → the old 21 must become 20.
+    const { htmlSlides } = renumberEyebrows([slide('מדדים', '19'), slide('CLOSING', '21')])
+    expect(htmlSlides[0]).toContain('מדדים // 01')
+    expect(htmlSlides[1]).toContain('CLOSING // 02')
+  })
+
+  it('handles a number-first eyebrow', () => {
+    const { htmlSlides } = renumberEyebrows(['<div class="eyebrow">07 // COVER</div>'])
+    expect(htmlSlides[0]).toContain('01 // COVER')
+  })
+
+  it('leaves an eyebrow without a number, and the rest of the slide, untouched', () => {
+    const html = '<div class="eyebrow">SECTION</div><p>keep // 42 in body</p>'
+    const { htmlSlides, renumbered } = renumberEyebrows([html])
+    expect(htmlSlides[0]).toBe(html)
+    expect(renumbered).toBe(0)
+  })
+
+  it('only touches the first eyebrow on a slide', () => {
+    const html = '<div class="eyebrow">A // 09</div><div class="eyebrow">B // 09</div>'
+    const { htmlSlides } = renumberEyebrows([html])
+    expect(htmlSlides[0]).toBe('<div class="eyebrow">A // 01</div><div class="eyebrow">B // 09</div>')
   })
 })

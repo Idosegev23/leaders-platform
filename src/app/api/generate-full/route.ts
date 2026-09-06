@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { isDevMode, DEV_AUTH_USER } from '@/lib/auth/dev-mode'
 import { runPresentationAgent, type AgentInput, type AgentCheckpoint } from '@/lib/gemini/presentation-agent'
-import { normalizeDeckStructure } from '@/lib/qa/deck-structure'
+import { normalizeDeckStructure, renumberEyebrows } from '@/lib/qa/deck-structure'
 import { buildWizardContract, type WizardContract } from '@/lib/gemini/wizard-contract'
 import { critiqueSlides } from '@/lib/qa/slide-critic'
 import type { BrandAssets } from '@/lib/brand/types'
@@ -310,13 +310,17 @@ export async function POST(request: NextRequest) {
     if (structure.changed) {
       console.log(`[${requestId}] 🧭 Reordered ${structure.moves.length} slide(s) into the narrative grammar: ${structure.moves.join(', ')}`)
     }
+    // Eyebrow numbers were baked in at generation position; a reorder leaves
+    // them pointing at the old slots (COVER // 08 on slide 1).
+    const { htmlSlides: numberedSlides, renumbered } = renumberEyebrows(ordered.htmlSlides)
+    if (renumbered) console.log(`[${requestId}] 🔢 Renumbered ${renumbered} eyebrow(s) to match position`)
 
     // Build HtmlPresentation object
     const htmlPresentation: HtmlPresentation = {
       title: brandName,
       brandName,
       designSystem: result.designSystem,
-      htmlSlides: ordered.htmlSlides,
+      htmlSlides: numberedSlides,
       slideTypes: ordered.slideTypes,
       metadata: {
         brandName,

@@ -163,3 +163,61 @@ export function allowedRemovals(
   }
   return { allowed, refused }
 }
+
+/**
+ * A critique that fails most of the deck is describing a systematic problem,
+ * not identifying individual slides to delete. Measured: after a reorder left
+ * every eyebrow numbered for its old position, the critic failed 19 of 21
+ * slides on `noPlaceholder` and asked for removals in the same breath. Acting
+ * on removals from a round like that would gut the deck for a formatting bug.
+ */
+export const REMOVAL_MAX_FAILING_FRACTION = 0.4
+
+export function removalsTrustworthy(
+  failingCount: number,
+  slideCount: number,
+  maxFailingFraction: number = REMOVAL_MAX_FAILING_FRACTION,
+): boolean {
+  if (slideCount <= 0) return false
+  return failingCount / slideCount <= maxFailingFraction
+}
+
+// ─── Eyebrow renumbering ────────────────────────────────
+
+/**
+ * Each slide's eyebrow is rendered as `LABEL // NN` — `COVER // 01`,
+ * `יעדים // 03` — with NN being the slide's position at GENERATION time, baked
+ * into the HTML. Reordering or removing slides leaves every affected eyebrow
+ * pointing at its old position: after moving the cover from slide 8 to slide 1
+ * it still read `COVER // 08`, and the critic rightly failed 19 slides for
+ * "leftover template numbers". Any structural change must be followed by this.
+ *
+ * Only the first `.eyebrow` element per slide is touched, and only its number.
+ * Eyebrows without a number are left alone.
+ */
+const EYEBROW_RE = /(<div\b[^>]*\bclass="eyebrow"[^>]*>)([\s\S]*?)(<\/div>)/i
+const NUMBER_AFTER_SEP_RE = /(\/\/\s*)(\d{1,2})\b/
+const NUMBER_BEFORE_SEP_RE = /^(\s*)(\d{1,2})(\s*\/\/)/
+
+export function renumberEyebrows(htmlSlides: string[]): { htmlSlides: string[]; renumbered: number } {
+  let renumbered = 0
+  const out = htmlSlides.map((html, i) => {
+    const target = String(i + 1).padStart(2, '0')
+    return html.replace(EYEBROW_RE, (_m, open: string, inner: string, close: string) => {
+      let fixed = inner
+      if (NUMBER_AFTER_SEP_RE.test(inner)) {
+        fixed = inner.replace(NUMBER_AFTER_SEP_RE, (_mm, sep: string, num: string) => {
+          if (num.padStart(2, '0') !== target) renumbered++
+          return sep + target
+        })
+      } else if (NUMBER_BEFORE_SEP_RE.test(inner)) {
+        fixed = inner.replace(NUMBER_BEFORE_SEP_RE, (_mm, lead: string, num: string, sep: string) => {
+          if (num.padStart(2, '0') !== target) renumbered++
+          return lead + target + sep
+        })
+      }
+      return open + fixed + close
+    })
+  })
+  return { htmlSlides: out, renumbered }
+}
