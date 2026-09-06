@@ -6,7 +6,7 @@ const DEFAULT_EXPIRY_SECONDS = 60 * 60 * 24 * 7 // 7 days
 /** Deterministic storage key for a deck artifact. `ts` defaults to now. */
 export function deckArtifactPath(
   documentId: string,
-  kind: 'pdf' | 'pptx',
+  kind: 'pdf' | 'pptx' | 'html',
   ts: number = Date.now(),
 ): string {
   return `decks/${documentId}/${ts}.${kind}`

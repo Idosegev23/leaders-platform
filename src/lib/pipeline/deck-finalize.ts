@@ -16,7 +16,9 @@ function service() {
  * 1. Derive `_structuredPresentation` 1:1 from `_agentSlides` if it's missing
  *    (same faithful path as /api/gamma-prototype — no regeneration), so the
  *    Canva import gets native editable PPTX instead of a flat screenshot PDF.
- * 2. exportDeckToCanva() — PPTX → signed URL → Canva url-import → links
+ * 2. exportDeckToCanva() — HTML (one page per current slide) → signed URL →
+ *    Canva url-import → links. The derived structured/PPTX form is only a
+ *    fallback now: it reflects the agent's first draft, not the critiqued deck.
  *    persisted on documents.data._canva + the linked kickoff row.
  * 3. autofillCreativeDeckFromDocument() — the AI mapping bridge fills the
  *    creative-strategy brand template (~86 text+image fields) and persists a

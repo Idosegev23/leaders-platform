@@ -7,12 +7,13 @@ import type { StructuredPresentation } from '@/lib/gemini/layout-prototypes/type
 import { structuredPresentationToPptxDetailed } from '@/lib/export/structured-pptx'
 import { uploadAndSignedUrl, deckArtifactPath } from '@/lib/render/storage'
 import { importDesignFromUrl, waitForUrlImport } from '@/lib/canva/client'
+import { buildCanvaImportHtml } from '@/lib/canva/html-import'
 
 export type CanvaExportResult = {
   designId: string
   editUrl: string
   viewUrl: string
-  mode: 'measured-pptx' | 'native-pptx' | 'screenshot-pdf'
+  mode: 'html-import' | 'measured-pptx' | 'native-pptx' | 'screenshot-pdf'
   warnings: string[]
   kickoffUpdated: boolean
 }
@@ -53,19 +54,74 @@ export async function exportDeckToCanva(opts: {
   const documentData = (document.data ?? {}) as Record<string, unknown>
   const brandName = (documentData.brandName as string) || document.title || 'Presentation'
 
-  // 1. Produce the deck artifact. StructuredPresentation → NATIVE PPTX (real
-  //    editable text/image/shape elements in Canva). Anything else falls back
-  //    to the legacy screenshot-PDF path (flat, but never blocks the import).
-  let artifact: { buffer: Buffer; contentType: string; ext: 'pdf' | 'pptx'; mode: CanvaExportResult['mode'] }
+  // 1. Produce the deck artifact and import it.
+  //
+  //    PRIMARY — html-import: one Canva page per rendered slide, built from
+  //    `_htmlPresentation.htmlSlides` — the deck AS IT STANDS after critique,
+  //    repair, reordering and renumbering. The structured/PPTX route below is
+  //    derived once from the agent's raw `_agentSlides` (their generation-time
+  //    content, not their HTML) and then reused, so it exported the first
+  //    draft no matter what the pipeline fixed afterwards — a 22-page deck with
+  //    the cover on page 8 while the approved deck had 21 with the cover first.
+  //    Canva returns real editable text for HTML pages (verified 21/21), and
+  //    fidelity beat the PPTX conversion, which garbled the letter-spaced
+  //    eyebrows and cropped the logo.
+  //
+  //    FALLBACK — the legacy cascade: StructuredPresentation → measured PPTX →
+  //    native PPTX → screenshot PDF. Never blocks the import.
+  type Artifact = {
+    buffer: Buffer
+    contentType: string
+    ext: 'pdf' | 'pptx' | 'html'
+    mode: CanvaExportResult['mode']
+  }
+  let artifact: Artifact | null = null
+  let result: Awaited<ReturnType<typeof waitForUrlImport>> | null = null
   let pptxWarnings: string[] = []
 
-  const htmlPres = documentData._htmlPresentation as { htmlSlides?: string[]; title?: string } | undefined
+  const htmlPres = documentData._htmlPresentation as
+    | { htmlSlides?: string[]; slideTypes?: string[]; title?: string }
+    | undefined
   const astPres = documentData._presentation as Presentation | undefined
   const cachedSlides = documentData._cachedSlides as string[] | undefined
   const structured =
     (bodyPresentation?.slides?.length ? bodyPresentation : undefined) ||
     (documentData._structuredPresentation as StructuredPresentation | undefined)
 
+  // Upload to Supabase Storage and hand Canva a SIGNED URL (Drive's
+  // uc?export=download redirect is rejected by Canva's url-import), then poll.
+  const pushArtifact = async (a: Artifact) => {
+    const { signedUrl } = await uploadAndSignedUrl({
+      path: deckArtifactPath(documentId, a.ext),
+      body: a.buffer,
+      contentType: a.contentType,
+    })
+    const { jobId } = await importDesignFromUrl({ title: brandName, url: signedUrl, mimeType: a.contentType })
+    return waitForUrlImport(jobId)
+  }
+
+  if (htmlPres?.htmlSlides?.length) {
+    const built = buildCanvaImportHtml({
+      htmlSlides: htmlPres.htmlSlides,
+      slideTypes: htmlPres.slideTypes,
+      brandName,
+    })
+    const htmlArtifact: Artifact = {
+      buffer: Buffer.from(built.html, 'utf8'),
+      contentType: 'text/html',
+      ext: 'html',
+      mode: 'html-import',
+    }
+    try {
+      result = await pushArtifact(htmlArtifact)
+      artifact = htmlArtifact
+      console.log(`[canva-export] html-import: ${built.pages} pages, ${built.scopedStyleBlocks} scoped style blocks`)
+    } catch (htmlErr) {
+      console.error('[canva-export] html-import failed, falling back to the PPTX cascade:', htmlErr)
+    }
+  }
+
+  if (!result) {
   if (structured?.slides?.length) {
     const structuredHtml = structured.slides.map((s) =>
       renderStructuredSlide(s, structured.designSystem, { brandLogoUrl: structured.brandLogoUrl }),
@@ -116,22 +172,12 @@ export async function exportDeckToCanva(opts: {
   } else {
     throw new DeckNotReadyError('Deck has no rendered slides yet — generate the PDF first, then import to Canva.')
   }
+  result = await pushArtifact(artifact)
+  }
 
-  // 2. Upload to Supabase Storage and hand Canva a SIGNED URL (Drive's
-  //    uc?export=download redirect is rejected by Canva's url-import).
-  const { signedUrl } = await uploadAndSignedUrl({
-    path: deckArtifactPath(documentId, artifact.ext),
-    body: artifact.buffer,
-    contentType: artifact.contentType,
-  })
-
-  // 3. Import into Canva + poll for the finished design.
-  const { jobId } = await importDesignFromUrl({
-    title: brandName,
-    url: signedUrl,
-    mimeType: artifact.contentType,
-  })
-  const result = await waitForUrlImport(jobId)
+  if (!artifact || !result) {
+    throw new Error('canva-export: no artifact was produced')
+  }
 
   const nowIso = new Date().toISOString()
 
