@@ -41,7 +41,8 @@ node scripts/bench-flash-models.mjs       # re-run before bumping the flash mode
 
 - Demo rows from 2026-09-06: forms `2d64722d`, `94982cab`, `bcf51f4c` (+ their `document_links` with `salesforce_ref` `DEMO-*`); deck docs `2ff2af2c`, `80f9657c`, `be568a07`, `192039b3`; several "SEACRET SPA — דמו" Canva designs.
 - **Four local-only branches never pushed to origin** — at risk: `feat/art-director-engine`, `feat/auto-deck-to-canva`, `feat/canva-autofill`, `feat/template-hub`.
-- Phase 7 (delete legacy apps) — unchanged, still pending, still needs a "go ahead".
+- **Phase 7 — legacy apps** (user approved "later"; every `rm -rf` needs a fresh "go ahead" in the current session): `/Users/idosegev/Downloads/TriRoars/Leaders/chatbrief`, `…/qoute1` (and `…/qoute` — a stale HTML/JS preview, no DB), `…/innerMeeting` (verify the port works first), `…/costumerbrief` (verify the port works first), `…/docs-hub` (absorbed into the dashboard + `/send/[slug]`). **Do not delete `pptmaker`** — it holds the original code this app was forked from; only once leaders-platform is stable in prod and the user confirms.
+- Supabase MCP is wired in [.mcp.json](.mcp.json) (project `fhgggqnaplshwbrzgima`); authenticate once via `claude /mcp` in a regular terminal for direct SQL tools. Until then, REST with `SUPABASE_SERVICE_ROLE_KEY` from `.env.local` works — that is what today's checks used.
 
 ---
 
