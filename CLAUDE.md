@@ -6,66 +6,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Everything below this section is reference. This section is **what to do right now**.
 
-### Current state (checkpoint as of last commit `69d8898`)
-- All code for phases 0–6 is merged to `main` and deployed on Vercel.
-- The Vercel project is `idosegev23s-projects/leaders-platform`. GitHub remote is `git@github.com:Idosegev23/leaders-platform.git`.
-- Env vars are pushed to all three Vercel environments. `NEXT_PUBLIC_DEV_MODE=true` is still active across all envs (so auth is effectively bypassed until the user flips it).
-- Supabase MCP server is wired up in [.mcp.json](.mcp.json) for project ref `fhgggqnaplshwbrzgima`. The user must authenticate it once via `claude /mcp` in a regular terminal (not an IDE session). After that, you have direct SQL/DB tools.
+### Current state (as of 2026-09-06, `main` = `7f1a434`, deployed to prod)
 
-### Immediate open items (in priority order)
+- **The auto deck pipeline (kickoff → deck → Canva) works end to end** and produced its first *verified* `passed=True` on 2026-09-06 (document `192039b3`, run `mtq892fg`: round 1 found 2 issues, removed 1 duplicate slide, rewrote 1 → round 2 found 0 → Canva `DAHUc70tffE`; the critique chain took ~4 min).
+- Chain: `/api/inner-meeting/complete` → QStash → `pipeline/kickoff-deck/run` (assemble brief+kickoff, `_stepData`, blueprint) → `generate-full` (checkpoint/resume across invocations) → `pipeline/deck-critique` (**one round per QStash hop**, MAX 4) → `pipeline/deck-finalize` → Canva link on `inner_meeting_forms.canva_*`.
+- Quality gates in the path: image-provenance gate (no foreign/stock URLs), deterministic structure normalization + eyebrow renumbering (`src/lib/qa/deck-structure.ts`), content critic = **two pinned critiques intersected** (`src/lib/qa/content-critic.ts`), in-context slide repair (`src/lib/qa/slide-repair.ts`), structural-duplicate removal (1 per round, never cover/closing, floor 12, refused when >40% of the deck failed), best-verified-round restore (ties → later state).
+- **Verified vs. not:** everything above ran in prod today *except* `generate-full`'s checkpoint/resume — every run finished at ~644s, under the 650s deadline, so that path is deployed but has never fired. If a deck ever stops at exactly 800s with nothing saved, that's where to look.
+- Why it was dead 2026-07-07 → 2026-09-06: every QStash publish passed a `deduplicationId` containing `:`, which QStash rejects; all three call sites swallowed the throw. Dashes only.
 
-1. **Run the SQL migration.** [supabase/migrations/20260419_init_hub_schema.sql](supabase/migrations/20260419_init_hub_schema.sql) has not been applied yet. Without it:
-   - `document_links` / `document_types` / `contacts` / `forms` / `inner_meeting_forms` / `form_participants` / `form_activity_logs` / `client_folders` don't exist
-   - The dashboard's "recent activity" query returns nothing (it's wrapped in try/catch, so the UI survives)
-   - `/inner-meeting` and `/send/client-brief` can't create rows
-   - The auth whitelist check against `contacts` returns "not in whitelist" for everyone — but it's bypassed because `NEXT_PUBLIC_DEV_MODE=true`
-   - **How to run:** if the Supabase MCP is authenticated, use the `apply_migration` / `execute_sql` tool with the contents of that file. Otherwise direct the user to [the SQL editor](https://supabase.com/dashboard/project/fhgggqnaplshwbrzgima/sql/new).
+### If something's off, check in this order
 
-2. **Seed the `contacts` table.** After migration, run `node scripts/seed-contacts.mjs`. This requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local` (it's already there from the pptmaker fork). The CSV source is `scripts/contacts.csv`.
+1. **QStash events** — `GET https://qstash.upstash.io/v2/events` with `QSTASH_TOKEN`. Every hop (generate-full, deck-critique ×N, deck-finalize) shows there with state + status. A hop that never appears was never published.
+2. **`documents.data._contentCritique`** — `rounds[].findings` carry per-slide failed checks, quoted issues and rewrite directives; `removed` lists dropped slides; `passed` is only ever true when `reviewed` is true; `restoredBest` says the final deck is an earlier verified round.
+3. **`documents.data._generationCheckpoint`** present → a generation is mid-resume (or a resume never fired).
 
-3. **Debug "בריף הלקוח" (client-brief) card — user reports it "not active" (לא פעיל).** Likely causes to investigate in order:
-   - `document_types` row for `client-brief` doesn't exist yet (fix: run the migration, seeds the row automatically via `ON CONFLICT DO NOTHING`).
-   - The `/send/client-brief` route loads but the `SELECT` on `document_types` returns null because the migration hasn't run — resulting in `notFound()`.
-   - The dashboard card is linked correctly (`targetUrl: '/send/client-brief'` in [src/app/dashboard/page.tsx](src/app/dashboard/page.tsx)), so it's not a UI wiring issue — it's almost certainly "DB not ready".
-   - Verify by hitting `/send/client-brief` after migration. If it still fails, check `/api/links/route.ts` which queries `document_types.slug = 'client-brief'`.
+### Live-test safety — prod env facts (verified 2026-09-06)
 
-4. **Supabase Auth URL Configuration — user already completed.** Google Cloud redirect URI already set to `https://fhgggqnaplshwbrzgima.supabase.co/auth/v1/callback` under the `LDRSAGENT` OAuth client.
+- `NEXT_PUBLIC_DEV_MODE` is **absent** in prod → the `contacts` whitelist is enforced (130 seeded). The April migration/seed steps are long done.
+- `NOTIFICATIONS_TEST_MODE=false` → completing a kickoff emails real management. Flip to `true` (+ redeploy) before live kickoff tests. Never include Eran.
+- `QUOTE_NOTIFICATION_EMAILS` unset → signed-quote mail CCs `roei@` and does **not** honour test mode.
+- `CRON_SECRET` unset → the three cron routes are publicly callable.
+- Salesforce inbound needs `Authorization: Bearer <SALESFORCE_WEBHOOK_SECRET>`; their `projectquote` answers `{"received":true}` and processes async — a 200 is receipt, not success.
 
-5. **Remaining manual setup (optional / future):**
-   - `REMINDERS_WEBHOOK_URL` → Make.com scenario for cron reminders (the route silently no-ops without it).
-   - `CRON_SECRET` → gate `/api/cron/reminders` endpoint.
-   - `ADMIN_EMAILS` → auto-promote matching emails to `users.role='admin'`.
-   - Flip `NEXT_PUBLIC_DEV_MODE` to `false` in production when ready to enforce the whitelist.
-
-### Handy commands for the next session
+### Demo / test workflow
 
 ```bash
-# Verify env on Vercel
-vercel env ls
-
-# Type-check (fast)
-npx tsc --noEmit
-
-# Local dev
-npm run dev
-
-# Seed contacts after the migration has been applied
-node scripts/seed-contacts.mjs
-
-# Check git state
-git status && git log --oneline -5
+node scripts/seed-demo-kickoff.mjs        # full SEACRET SPA demo kickoff + brief → prints {formId, salesforceRef}
+# then: POST /api/pipeline/kickoff-deck/run  -H "x-internal-secret: $LEADS_TRIGGER_SECRET"  -d '{"formId":..,"salesforceRef":..}'
+# critique only:  publish {"documentId":..,"round":1} to /api/pipeline/deck-critique via QStash with a FRESH dedup id
+node scripts/bench-flash-models.mjs       # re-run before bumping the flash model (picked gemini-3.7-flash; 3.8 is slower)
 ```
 
-### Phase 7 (cleanup) is still pending
-The user approved deletion of `chatbrief` and `qoute1` "later". The full deletion list:
-- `/Users/idosegev/Downloads/TriRoars/Leaders/chatbrief`
-- `/Users/idosegev/Downloads/TriRoars/Leaders/qoute1` (also `qoute` — it's a stale HTML/JS preview, no DB)
-- `/Users/idosegev/Downloads/TriRoars/Leaders/innerMeeting` (port verified working first)
-- `/Users/idosegev/Downloads/TriRoars/Leaders/costumerbrief` (port verified working first)
-- `/Users/idosegev/Downloads/TriRoars/Leaders/docs-hub` (functionality absorbed into leaders-platform dashboard + /send/[slug])
-- Do not delete `pptmaker` — it still contains the original code leaders-platform was forked from; delete only after leaders-platform is in stable production and the user confirms.
+### Cleanup candidates (NOT done — needs an explicit go-ahead)
 
-**IMPORTANT:** All destructive deletes need explicit user confirmation. Never `rm -rf` legacy apps without a "go ahead" in the current session.
+- Demo rows from 2026-09-06: forms `2d64722d`, `94982cab`, `bcf51f4c` (+ their `document_links` with `salesforce_ref` `DEMO-*`); deck docs `2ff2af2c`, `80f9657c`, `be568a07`, `192039b3`; several "SEACRET SPA — דמו" Canva designs.
+- **Four local-only branches never pushed to origin** — at risk: `feat/art-director-engine`, `feat/auto-deck-to-canva`, `feat/canva-autofill`, `feat/template-hub`.
+- Phase 7 (delete legacy apps) — unchanged, still pending, still needs a "go ahead".
 
 ---
 
@@ -96,7 +72,7 @@ The five rubrics on the dashboard:
 - **Phase 6 — Reminders** ✓ `/api/cron/reminders` (daily 08:00 UTC via `vercel.json`); POSTs consolidated reminder batch to `REMINDERS_WEBHOOK_URL` (Make.com) for actual email delivery.
 - **Phase 7 — Cleanup** pending: delete legacy apps (`innerMeeting`, `costumerbrief`, `chatbrief`, `qoute1`, `docs-hub`).
 
-## Manual setup still required
+## Manual setup still required (historical — items 1–4 were completed by 2026-09; see start-here)
 
 Code alone isn't enough — these live-system tweaks must be done once:
 
