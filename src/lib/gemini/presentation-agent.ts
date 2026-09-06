@@ -364,11 +364,17 @@ export async function runPresentationAgent(
   // system, English headings — none of which appear anywhere in the brief.
   // Re-stating the source with every slide result puts it back in front of the
   // model immediately before it writes the next one, where it still counts.
-  const anchorSource = [input.briefText, input.kickoffText].filter(Boolean).join('\n\n').slice(0, 2200)
+  // Cost discipline matters here: a function-calling loop resends the whole
+  // conversation every turn, so an anchor on all 22 results compounds. Attaching
+  // a 2.2k-char anchor to every slide pushed a run that already used 776s of its
+  // 800s ceiling into a 504 timeout. So: a compact anchor, every fourth slide —
+  // roughly five injections instead of twenty-two, at a fraction of the tokens,
+  // while still re-grounding the tail where the drift actually appeared.
+  const anchorSource = [input.briefText, input.kickoffText].filter(Boolean).join('\n\n').slice(0, 900)
   const driftAnchor =
-    `\n\nתזכורת מקור (אל תסטה ממנה):\n${anchorSource}\n\n` +
-    'כל שקף הבא חייב להיגזר מהמקור הזה בלבד. אל תמציא מסגרות, שכבות, טירים, מערכות או שירותים ' +
-    'שלא מופיעים בו. כתוב בעברית — גם הכותרות והתוויות.'
+    `\n\nתזכורת מקור — אל תסטה ממנה:\n${anchorSource}\n` +
+    'אל תמציא מסגרות, שכבות, טירים, מערכות או שירותים שאינם במקור. כתוב בעברית, כולל כותרות ותוויות.'
+  const ANCHOR_EVERY = 4
   let totalToolCalls = 0
   let designSystem: PremiumDesignSystem | null = null
   let researchData: Record<string, unknown> | undefined
@@ -877,8 +883,8 @@ ${preferredImageryContext}
               slideIndex,
               slideType,
               htmlLength: html.length,
-              // Re-anchor before the next slide — see driftAnchor above.
-              reminder: driftAnchor,
+              // Periodic re-anchor — see driftAnchor above.
+              ...(slideIndex % ANCHOR_EVERY === ANCHOR_EVERY - 1 ? { reminder: driftAnchor } : {}),
             }
             break
           }
