@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { critiqueDeckContent, contentGateVerdict, extractSlideText } from '@/lib/qa/content-critic'
 import { repairSlideInContext } from '@/lib/qa/slide-repair'
+import { normalizeDeckStructure, removeSlides, allowedRemovals } from '@/lib/qa/deck-structure'
 import { isDevMode } from '@/lib/auth/dev-mode'
 
 export const dynamic = 'force-dynamic'
@@ -62,6 +63,8 @@ interface RoundRecord {
   round: number
   summary: string
   repaired: number[]
+  /** Slides dropped as structural duplicates (indexes as of this round). */
+  removed?: number[]
   findings: Array<{ slide: number; failed: string[]; issues: string[]; rewrite: string }>
 }
 
@@ -70,8 +73,13 @@ interface CritiqueState {
   inProgress?: boolean
   rounds?: RoundRecord[]
   bestFailures?: number | null
-  /** Snapshot of the best VERIFIED slides — transient, stripped at finalize. */
+  /** Snapshot of the best VERIFIED slides — transient, stripped at finalize.
+   *  Types travel with them: a removal changes the deck's length, so restoring
+   *  slides without their types would misalign the two arrays. */
   bestSlides?: string[] | null
+  bestSlideTypes?: string[] | null
+  /** What round 1's structure normalization moved, if anything. */
+  structure?: string[]
   // final fields
   checkedAt?: string
   passed?: boolean
@@ -166,30 +174,49 @@ export async function POST(request: Request) {
 
   const doc = await loadDoc(sb, documentId)
   if (!doc) return NextResponse.json({ ok: false, error: 'document not found' }, { status: 404 })
-  const slides = doc._htmlPresentation?.htmlSlides ?? []
+  let slides = doc._htmlPresentation?.htmlSlides ?? []
+  let slideTypes = doc._htmlPresentation?.slideTypes ?? []
   if (!slides.length) return NextResponse.json({ ok: false, error: 'deck has no slides to review' }, { status: 400 })
 
   // Round 1 starts fresh; later rounds continue the state the previous hop left.
   const prior: CritiqueState = round === 1 ? {} : (doc._contentCritique ?? {})
   const rounds: RoundRecord[] = [...(prior.rounds ?? [])]
-  let best: { failures: number; slides: string[] } | null =
-    prior.bestSlides && typeof prior.bestFailures === 'number'
-      ? { failures: prior.bestFailures, slides: prior.bestSlides }
+  let best: { failures: number; slides: string[]; slideTypes: string[] } | null =
+    prior.bestSlides && prior.bestSlideTypes && typeof prior.bestFailures === 'number'
+      ? { failures: prior.bestFailures, slides: prior.bestSlides, slideTypes: prior.bestSlideTypes }
       : null
+
+  // ── 0. Structure (round 1 only) ──
+  // generate-full normalizes order at save time; this catches decks built
+  // before that, or through other paths (auto-deck, the editor). The critic
+  // never sees a cover on slide 8 — sequence is deterministic, not a judgement.
+  let structureMoves: string[] = prior.structure ?? []
+  if (round === 1 && slideTypes.length === slides.length) {
+    const { deck: ordered, report } = normalizeDeckStructure({ htmlSlides: slides, slideTypes })
+    if (report.changed) {
+      slides = ordered.htmlSlides
+      slideTypes = ordered.slideTypes
+      structureMoves = report.moves
+      await patchDoc(sb, documentId, (d) => {
+        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: slides, slideTypes }
+      })
+      console.log(`${tag} 🧭 reordered ${report.moves.length} slide(s): ${report.moves.join(', ')}`)
+    }
+  }
 
   // ── 1. Critique ──
   const sourceMaterial = [doc._briefText, doc._kickoffText].filter(Boolean).join('\n\n')
   const critique = await critiqueDeckContent(slides, {
     brandName: doc.brandName || '',
     sourceMaterial,
-    slideTypes: doc._htmlPresentation?.slideTypes ?? [],
+    slideTypes,
     budgetMs: Math.min(CRITIQUE_BUDGET_MS, deadline - Date.now()),
   })
   const gate = contentGateVerdict(critique)
   console.log(`${tag} ${gate.summary}`)
 
   if (!critique.unchecked && (!best || gate.failingIndexes.length < best.failures)) {
-    best = { failures: gate.failingIndexes.length, slides: [...slides] }
+    best = { failures: gate.failingIndexes.length, slides: [...slides], slideTypes: [...slideTypes] }
   }
 
   const findings = critique.slides
@@ -220,11 +247,11 @@ export async function POST(request: Request) {
       restoredBest = true
       console.log(`${tag} restoring best verified round (${best.failures} failures)`)
     }
-    const bestSlides = best?.slides
+    const bestSnap = best
 
     await patchDoc(sb, documentId, (d) => {
-      if (restoredBest && bestSlides) {
-        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: bestSlides }
+      if (restoredBest && bestSnap) {
+        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: bestSnap.slides, slideTypes: bestSnap.slideTypes }
       }
       d._contentCritique = {
         checkedAt: new Date().toISOString(),
@@ -234,11 +261,13 @@ export async function POST(request: Request) {
         restoredBest,
         bestFailures: best?.failures ?? null,
         rounds,
+        structure: structureMoves,
         failingSlides: restoredBest ? [] : gate.failingIndexes,
         failedChecks: restoredBest ? {} : gate.failedChecks,
         summary: gate.summary,
         inProgress: false,
         bestSlides: null,
+        bestSlideTypes: null,
       }
     })
 
@@ -251,9 +280,24 @@ export async function POST(request: Request) {
   // Each repair sees the previous ones, so a contradiction resolved on one
   // slide stays resolved on the next. Anything not repaired within budget is
   // simply picked up by the next round's critique.
-  const targets = critique.slides.filter((s) => s.verdict === 'fail' && s.rewrite)
+  // Structural duplicates come out, under policy: never cover/closing, deck
+  // floor of 12, at most two per round. Measured: the `results` slide
+  // duplicating the `metrics` slide's budget split failed notRedundant in every
+  // round of every deck — each rewrite only moved which figures overlapped.
+  const removalRequests = critique.slides
+    .filter((s) => s.verdict === 'fail' && s.disposition === 'remove')
+    .map((s) => s.slideIndex)
+  const { allowed: toRemove, refused } = allowedRemovals({ htmlSlides: slides, slideTypes }, removalRequests)
+  for (const r of refused) console.log(`${tag} removal of slide ${r.index} refused: ${r.reason}`)
+  if (toRemove.length) console.log(`${tag} removing slide(s) ${toRemove.join(', ')} as structural duplicates`)
+
+  // Rewrites run in place first (indexes unchanged), removals splice afterwards.
+  const removeSet = new Set(toRemove)
+  const targets = critique.slides.filter(
+    (s) => s.verdict === 'fail' && s.disposition === 'rewrite' && s.rewrite && !removeSet.has(s.slideIndex),
+  )
   const working = [...slides]
-  const types = doc._htmlPresentation?.slideTypes ?? []
+  const workingTypes = [...slideTypes]
   const repaired: number[] = []
   for (const target of targets) {
     const left = deadline - Date.now()
@@ -264,7 +308,7 @@ export async function POST(request: Request) {
     const html = await repairSlideInContext({
       slideHtml: working[target.slideIndex],
       slideIndex: target.slideIndex,
-      slideType: types[target.slideIndex],
+      slideType: workingTypes[target.slideIndex],
       allSlideTexts: working.map(extractSlideText),
       sourceMaterial,
       brandName: doc.brandName || '',
@@ -279,17 +323,18 @@ export async function POST(request: Request) {
       repaired.push(target.slideIndex)
     }
   }
-  console.log(`${tag} repaired ${repaired.length}/${targets.length} slides`)
-  rounds.push({ round, summary: gate.summary, repaired, findings })
+  const finalDeck = removeSlides({ htmlSlides: working, slideTypes: workingTypes }, toRemove)
+  console.log(`${tag} repaired ${repaired.length}/${targets.length} slides, removed ${toRemove.length}`)
+  rounds.push({ round, summary: gate.summary, repaired, removed: toRemove, findings })
 
-  // Nothing could be repaired: the next round would critique the same deck and
-  // reach the same verdict. Stop on this verified state instead.
-  if (repaired.length === 0) {
-    const bestSlides = best?.slides
+  // Nothing changed: the next round would critique the same deck and reach the
+  // same verdict. Stop on this verified state instead.
+  if (repaired.length === 0 && toRemove.length === 0) {
+    const bestSnap = best
     const restoredBest = !!best && gate.failingIndexes.length > best.failures
     await patchDoc(sb, documentId, (d) => {
-      if (restoredBest && bestSlides) {
-        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: bestSlides }
+      if (restoredBest && bestSnap) {
+        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: bestSnap.slides, slideTypes: bestSnap.slideTypes }
       }
       d._contentCritique = {
         checkedAt: new Date().toISOString(),
@@ -299,11 +344,13 @@ export async function POST(request: Request) {
         restoredBest,
         bestFailures: best?.failures ?? null,
         rounds,
+        structure: structureMoves,
         failingSlides: restoredBest ? [] : gate.failingIndexes,
         failedChecks: restoredBest ? {} : gate.failedChecks,
         summary: gate.summary,
         inProgress: false,
         bestSlides: null,
+        bestSlideTypes: null,
       }
     })
     await finalize(base, secret, documentId, tag)
@@ -313,12 +360,14 @@ export async function POST(request: Request) {
   // ── 4. Persist repaired slides + in-progress state, then hand off ──
   const bestSnapshot = best
   await patchDoc(sb, documentId, (d) => {
-    d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: working }
+    d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: finalDeck.htmlSlides, slideTypes: finalDeck.slideTypes }
     d._contentCritique = {
       inProgress: true,
       rounds,
+      structure: structureMoves,
       bestFailures: bestSnapshot?.failures ?? null,
       bestSlides: bestSnapshot?.slides ?? null,
+      bestSlideTypes: bestSnapshot?.slideTypes ?? null,
       summary: gate.summary,
       checkedAt: new Date().toISOString(),
       passed: false,
@@ -339,6 +388,7 @@ export async function POST(request: Request) {
         ...(d._contentCritique ?? {}),
         inProgress: false,
         bestSlides: null,
+        bestSlideTypes: null,
         reviewed: false,
         stoppedBecause: 'next round could not be scheduled — last repair unverified',
       }

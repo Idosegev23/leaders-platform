@@ -92,6 +92,41 @@ describe('parseContentCritique', () => {
     expect(parseContentCritique('not json', 1)).toBeNull()
     expect(parseContentCritique('{"deck":{}}', 1)).toBeNull()
   })
+
+  it('defaults disposition to rewrite', () => {
+    const raw = critiqueJson([
+      { slideIndex: 0, checks: { ...pass(), grounded: false }, verdict: 'fail', issues: ['x'], rewrite: 'ground it' },
+    ])
+    expect(parseContentCritique(raw, 1)!.slides[0].disposition).toBe('rewrite')
+  })
+
+  it('honours remove for a failing slide with a stated reason, even without rewrite text', () => {
+    // The observed case: a results slide duplicating the metrics slide's budget
+    // split — a rewrite only ever moved the overlap. Removal is the action.
+    const raw = critiqueJson([
+      { slideIndex: 1, checks: { ...pass(), notRedundant: false }, verdict: 'fail',
+        issues: ['חוזר על חלוקת התקציב שכבר הוצגה בשקף 0'], rewrite: '', disposition: 'remove' },
+    ])
+    const s = parseContentCritique(raw, 2)!.slides[1]
+    expect(s.verdict).toBe('fail')
+    expect(s.disposition).toBe('remove')
+  })
+
+  it('refuses a bare remove with no stated reason', () => {
+    const raw = critiqueJson([
+      { slideIndex: 0, checks: { ...pass(), notRedundant: false }, verdict: 'fail', issues: [], rewrite: '', disposition: 'remove' },
+    ])
+    // No reason and no rewrite → unactionable → downgraded, not removed.
+    const s = parseContentCritique(raw, 1)!.slides[0]
+    expect(s.disposition).toBe('rewrite')
+    expect(s.verdict).toBe('pass')
+    expect(s.issues[0]).toMatch(/^unchecked:/)
+  })
+
+  it('ignores remove on a passing slide', () => {
+    const raw = critiqueJson([{ slideIndex: 0, checks: pass(), verdict: 'pass', issues: ['x'], rewrite: '', disposition: 'remove' }])
+    expect(parseContentCritique(raw, 1)!.slides[0].disposition).toBe('rewrite')
+  })
 })
 
 describe('contentGateVerdict', () => {

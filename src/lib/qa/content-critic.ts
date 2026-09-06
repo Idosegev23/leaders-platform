@@ -44,8 +44,17 @@ export interface SlideContentCritique {
   checks: Record<ContentCheckKey, boolean>
   verdict: 'pass' | 'fail'
   issues: string[]
-  /** What a regeneration must do differently. Required whenever verdict=fail. */
+  /** What a regeneration must do differently. Required whenever verdict=fail
+   *  and disposition is 'rewrite'. */
   rewrite: string
+  /**
+   * 'remove' when the slide's entire purpose is already served by another
+   * slide, so no rewrite can give it a distinct role. Measured: a `results`
+   * slide duplicating the `metrics` slide's budget split failed notRedundant in
+   * every round of every deck — each rewrite only moved which figures overlapped.
+   * Structural duplicates need removal, not better prose.
+   */
+  disposition: 'rewrite' | 'remove'
 }
 
 export interface DeckContentCritique {
@@ -106,6 +115,7 @@ Also judge the deck as a whole:
 <rules>
 - Report an issue ONLY for a check you marked false. Be concrete: quote the offending phrase.
 - Every failing slide MUST carry a "rewrite" directive: a specific instruction for what the regenerated slide must contain or do differently. Never "make it better" — say what to add, cut, or ground.
+- "disposition" is "rewrite" by default. Use "remove" ONLY when the slide's ENTIRE purpose is already fully served by another slide (name it in issues) so that no rewrite could give it a distinct role — e.g. a second slide presenting the same budget split, or a second slide restating the same three pillars. A slide that merely overlaps in part gets "rewrite" with a directive to drop the overlap. Never "remove" a cover or closing.
 - A slide with any false check gets verdict "fail".
 - When every check passes: verdict "pass", empty issues, and rewrite MUST be an empty string.
 - Judge ONLY the content. Layout, colour and imagery are another critic's job.
@@ -114,7 +124,7 @@ Also judge the deck as a whole:
 
 <output>JSON only:
 {"deck":{"arcHolds":bool,"noContradictions":bool,"issues":[string]},
- "slides":[{"slideIndex":int,"checks":{"brandSpecific":bool,"concrete":bool,"grounded":bool,"noPlaceholder":bool,"notRedundant":bool,"earnsItsPlace":bool,"hebrewQuality":bool},"verdict":"pass"|"fail","issues":[string],"rewrite":string}]}
+ "slides":[{"slideIndex":int,"checks":{"brandSpecific":bool,"concrete":bool,"grounded":bool,"noPlaceholder":bool,"notRedundant":bool,"earnsItsPlace":bool,"hebrewQuality":bool},"verdict":"pass"|"fail","issues":[string],"rewrite":string,"disposition":"rewrite"|"remove"}]}
 </output>`
 
 /** Strip markup so the critic judges words, not HTML. */
@@ -191,6 +201,7 @@ export function uncheckedCritique(slideCount: number, note: string): DeckContent
       verdict: 'pass' as const,
       issues: [],
       rewrite: '',
+      disposition: 'rewrite' as const,
     })),
     deck: { arcHolds: true, noContradictions: true, issues: [] },
     unchecked: true,
@@ -222,7 +233,7 @@ export function parseContentCritique(raw: string, slideCount: number): DeckConte
   for (let i = 0; i < slideCount; i++) {
     const s = byIndex.get(i)
     if (!s) {
-      slides.push({ slideIndex: i, checks: allPass(), verdict: 'pass', issues: [], rewrite: '' })
+      slides.push({ slideIndex: i, checks: allPass(), verdict: 'pass', issues: [], rewrite: '', disposition: 'rewrite' })
       continue
     }
     const rawChecks = (s.checks ?? {}) as Record<string, unknown>
@@ -233,17 +244,23 @@ export function parseContentCritique(raw: string, slideCount: number): DeckConte
     const issues = Array.isArray(s.issues) ? (s.issues as unknown[]).filter((x): x is string => typeof x === 'string') : []
     const rewrite = typeof s.rewrite === 'string' ? s.rewrite.trim() : ''
     const anyFailed = CONTENT_CHECK_KEYS.some((k) => !checks[k])
-    const claimedFail = s.verdict === 'fail'
+    const failed = anyFailed || s.verdict === 'fail'
+    // Removal is only meaningful for a failing slide, and only with a stated
+    // reason — a bare "remove" is as unactionable as a bare "fail".
+    const disposition: 'rewrite' | 'remove' =
+      failed && s.disposition === 'remove' && issues.length > 0 ? 'remove' : 'rewrite'
 
     // A fail we cannot act on is worse than no finding: it would burn a repair
-    // round with no instruction. Treat it as a pass and say so.
-    if ((anyFailed || claimedFail) && !rewrite) {
+    // round with no instruction. Treat it as a pass and say so. A removal
+    // needs no rewrite text — the action IS the instruction.
+    if (failed && !rewrite && disposition !== 'remove') {
       slides.push({
         slideIndex: i,
         checks: allPass(),
         verdict: 'pass',
         issues: ['unchecked: critic failed this slide without a rewrite directive'],
         rewrite: '',
+        disposition: 'rewrite',
       })
       continue
     }
@@ -251,9 +268,10 @@ export function parseContentCritique(raw: string, slideCount: number): DeckConte
     slides.push({
       slideIndex: i,
       checks,
-      verdict: anyFailed || claimedFail ? 'fail' : 'pass',
+      verdict: failed ? 'fail' : 'pass',
       issues,
-      rewrite: anyFailed || claimedFail ? rewrite : '',
+      rewrite: failed ? rewrite : '',
+      disposition,
     })
   }
 
@@ -348,6 +366,7 @@ const CRITIQUE_SCHEMA = {
           verdict: { type: 'string', enum: ['pass', 'fail'] },
           issues: { type: 'array', items: { type: 'string' } },
           rewrite: { type: 'string' },
+          disposition: { type: 'string', enum: ['rewrite', 'remove'] },
         },
       },
     },

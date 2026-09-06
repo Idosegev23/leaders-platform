@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { isDevMode, DEV_AUTH_USER } from '@/lib/auth/dev-mode'
 import { runPresentationAgent, type AgentInput, type AgentCheckpoint } from '@/lib/gemini/presentation-agent'
+import { normalizeDeckStructure } from '@/lib/qa/deck-structure'
 import { buildWizardContract, type WizardContract } from '@/lib/gemini/wizard-contract'
 import { critiqueSlides } from '@/lib/qa/slide-critic'
 import type { BrandAssets } from '@/lib/brand/types'
@@ -299,13 +300,24 @@ export async function POST(request: NextRequest) {
         }
       : null
 
+    // Normalize order before anything downstream sees the deck. The agent
+    // decides sequence itself and gets it wrong often (cover at slide 8;
+    // influencer slides after the closing) — see src/lib/qa/deck-structure.ts.
+    const { deck: ordered, report: structure } = normalizeDeckStructure({
+      htmlSlides: result.htmlSlides,
+      slideTypes: result.slideTypes,
+    })
+    if (structure.changed) {
+      console.log(`[${requestId}] 🧭 Reordered ${structure.moves.length} slide(s) into the narrative grammar: ${structure.moves.join(', ')}`)
+    }
+
     // Build HtmlPresentation object
     const htmlPresentation: HtmlPresentation = {
       title: brandName,
       brandName,
       designSystem: result.designSystem,
-      htmlSlides: result.htmlSlides,
-      slideTypes: result.slideTypes,
+      htmlSlides: ordered.htmlSlides,
+      slideTypes: ordered.slideTypes,
       metadata: {
         brandName,
         createdAt: new Date().toISOString(),
