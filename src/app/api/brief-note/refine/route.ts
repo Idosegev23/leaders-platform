@@ -17,7 +17,7 @@ import { isDevMode } from '@/lib/auth/dev-mode'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const MODEL = 'gemini-3.5-flash'
+const MODEL = 'gemini-3.7-flash'
 
 export async function POST(request: Request) {
   if (!isDevMode) {

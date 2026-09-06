@@ -14,7 +14,7 @@ const ai = new GoogleGenAI({
 
 // Models setup
 const IMAGE_MODEL = 'gemini-3-pro-image' // The multimodal image generation model
-const FLASH_TEXT_MODEL = 'gemini-3.5-flash' // Primary for text/grounding — fast + cheap
+const FLASH_TEXT_MODEL = 'gemini-3.7-flash' // Primary for text/grounding — fast + cheap
 const PRO_TEXT_MODEL = 'gemini-3.1-pro-preview'   // Fallback when Flash fails
 
 export interface GeneratedImage {

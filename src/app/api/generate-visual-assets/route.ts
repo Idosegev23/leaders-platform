@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
       try {
         const { callAI: callAILogo } = await import('@/lib/ai-provider')
         const urlResult = await callAILogo({
-          model: 'gemini-3.5-flash',
+          model: 'gemini-3.7-flash',
           prompt: `Visit ${siteUrl} and find the logo image URL. Look for:
 1. <img> tags with alt containing "logo" or the brand name
 2. <link rel="icon"> or <link rel="apple-touch-icon">

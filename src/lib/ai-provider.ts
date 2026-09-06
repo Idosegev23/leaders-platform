@@ -38,7 +38,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     capabilities: { googleSearch: true, responseSchema: true, maxOutputTokens: 65536 },
   },
   {
-    id: 'gemini-3.5-flash',
+    id: 'gemini-3.7-flash',
     provider: 'gemini',
     label: 'Gemini 3 Flash (Preview)',
     capabilities: { googleSearch: true, responseSchema: true, maxOutputTokens: 65536 },
@@ -176,7 +176,7 @@ export async function resolveModels(
   agentPrimaryKey: string,
   agentFallbackKey: string,
   agentPrimaryDefault: string = 'gemini-3.1-pro-preview',
-  agentFallbackDefault: string = 'gemini-3.5-flash',
+  agentFallbackDefault: string = 'gemini-3.7-flash',
 ): Promise<string[]> {
   try {
     const { getConfig } = await import('@/lib/config/admin-config')
@@ -272,7 +272,7 @@ async function callWithFallback(
   } catch (err) {
     if (!isRetryableError(err)) throw err
 
-    const fallbackModel = await getConfig('ai_models', 'global.fallback_model', 'gemini-3.5-flash')
+    const fallbackModel = await getConfig('ai_models', 'global.fallback_model', 'gemini-3.7-flash')
     const fallbackProvider = getProviderForModel(fallbackModel)
 
     if (fallbackModel === model) throw err // same model, can't help
@@ -375,7 +375,7 @@ async function callGeminiDirect(options: AICallOptions): Promise<AICallResult> {
  * Use for large system prompts that get reused across many calls.
  *
  * Min tokens to cache:
- * - gemini-3.5-flash: 1,024
+ * - gemini-3.7-flash: 1,024
  * - gemini-3.1-pro-preview: 4,096
  *
  * @returns the cache resource name (pass to callAI as cachedContent)

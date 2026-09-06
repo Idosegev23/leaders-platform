@@ -150,7 +150,7 @@ Issues should be in Hebrew. revisionHint should be a concrete fix instruction (i
   let responseText = ''
   try {
     const visionResult = await callAI({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.7-flash',
       prompt: inspectorPrompt,
       inlineImages: [{ mimeType: 'image/jpeg', data: screenshotBase64 }],
       geminiConfig: {

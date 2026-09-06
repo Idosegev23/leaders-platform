@@ -68,10 +68,18 @@ export async function acquireBrandAssets(input: AcquireInput): Promise<AcquireRe
   const brandName = input.brandName?.trim()
   if (!brandName) return { brandAssets: { updatedAt: new Date().toISOString() }, scraped: null }
 
+  // ── 0. Website — search for it when the payload didn't carry one ──
+  // extractBrandWebsite() only pattern-matches the document, so a deck built
+  // from a kickoff (no website field, no URL in the brief text) arrived here
+  // with `website` undefined. That skipped the scrape AND the logo domain, and
+  // the deck was generated with entirely generic imagery. We know the brand
+  // name, so ask a grounded model instead of giving up.
+  const website = input.website || (await withTimeout(30_000, 'website search', searchBrandWebsite(brandName)))
+
   // ── 1. Scrape the site (best-effort; images/logo/favicon only) ──
   let scraped: ScrapedBrandData | null = null
-  if (input.website) {
-    const url = /^https?:\/\//i.test(input.website) ? input.website : `https://${input.website}`
+  if (website) {
+    const url = /^https?:\/\//i.test(website) ? website : `https://${website}`
     const raw = await withTimeout(45_000, 'scrape', fetchScrape(url))
     if (raw) {
       scraped = {
@@ -110,7 +118,7 @@ export async function acquireBrandAssets(input: AcquireInput): Promise<AcquireRe
       'logo resolver',
       resolveBrandLogo({
         brandName,
-        domain: input.website || undefined,
+        domain: website || undefined,
         scraped: {
           logoUrl: scraped?.logoUrl,
           ogImage: scraped?.ogImage,
@@ -169,6 +177,66 @@ export async function acquireBrandAssets(input: AcquireInput): Promise<AcquireRe
 }
 
 /**
+ * Find a brand's official site by grounded search, for payloads that never
+ * carried one (kickoff-originated decks in particular).
+ *
+ * Returns a bare domain ("seacretspa.com") or null. Two guards keep a
+ * hallucinated domain from poisoning the whole acquisition:
+ *   1. the model must answer with a domain-shaped token, and
+ *   2. that domain must actually answer over HTTPS.
+ * A wrong-but-live domain is still possible; that degrades to off-brand
+ * assets, exactly the behaviour we already have today with no website at all.
+ */
+async function searchBrandWebsite(brandName: string): Promise<string | null> {
+  try {
+    const { callAI } = await import('@/lib/ai-provider')
+    const res = await callAI({
+      model: 'gemini-3.7-flash',
+      prompt: `What is the official website of the brand "${brandName}"?
+Search the web to confirm it. Answer with ONLY the bare domain, lowercase, no scheme and no "www" (example: nike.com).
+If you genuinely cannot find it, answer exactly: UNKNOWN`,
+      useGoogleSearch: true,
+      callerId: 'brand-website-search',
+    })
+
+    const text = (res?.text || '').trim().toLowerCase()
+    if (!text || text.includes('unknown')) return null
+    const match = text.match(/([a-z0-9-]+\.)+[a-z]{2,}/)
+    const domain = match?.[0]?.replace(/^www\./, '')
+    if (!domain) return null
+
+    // Reject the socials/aggregators a search can land on — they are never the
+    // brand's own site and would scrape into completely wrong assets.
+    if (/^(instagram|facebook|tiktok|youtube|linkedin|x|twitter|wikipedia|amazon|google)\./.test(domain)) {
+      console.warn(`[acquireBrandAssets] website search returned a non-brand host (${domain}) — ignoring`)
+      return null
+    }
+
+    const live = await fetch(`https://${domain}`, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12_000),
+    })
+      .then((r) => {
+        if (r.body) void r.body.cancel().catch(() => {})
+        return r.status < 500
+      })
+      .catch(() => false)
+
+    if (!live) {
+      console.warn(`[acquireBrandAssets] website search returned an unreachable domain (${domain}) — ignoring`)
+      return null
+    }
+
+    console.log(`[acquireBrandAssets] website search resolved "${brandName}" → ${domain}`)
+    return domain
+  } catch (e) {
+    console.warn('[acquireBrandAssets] website search failed (continuing without a site):', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+/**
  * Scrape-hostile-site fallback: ask Gemini (URL-context) to read the brand site
  * from Google's infrastructure and return real image URLs. Bypasses datacenter
  * IP blocks that defeat a direct fetch. Returns [] on any failure.
@@ -181,7 +249,7 @@ async function geminiSiteImages(
   try {
     const { callAI } = await import('@/lib/ai-provider')
     const res = await callAI({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.7-flash',
       prompt:
         `Visit ${website} and its product/shop pages. Extract REAL image URLs from the HTML.\n` +
         `Return ONLY minified JSON, no markdown:\n` +

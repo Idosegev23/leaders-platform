@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   if (!template) return NextResponse.json({ error: 'Unknown template' }, { status: 400 })
 
   const fields = body.fields ?? {}
-  const model = await getConfig('ai_models', 'ai_assist.model', 'gemini-3.5-flash')
+  const model = await getConfig('ai_models', 'ai_assist.model', 'gemini-3.7-flash')
 
   try {
     if (body.action === 'improve') {

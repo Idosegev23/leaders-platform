@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
   ].filter(Boolean).join('\n\n')
 
   try {
-    const model = await getConfig('ai_models', 'ai_assist.model', 'gemini-3.5-flash')
+    const model = await getConfig('ai_models', 'ai_assist.model', 'gemini-3.7-flash')
     const result = await callAI({
       model,
       prompt,

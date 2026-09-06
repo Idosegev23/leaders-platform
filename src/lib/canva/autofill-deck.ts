@@ -268,7 +268,7 @@ async function generateNarrativeFields(data: Rec, tag: string): Promise<Record<s
     'canva_autofill.primary_model',
     'canva_autofill.fallback_model',
     'gemini-3.1-pro-preview',
-    'gemini-3.5-flash',
+    'gemini-3.7-flash',
   )
 
   let lastErr: unknown
