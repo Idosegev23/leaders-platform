@@ -345,7 +345,8 @@ export async function POST(req: Request) {
         headers: { 'x-internal-secret': process.env.LEADS_TRIGGER_SECRET || '' },
         timeout: '600s',
         retries: 1,
-        deduplicationId: `kickoff-deck:${formId}`,
+        // QStash rejects a deduplicationId containing ':' — keep the separator a dash.
+        deduplicationId: `kickoff-deck-${formId}`,
       })
       console.log(`${tag} deck pipeline published (${(pub as { messageId?: string }).messageId ?? 'ok'})`)
     } else {

@@ -173,7 +173,8 @@ export async function POST(request: Request) {
       headers: { 'x-internal-secret': secret },
       timeout: '900s',
       retries: 0,
-      deduplicationId: `deck-generate:${documentId}`,
+      // QStash rejects a deduplicationId containing ':' — keep the separator a dash.
+      deduplicationId: `deck-generate-${documentId}`,
     })
     console.log(`${tag} generate-full published (${(pub as { messageId?: string }).messageId ?? 'ok'})`)
   } catch (e) {

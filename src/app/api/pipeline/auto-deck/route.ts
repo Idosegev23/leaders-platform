@@ -141,7 +141,8 @@ export async function POST(request: Request) {
         headers: { 'x-internal-secret': secret },
         timeout: '900s',
         retries: 0,
-        deduplicationId: `deck-generate:${documentId}`,
+        // QStash rejects a deduplicationId containing ':' — keep the separator a dash.
+        deduplicationId: `deck-generate-${documentId}`,
       })
     } else if (isDevMode) {
       fetch(`${base}/api/generate-full`, {

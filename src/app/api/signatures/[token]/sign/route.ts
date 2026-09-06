@@ -11,7 +11,11 @@ import {
   uploadBufferToDriveAsUser,
   uploadBufferToDriveFolder,
 } from '@/lib/google-drive/client'
-import { sendGmailEmail, refreshAccessToken } from '@/lib/gmail'
+import {
+  sendGmailEmail,
+  sendGmailViaServiceAccount,
+  refreshAccessToken,
+} from '@/lib/gmail'
 import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
 import { notifySalesforceQuote } from '@/lib/salesforce/quote'
 import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
@@ -310,29 +314,52 @@ export async function POST(
     cc: ((req.cc_emails as string[] | null) ?? []),
   })
 
-  if (creatorRefresh) {
+  // Shared mailboxes have no OAuth refresh_token because nobody ever logs into
+  // them — a quote created by the Salesforce flow is attributed to info@, so
+  // the confirmation emails used to be dropped here with only a warning. Fall
+  // back to the service account impersonating that mailbox, the same way
+  // management mail and the brief flow already do. Domain-wide delegation can
+  // impersonate any Leaders mailbox, so we keep the real creator as the sender
+  // and only fall back to the shared mailbox for an out-of-domain creator.
+  const creatorEmail = req.created_by_email ?? ''
+  const impersonateAs = creatorEmail.toLowerCase().endsWith('@ldrsgroup.com')
+    ? creatorEmail
+    : (process.env.BRIEF_DEFAULT_SENDER_EMAIL || '').trim()
+  const useServiceAccount = !creatorRefresh && !!impersonateAs
+
+  const sendConfirmation = (to: string) => {
+    const shared = {
+      fromName: req.created_by_name ?? creatorEmail,
+      to,
+      subject: `נחתם: ${req.title} — Leaders`,
+      html: buildSignedConfirmationEmail({
+        signerName: body.signer_name!,
+        title: req.title,
+        driveLink: signedUpload.viewLink,
+        signedAt: formattedSignedAt,
+        isInternal: to !== signerEmailFinal,
+      }),
+    }
+    return creatorRefresh
+      ? sendGmailEmail({ refreshToken: creatorRefresh, from: creatorEmail, ...shared })
+      : sendGmailViaServiceAccount({ from: impersonateAs, ...shared })
+  }
+
+  if (creatorRefresh || useServiceAccount) {
+    if (useServiceAccount) {
+      console.log(`[sign] no refresh_token for ${creatorEmail} — sending via service account as ${impersonateAs}`)
+    }
     await Promise.all(
       recipients.map((to) =>
-        sendGmailEmail({
-          refreshToken: creatorRefresh,
-          from: req.created_by_email,
-          fromName: req.created_by_name ?? req.created_by_email,
-          to,
-          subject: `נחתם: ${req.title} — Leaders`,
-          html: buildSignedConfirmationEmail({
-            signerName: body.signer_name!,
-            title: req.title,
-            driveLink: signedUpload.viewLink,
-            signedAt: formattedSignedAt,
-            isInternal: to !== signerEmailFinal,
-          }),
-        }).catch((e) =>
+        sendConfirmation(to).catch((e) =>
           console.error(`[sign] gmail send failed for ${to}:`, e),
         ),
       ),
     )
   } else {
-    console.warn(`[sign] no refresh_token for ${req.created_by_email} — emails not sent`)
+    console.warn(
+      `[sign] no refresh_token for ${creatorEmail} and BRIEF_DEFAULT_SENDER_EMAIL unset — emails not sent`,
+    )
   }
 
   return NextResponse.json({
