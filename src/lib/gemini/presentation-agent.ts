@@ -259,6 +259,26 @@ const FUNCTION_DECLARATIONS = [
 // ─── Function Handlers ──────────────────────────────────
 
 
+/** Slide types that carry the story and must show imagery; card/data slides may not. */
+const NARRATIVE_SLIDE_TYPES: ReadonlySet<string> = new Set([
+  'cover', 'brief', 'audience', 'insight', 'bigIdea', 'creative', 'closing',
+])
+
+export function isNarrativeSlideType(type: string): boolean {
+  const t = (type || '').trim()
+  return NARRATIVE_SLIDE_TYPES.has(t) || /^pillar(-\d+)?$/i.test(t)
+}
+
+/**
+ * Does this slide still need a hero image? The generation prompt has always
+ * required one on every narrative slide, but nothing checked it: a resumed run
+ * batch-emitted 20 text-only slides — cover and closing included — in 79
+ * seconds, and the provenance gate is happy with an EMPTY imageUrl.
+ */
+export function needsHeroImage(slideType: string, imageUrl: string | null | undefined): boolean {
+  return isNarrativeSlideType(slideType) && !(imageUrl || '').trim()
+}
+
 /**
  * May this URL be used as a slide image?
  *
@@ -395,6 +415,10 @@ export async function runPresentationAgent(
   // Explicitly-offered imagery, checked before the origin test in the
   // provenance gate below.
   const allowedImageUrls = new Set<string>()
+  // Narrative-image gate state: rejections so far per slide index. Bounded so a
+  // broken image generator degrades to a text slide instead of stalling the run.
+  const MAX_IMAGE_REJECTS = 2
+  const imageRejectsBySlide = new Map<number, number>()
 
   // ── Anti-drift anchor ──
   // The brief and the blueprint are injected once, into the opening prompt,
@@ -964,6 +988,30 @@ ${preferredImageryContext}
                 unusedImages: unused,
               }
               break
+            }
+
+            // Narrative-image gate: the prompt requires imagery on every story
+            // slide, but nothing enforced it — a resumed run batch-emitted 20
+            // text-only slides, cover and closing included, in 79 seconds.
+            // Reject through the same retry channel and point at
+            // generate_brand_image; after MAX_IMAGE_REJECTS accept the slide
+            // as-is so image trouble can never stall the deck.
+            if (needsHeroImage(slideType, imgUrl)) {
+              const rejects = imageRejectsBySlide.get(slideIndex) ?? 0
+              if (rejects < MAX_IMAGE_REJECTS) {
+                imageRejectsBySlide.set(slideIndex, rejects + 1)
+                const unused = preferredImageryUrls.filter(u => !imageUse.has(u)).slice(0, 10)
+                console.log(`[PresentationAgent][${requestId}]     ✋ Narrative slide ${slideType} has no image (reject ${rejects + 1}/${MAX_IMAGE_REJECTS})`)
+                result = {
+                  success: false,
+                  error:
+                    'שקף נרטיבי חייב imageUrl. צור תמונה עם generate_brand_image (המוצר האמיתי משולב אוטומטית כרפרנס) ' +
+                    'ואז קרא שוב ל-generate_slide_html לאותו שקף עם ה-URL שהוחזר — או בחר סצנה פנויה מהרשימה.',
+                  unusedImages: unused,
+                }
+                break
+              }
+              console.warn(`[PresentationAgent][${requestId}]     ⚠️ Accepting narrative slide ${slideType} without an image after ${rejects} rejections`)
             }
 
             // Image-variety gate: reject the 3rd use of the same URL and hand

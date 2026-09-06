@@ -43,7 +43,10 @@ export const maxDuration = 800
  * Auth: x-internal-secret (LEADS_TRIGGER_SECRET); dev-mode bypass for local runs.
  */
 
-const MAX_ROUNDS = 4
+/** Each round is its own hop (1–8 min), so more rounds cost time, not risk. A
+ *  cold deck reached 11 → 4 → 3 → 2 in four rounds and stopped on two residual
+ *  redundancies it would likely have cleared with two more. */
+const MAX_ROUNDS = 6
 /** Keep this much for persisting state + publishing the next hop. */
 const RESERVE_MS = 60_000
 /** Critique can take a while on a long deck; repairs get what is left. */
