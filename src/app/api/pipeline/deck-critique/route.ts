@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
-import { critiqueDeckContent, contentGateVerdict, extractSlideText, type ContentGate } from '@/lib/qa/content-critic'
+import { critiqueDeckContent, contentGateVerdict, extractSlideText } from '@/lib/qa/content-critic'
 import { repairSlideInContext } from '@/lib/qa/slide-repair'
 import { isDevMode } from '@/lib/auth/dev-mode'
 
@@ -9,46 +9,39 @@ export const runtime = 'nodejs'
 export const maxDuration = 800
 
 /**
- * Content critique + repair loop — the quality gate of the auto pipeline.
+ * Content critique + repair — the quality gate of the auto pipeline.
  *
- * Sits between generate-full and deck-finalize as its OWN QStash hop, and that
- * placement is the whole point: generate-full already burns ~776s of its 800s
- * ceiling building the deck, and its existing visual critic is explicitly
- * skipped when under 15s remain. There is no room inside it for a critique
- * that also rebuilds slides, so this gets its own budget.
+ * ONE ROUND PER INVOCATION. Each call critiques the deck, and then either
+ * finalizes (passed, or round cap reached) or repairs the failing slides and
+ * publishes the NEXT round as a fresh QStash hop with its own 800s budget.
  *
- * Each round:
- *   1. critique the whole deck's CONTENT in one call (cross-slide checks like
- *      redundancy and narrative arc only work when the critic sees everything)
- *   2. rewrite every failing slide IN FULL-DECK CONTEXT (src/lib/qa/slide-repair),
- *      sequentially, so each repair sees the previous ones
- *   3. re-critique the rebuilt deck
+ * Why per-hop: every earlier run of this gate ended the same way — "time budget
+ * exhausted" — with the deck left in whatever state the last partial round
+ * produced. Twice that final state was unverified, and once it was the WORST
+ * round. Running all rounds inside one function meant the loop never finished
+ * on its own terms. Now each round has the full budget, and the chain has one
+ * structural guarantee: a repair is only ever followed by a critique in the
+ * next hop, so the deck the pipeline hands to Canva is always a deck that was
+ * actually reviewed.
  *
- * Repair deliberately does NOT go through /api/regenerate-slide: that rebuilds
- * a slide in isolation, which makes redundancy, contradictions and Hebrew drift
- * structurally unfixable. Measured across four rounds, failures went 3 → 2 → 3
- * → 4 under isolated repair. The loop now also keeps the best round and
- * restores it if a later round is worse.
+ * State between hops lives on the document (`_contentCritique`): the round
+ * history, and a snapshot of the best VERIFIED slides, restored at the end if
+ * the final verified round is worse. Repair is not monotonic — a rewrite can
+ * satisfy its own note and break something else — measured 3 → 2 → 3 → 4 under
+ * the old isolated repair.
  *
- * The loop runs until the deck passes, and is bounded by BOTH a round cap and
- * a wall-clock reserve. An LLM critic can always find one more nit, so an
- * unbounded "until perfect" loop would run until the function is killed and
- * leave nothing behind. When the cap is hit we stop and record honestly that
- * the deck shipped un-passed, rather than reporting success.
- *
- * The deck is already persisted before this runs, so every failure mode here
- * costs only the critique — never the deck.
+ * The deck is persisted before this runs, so every failure mode here costs
+ * only the critique, never the deck.
  *
  * Auth: x-internal-secret (LEADS_TRIGGER_SECRET); dev-mode bypass for local runs.
  */
 
 const MAX_ROUNDS = 4
-/** Stop starting new work with less than this left, so results can be saved. */
-const RESERVE_MS = 90_000
-/** A 22-slide critique needs real time. Starting one with less than this left
- *  just burns a round on a guaranteed timeout — observed as a phantom round 4
- *  that reported "0 failures" purely because it never ran. */
-const MIN_CRITIQUE_MS = 100_000
+/** Keep this much for persisting state + publishing the next hop. */
+const RESERVE_MS = 60_000
+/** Critique can take a while on a long deck; repairs get what is left. */
+const CRITIQUE_BUDGET_MS = 240_000
+const REPAIR_BUDGET_MS = 120_000
 
 function service() {
   return createServiceClient(
@@ -65,243 +58,72 @@ function appBaseUrl(): string {
   return 'https://leaders-platform.vercel.app'
 }
 
+interface RoundRecord {
+  round: number
+  summary: string
+  repaired: number[]
+  findings: Array<{ slide: number; failed: string[]; issues: string[]; rewrite: string }>
+}
+
+/** Persisted between hops on documents.data._contentCritique. */
+interface CritiqueState {
+  inProgress?: boolean
+  rounds?: RoundRecord[]
+  bestFailures?: number | null
+  /** Snapshot of the best VERIFIED slides — transient, stripped at finalize. */
+  bestSlides?: string[] | null
+  // final fields
+  checkedAt?: string
+  passed?: boolean
+  reviewed?: boolean
+  stoppedBecause?: string
+  restoredBest?: boolean
+  failingSlides?: number[]
+  failedChecks?: Record<string, number>
+  summary?: string
+}
+
 interface DocShape {
   brandName?: string
   _briefText?: string
   _kickoffText?: string
   _htmlPresentation?: { htmlSlides?: string[]; slideTypes?: string[] }
+  _contentCritique?: CritiqueState
 }
 
-async function loadSlides(
-  sb: ReturnType<typeof service>,
-  documentId: string,
-): Promise<{ data: DocShape; slides: string[] } | null> {
+type Sb = ReturnType<typeof service>
+
+async function loadDoc(sb: Sb, documentId: string): Promise<DocShape | null> {
   const { data: doc } = await sb.from('documents').select('data').eq('id', documentId).maybeSingle()
-  if (!doc) return null
-  const data = (doc.data ?? {}) as DocShape
-  return { data, slides: data._htmlPresentation?.htmlSlides ?? [] }
+  return doc ? ((doc.data ?? {}) as DocShape) : null
 }
 
-/** Persist the deck's slides after an in-context repair pass. */
-async function saveSlides(
-  sb: ReturnType<typeof service>,
-  documentId: string,
-  slides: string[],
-): Promise<void> {
-  const { data: fresh } = await sb.from('documents').select('data').eq('id', documentId).maybeSingle()
-  const data = (fresh?.data ?? {}) as Record<string, unknown>
-  const pres = (data._htmlPresentation ?? {}) as Record<string, unknown>
+/** Read-modify-write on documents.data, so slides and state land together. */
+async function patchDoc(sb: Sb, documentId: string, mutate: (data: DocShape) => void): Promise<void> {
+  const fresh = (await loadDoc(sb, documentId)) ?? {}
+  mutate(fresh)
   await sb
     .from('documents')
-    .update({
-      data: { ...data, _htmlPresentation: { ...pres, htmlSlides: slides } },
-      updated_at: new Date().toISOString(),
-    })
+    .update({ data: fresh, updated_at: new Date().toISOString() })
     .eq('id', documentId)
 }
 
-export async function POST(request: Request) {
-  const startTs = Date.now()
-  const secret = process.env.LEADS_TRIGGER_SECRET || ''
-  const authorized = (secret && request.headers.get('x-internal-secret') === secret) || isDevMode
-  if (!authorized) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
+async function publishNextRound(base: string, secret: string, documentId: string, round: number, tag: string) {
+  const { Client: QStashClient } = await import('@upstash/qstash')
+  const q = new QStashClient({ token: process.env.QSTASH_TOKEN! })
+  await q.publishJSON({
+    url: `${base}/api/pipeline/deck-critique`,
+    body: { documentId, round },
+    headers: { 'x-internal-secret': secret },
+    timeout: '900s',
+    retries: 1,
+    // QStash rejects ':' in a deduplicationId — dashes only.
+    deduplicationId: `deck-critique-${documentId}-r${round}`,
+  })
+  console.log(`${tag} round ${round} published as next hop`)
+}
 
-  const body = (await request.json().catch(() => null)) as { documentId?: string } | null
-  if (!body?.documentId) {
-    return NextResponse.json({ ok: false, error: 'documentId required' }, { status: 400 })
-  }
-  const documentId = body.documentId
-  const tag = `[deck-critique:${documentId.slice(0, 8)}]`
-  const sb = service()
-  const base = appBaseUrl()
-
-  const deadline = startTs + (maxDuration * 1000 - RESERVE_MS)
-  const rounds: Array<{
-    round: number
-    summary: string
-    repaired: number[]
-    // The reasons, not just the tally. Without these, improving the engine is
-    // guesswork — the first pass stored only counts and we could not tell WHY
-    // any given slide failed.
-    findings: Array<{ slide: number; failed: string[]; issues: string[]; rewrite: string }>
-  }> = []
-  let gate: ContentGate | null = null
-  let stoppedBecause = 'passed'
-  // The gate deliberately returns passed=true when the critique could not run,
-  // so our own outage never blocks a deck. That must NOT be recorded as a
-  // clean bill of health — "we did not check" is not "it passed".
-  let lastCritiqueUnchecked = false
-  // The loop used to hand back whatever the last round produced, even when an
-  // earlier round was better — measured 3 → 2 → 3 → 4 failures across rounds,
-  // so the best version was discarded. Keep the best and restore it at the end.
-  let best: { failures: number; slides: string[] } | null = null
-
-  try {
-    for (let round = 1; round <= MAX_ROUNDS; round++) {
-      const loaded = await loadSlides(sb, documentId)
-      if (!loaded) return NextResponse.json({ ok: false, error: 'document not found' }, { status: 404 })
-      if (!loaded.slides.length) {
-        return NextResponse.json({ ok: false, error: 'deck has no slides to review' }, { status: 400 })
-      }
-
-      // The kickoff + brief the deck was built from — the critic needs it to
-      // tell a claim that traces to real input from one the model invented.
-      const sourceMaterial = [loaded.data._briefText, loaded.data._kickoffText].filter(Boolean).join('\n\n')
-
-      // Don't start a critique that cannot finish — see MIN_CRITIQUE_MS.
-      const critiqueBudget = deadline - Date.now()
-      if (critiqueBudget < MIN_CRITIQUE_MS) {
-        stoppedBecause = 'time budget exhausted before critique'
-        console.log(`${tag} stopping before round ${round}: only ${Math.round(critiqueBudget / 1000)}s left`)
-        break
-      }
-
-      const critique = await critiqueDeckContent(loaded.slides, {
-        brandName: loaded.data.brandName || '',
-        sourceMaterial,
-        slideTypes: loaded.data._htmlPresentation?.slideTypes ?? [],
-        budgetMs: Math.min(180_000, critiqueBudget),
-      })
-      gate = contentGateVerdict(critique)
-      lastCritiqueUnchecked = critique.unchecked
-      if (!critique.unchecked && (!best || gate.failingIndexes.length < best.failures)) {
-        best = { failures: gate.failingIndexes.length, slides: [...loaded.slides] }
-      }
-      console.log(`${tag} round ${round}: ${gate.summary}`)
-
-      const findings = critique.slides
-        .filter((sl) => sl.verdict === 'fail')
-        .map((sl) => ({
-          slide: sl.slideIndex,
-          failed: Object.entries(sl.checks).filter(([, ok]) => !ok).map(([k]) => k),
-          issues: sl.issues,
-          rewrite: sl.rewrite,
-        }))
-
-      if (gate.passed) {
-        rounds.push({ round, summary: gate.summary, repaired: [], findings })
-        stoppedBecause = critique.unchecked ? 'critique unavailable' : 'passed'
-        break
-      }
-
-      if (round === MAX_ROUNDS) {
-        rounds.push({ round, summary: gate.summary, repaired: [], findings })
-        stoppedBecause = `round cap (${MAX_ROUNDS}) reached without passing`
-        break
-      }
-      if (Date.now() > deadline) {
-        rounds.push({ round, summary: gate.summary, repaired: [], findings })
-        stoppedBecause = 'time budget exhausted'
-        break
-      }
-
-      // ── Repair the failing slides, in full-deck context ──
-      // Sequential on purpose: each repair sees the previous ones, so a
-      // contradiction resolved on one slide stays resolved on the next. That is
-      // the whole reason this replaced isolated regeneration.
-      const targets = critique.slides.filter((s) => s.verdict === 'fail' && s.rewrite)
-      const repaired: number[] = []
-      const working = [...loaded.slides]
-      const types = loaded.data._htmlPresentation?.slideTypes ?? []
-      for (const target of targets) {
-        if (Date.now() > deadline) {
-          stoppedBecause = 'time budget exhausted mid-repair'
-          break
-        }
-        const html = await repairSlideInContext({
-          slideHtml: working[target.slideIndex],
-          slideIndex: target.slideIndex,
-          slideType: types[target.slideIndex],
-          allSlideTexts: working.map(extractSlideText),
-          sourceMaterial,
-          brandName: loaded.data.brandName || '',
-          failedChecks: Object.entries(target.checks).filter(([, ok]) => !ok).map(([k]) => k),
-          issues: target.issues,
-          rewrite: target.rewrite,
-          deckIssues: critique.deck.issues,
-          budgetMs: Math.max(30_000, Math.min(120_000, deadline - Date.now())),
-        })
-        if (html) {
-          working[target.slideIndex] = html
-          repaired.push(target.slideIndex)
-        }
-      }
-      if (repaired.length) await saveSlides(sb, documentId, working)
-      console.log(`${tag} round ${round}: repaired ${repaired.length}/${targets.length} slides`)
-      rounds.push({ round, summary: gate.summary, repaired, findings })
-
-      // Nothing could be repaired — another round would critique the same deck
-      // and reach the same verdict, so stop instead of burning the budget.
-      if (repaired.length === 0) {
-        stoppedBecause = 'no slide could be repaired'
-        break
-      }
-    }
-  } catch (e) {
-    console.error(`${tag} failed:`, e)
-    stoppedBecause = e instanceof Error ? e.message : 'critique loop failed'
-  }
-
-  // ── Restore the best round if the loop ended on a worse one ──
-  // Repair is not monotonic: a rewrite can satisfy its own note and break
-  // something else. Shipping the final round regardless would mean the loop
-  // can leave a deck worse than it found it.
-  let restoredBest = false
-  try {
-    // Restore when the final round scored worse, and ALSO when the final
-    // critique never ran: an unverified deck is not evidence of improvement,
-    // and the last repairs may well have made it worse. Falling back to the
-    // best VERIFIED state is the only honest choice.
-    const finalUnverified = lastCritiqueUnchecked || !gate
-    const finalWorse = !!best && !!gate && !lastCritiqueUnchecked && gate.failingIndexes.length > best.failures
-    if (best && (finalUnverified || finalWorse)) {
-      await saveSlides(sb, documentId, best.slides)
-      restoredBest = true
-      console.log(
-        `${tag} restored best verified round (${best.failures} failures) — ` +
-          (finalUnverified ? 'final critique never ran' : `final had ${gate!.failingIndexes.length}`),
-      )
-    }
-  } catch (e) {
-    console.warn(`${tag} could not restore best round:`, e instanceof Error ? e.message : e)
-  }
-
-  // ── Persist the verdict alongside the deck ──
-  // Only a critique that actually ran can pass a deck.
-  const passed = !!gate?.passed && !lastCritiqueUnchecked
-  try {
-    const { data: fresh } = await sb.from('documents').select('data').eq('id', documentId).maybeSingle()
-    await sb
-      .from('documents')
-      .update({
-        data: {
-          ...((fresh?.data ?? {}) as Record<string, unknown>),
-          _contentCritique: {
-            checkedAt: new Date().toISOString(),
-            passed,
-            reviewed: !lastCritiqueUnchecked,
-            stoppedBecause,
-            restoredBest,
-            bestFailures: best?.failures ?? null,
-            rounds,
-            failingSlides: gate?.failingIndexes ?? [],
-            failedChecks: gate?.failedChecks ?? {},
-            summary: gate?.summary ?? 'no critique ran',
-          },
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', documentId)
-  } catch (e) {
-    console.warn(`${tag} could not persist critique:`, e instanceof Error ? e.message : e)
-  }
-
-  // ── Hand off to Canva ──
-  // The deck ships either way: a deck held hostage by a critic that can always
-  // find one more nit helps nobody. The verdict rides along on the document so
-  // the team sees exactly what is still weak.
+async function finalize(base: string, secret: string, documentId: string, tag: string) {
   try {
     if (process.env.QSTASH_TOKEN) {
       const { Client: QStashClient } = await import('@upstash/qstash')
@@ -321,15 +143,209 @@ export async function POST(request: Request) {
   } catch (e) {
     console.warn(`${tag} finalize handoff failed (deck is saved):`, e instanceof Error ? e.message : e)
   }
+}
 
-  console.log(`${tag} done — passed=${passed} (${stoppedBecause}) after ${rounds.length} round(s), ${Math.round((Date.now() - startTs) / 1000)}s`)
-  return NextResponse.json({
-    ok: true,
-    documentId,
-    passed,
-    restoredBest,
-    stoppedBecause,
-    rounds,
-    summary: gate?.summary ?? null,
+export async function POST(request: Request) {
+  const startTs = Date.now()
+  const secret = process.env.LEADS_TRIGGER_SECRET || ''
+  const authorized = (secret && request.headers.get('x-internal-secret') === secret) || isDevMode
+  if (!authorized) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const body = (await request.json().catch(() => null)) as { documentId?: string; round?: number } | null
+  if (!body?.documentId) {
+    return NextResponse.json({ ok: false, error: 'documentId required' }, { status: 400 })
+  }
+  const documentId = body.documentId
+  const round = Math.max(1, Math.min(MAX_ROUNDS, Number(body.round) || 1))
+  const tag = `[deck-critique:${documentId.slice(0, 8)}:r${round}]`
+  const sb = service()
+  const base = appBaseUrl()
+  const deadline = startTs + maxDuration * 1000 - RESERVE_MS
+
+  const doc = await loadDoc(sb, documentId)
+  if (!doc) return NextResponse.json({ ok: false, error: 'document not found' }, { status: 404 })
+  const slides = doc._htmlPresentation?.htmlSlides ?? []
+  if (!slides.length) return NextResponse.json({ ok: false, error: 'deck has no slides to review' }, { status: 400 })
+
+  // Round 1 starts fresh; later rounds continue the state the previous hop left.
+  const prior: CritiqueState = round === 1 ? {} : (doc._contentCritique ?? {})
+  const rounds: RoundRecord[] = [...(prior.rounds ?? [])]
+  let best: { failures: number; slides: string[] } | null =
+    prior.bestSlides && typeof prior.bestFailures === 'number'
+      ? { failures: prior.bestFailures, slides: prior.bestSlides }
+      : null
+
+  // ── 1. Critique ──
+  const sourceMaterial = [doc._briefText, doc._kickoffText].filter(Boolean).join('\n\n')
+  const critique = await critiqueDeckContent(slides, {
+    brandName: doc.brandName || '',
+    sourceMaterial,
+    slideTypes: doc._htmlPresentation?.slideTypes ?? [],
+    budgetMs: Math.min(CRITIQUE_BUDGET_MS, deadline - Date.now()),
   })
+  const gate = contentGateVerdict(critique)
+  console.log(`${tag} ${gate.summary}`)
+
+  if (!critique.unchecked && (!best || gate.failingIndexes.length < best.failures)) {
+    best = { failures: gate.failingIndexes.length, slides: [...slides] }
+  }
+
+  const findings = critique.slides
+    .filter((sl) => sl.verdict === 'fail')
+    .map((sl) => ({
+      slide: sl.slideIndex,
+      failed: Object.entries(sl.checks).filter(([, ok]) => !ok).map(([k]) => k),
+      issues: sl.issues,
+      rewrite: sl.rewrite,
+    }))
+
+  // ── 2. Decide: finish here, or repair and hand to the next hop ──
+  const verifiedPass = gate.passed && !critique.unchecked
+  let stoppedBecause: string | null = null
+  if (verifiedPass) stoppedBecause = 'passed'
+  else if (critique.unchecked) stoppedBecause = `critique unavailable (${critique.note ?? 'unknown'})`
+  else if (round >= MAX_ROUNDS) stoppedBecause = `round cap (${MAX_ROUNDS}) reached without passing`
+
+  if (stoppedBecause) {
+    rounds.push({ round, summary: gate.summary, repaired: [], findings })
+
+    // The deck we hand over must be the best VERIFIED one. If this final
+    // critique never ran, the current state is unverified and the best known
+    // state wins; if it ran and scored worse than an earlier round, likewise.
+    let restoredBest = false
+    const finalWorse = !!best && !critique.unchecked && gate.failingIndexes.length > best.failures
+    if (best && (critique.unchecked || finalWorse)) {
+      restoredBest = true
+      console.log(`${tag} restoring best verified round (${best.failures} failures)`)
+    }
+    const bestSlides = best?.slides
+
+    await patchDoc(sb, documentId, (d) => {
+      if (restoredBest && bestSlides) {
+        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: bestSlides }
+      }
+      d._contentCritique = {
+        checkedAt: new Date().toISOString(),
+        passed: verifiedPass,
+        reviewed: !critique.unchecked,
+        stoppedBecause: stoppedBecause!,
+        restoredBest,
+        bestFailures: best?.failures ?? null,
+        rounds,
+        failingSlides: restoredBest ? [] : gate.failingIndexes,
+        failedChecks: restoredBest ? {} : gate.failedChecks,
+        summary: gate.summary,
+        inProgress: false,
+        bestSlides: null,
+      }
+    })
+
+    await finalize(base, secret, documentId, tag)
+    console.log(`${tag} done — passed=${verifiedPass} (${stoppedBecause}) in ${Math.round((Date.now() - startTs) / 1000)}s`)
+    return NextResponse.json({ ok: true, documentId, round, passed: verifiedPass, restoredBest, stoppedBecause, summary: gate.summary })
+  }
+
+  // ── 3. Repair in full-deck context, sequentially ──
+  // Each repair sees the previous ones, so a contradiction resolved on one
+  // slide stays resolved on the next. Anything not repaired within budget is
+  // simply picked up by the next round's critique.
+  const targets = critique.slides.filter((s) => s.verdict === 'fail' && s.rewrite)
+  const working = [...slides]
+  const types = doc._htmlPresentation?.slideTypes ?? []
+  const repaired: number[] = []
+  for (const target of targets) {
+    const left = deadline - Date.now()
+    if (left < 30_000) {
+      console.log(`${tag} repair budget exhausted after ${repaired.length}/${targets.length} — next round continues`)
+      break
+    }
+    const html = await repairSlideInContext({
+      slideHtml: working[target.slideIndex],
+      slideIndex: target.slideIndex,
+      slideType: types[target.slideIndex],
+      allSlideTexts: working.map(extractSlideText),
+      sourceMaterial,
+      brandName: doc.brandName || '',
+      failedChecks: Object.entries(target.checks).filter(([, ok]) => !ok).map(([k]) => k),
+      issues: target.issues,
+      rewrite: target.rewrite,
+      deckIssues: critique.deck.issues,
+      budgetMs: Math.min(REPAIR_BUDGET_MS, left),
+    })
+    if (html) {
+      working[target.slideIndex] = html
+      repaired.push(target.slideIndex)
+    }
+  }
+  console.log(`${tag} repaired ${repaired.length}/${targets.length} slides`)
+  rounds.push({ round, summary: gate.summary, repaired, findings })
+
+  // Nothing could be repaired: the next round would critique the same deck and
+  // reach the same verdict. Stop on this verified state instead.
+  if (repaired.length === 0) {
+    const bestSlides = best?.slides
+    const restoredBest = !!best && gate.failingIndexes.length > best.failures
+    await patchDoc(sb, documentId, (d) => {
+      if (restoredBest && bestSlides) {
+        d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: bestSlides }
+      }
+      d._contentCritique = {
+        checkedAt: new Date().toISOString(),
+        passed: false,
+        reviewed: true,
+        stoppedBecause: 'no slide could be repaired',
+        restoredBest,
+        bestFailures: best?.failures ?? null,
+        rounds,
+        failingSlides: restoredBest ? [] : gate.failingIndexes,
+        failedChecks: restoredBest ? {} : gate.failedChecks,
+        summary: gate.summary,
+        inProgress: false,
+        bestSlides: null,
+      }
+    })
+    await finalize(base, secret, documentId, tag)
+    return NextResponse.json({ ok: true, documentId, round, passed: false, stoppedBecause: 'no slide could be repaired' })
+  }
+
+  // ── 4. Persist repaired slides + in-progress state, then hand off ──
+  const bestSnapshot = best
+  await patchDoc(sb, documentId, (d) => {
+    d._htmlPresentation = { ...(d._htmlPresentation ?? {}), htmlSlides: working }
+    d._contentCritique = {
+      inProgress: true,
+      rounds,
+      bestFailures: bestSnapshot?.failures ?? null,
+      bestSlides: bestSnapshot?.slides ?? null,
+      summary: gate.summary,
+      checkedAt: new Date().toISOString(),
+      passed: false,
+      reviewed: true,
+      stoppedBecause: `round ${round} repaired, awaiting round ${round + 1}`,
+    }
+  })
+
+  try {
+    await publishNextRound(base, secret, documentId, round + 1, tag)
+  } catch (e) {
+    // If the next hop cannot be scheduled, do not leave the deck in limbo:
+    // the current slides are the last repaired state, and the best verified
+    // snapshot is recorded — hand it to Canva with the truth attached.
+    console.error(`${tag} could not publish next round — finalizing as-is:`, e instanceof Error ? e.message : e)
+    await patchDoc(sb, documentId, (d) => {
+      d._contentCritique = {
+        ...(d._contentCritique ?? {}),
+        inProgress: false,
+        bestSlides: null,
+        reviewed: false,
+        stoppedBecause: 'next round could not be scheduled — last repair unverified',
+      }
+    })
+    await finalize(base, secret, documentId, tag)
+  }
+
+  console.log(`${tag} done in ${Math.round((Date.now() - startTs) / 1000)}s — ${repaired.length} repaired, round ${round + 1} queued`)
+  return NextResponse.json({ ok: true, documentId, round, repaired, nextRound: round + 1, summary: gate.summary })
 }
