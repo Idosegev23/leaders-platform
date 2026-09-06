@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
-import { critiqueDeckContent, contentGateVerdict, type ContentGate } from '@/lib/qa/content-critic'
+import { critiqueDeckContent, contentGateVerdict, extractSlideText, type ContentGate } from '@/lib/qa/content-critic'
+import { repairSlideInContext } from '@/lib/qa/slide-repair'
 import { isDevMode } from '@/lib/auth/dev-mode'
 
 export const dynamic = 'force-dynamic'
@@ -19,9 +20,15 @@ export const maxDuration = 800
  * Each round:
  *   1. critique the whole deck's CONTENT in one call (cross-slide checks like
  *      redundancy and narrative arc only work when the critic sees everything)
- *   2. rebuild every failing slide via /api/regenerate-slide, feeding that
- *      slide's `rewrite` directive in as the instruction
+ *   2. rewrite every failing slide IN FULL-DECK CONTEXT (src/lib/qa/slide-repair),
+ *      sequentially, so each repair sees the previous ones
  *   3. re-critique the rebuilt deck
+ *
+ * Repair deliberately does NOT go through /api/regenerate-slide: that rebuilds
+ * a slide in isolation, which makes redundancy, contradictions and Hebrew drift
+ * structurally unfixable. Measured across four rounds, failures went 3 → 2 → 3
+ * → 4 under isolated repair. The loop now also keeps the best round and
+ * restores it if a later round is worse.
  *
  * The loop runs until the deck passes, and is bounded by BOTH a round cap and
  * a wall-clock reserve. An LLM critic can always find one more nit, so an
@@ -38,8 +45,6 @@ export const maxDuration = 800
 const MAX_ROUNDS = 4
 /** Stop starting new work with less than this left, so results can be saved. */
 const RESERVE_MS = 90_000
-/** Parallel slide rebuilds — enough to be quick, low enough to avoid 429s. */
-const REPAIR_CONCURRENCY = 3
 
 function service() {
   return createServiceClient(
@@ -73,30 +78,22 @@ async function loadSlides(
   return { data, slides: data._htmlPresentation?.htmlSlides ?? [] }
 }
 
-/** Rebuild one slide with the critic's directive; resolves false on failure. */
-async function repairSlide(
-  base: string,
-  secret: string,
+/** Persist the deck's slides after an in-context repair pass. */
+async function saveSlides(
+  sb: ReturnType<typeof service>,
   documentId: string,
-  slideIndex: number,
-  instruction: string,
-  tag: string,
-): Promise<boolean> {
-  try {
-    const res = await fetch(`${base}/api/regenerate-slide`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-internal-secret': secret },
-      body: JSON.stringify({ documentId, slideIndex, instruction }),
+  slides: string[],
+): Promise<void> {
+  const { data: fresh } = await sb.from('documents').select('data').eq('id', documentId).maybeSingle()
+  const data = (fresh?.data ?? {}) as Record<string, unknown>
+  const pres = (data._htmlPresentation ?? {}) as Record<string, unknown>
+  await sb
+    .from('documents')
+    .update({
+      data: { ...data, _htmlPresentation: { ...pres, htmlSlides: slides } },
+      updated_at: new Date().toISOString(),
     })
-    if (!res.ok) {
-      console.warn(`${tag} slide ${slideIndex} repair → ${res.status}`)
-      return false
-    }
-    return true
-  } catch (e) {
-    console.warn(`${tag} slide ${slideIndex} repair threw:`, e instanceof Error ? e.message : e)
-    return false
-  }
+    .eq('id', documentId)
 }
 
 export async function POST(request: Request) {
@@ -132,6 +129,10 @@ export async function POST(request: Request) {
   // so our own outage never blocks a deck. That must NOT be recorded as a
   // clean bill of health — "we did not check" is not "it passed".
   let lastCritiqueUnchecked = false
+  // The loop used to hand back whatever the last round produced, even when an
+  // earlier round was better — measured 3 → 2 → 3 → 4 failures across rounds,
+  // so the best version was discarded. Keep the best and restore it at the end.
+  let best: { failures: number; slides: string[] } | null = null
 
   try {
     for (let round = 1; round <= MAX_ROUNDS; round++) {
@@ -153,6 +154,9 @@ export async function POST(request: Request) {
       })
       gate = contentGateVerdict(critique)
       lastCritiqueUnchecked = critique.unchecked
+      if (!critique.unchecked && (!best || gate.failingIndexes.length < best.failures)) {
+        best = { failures: gate.failingIndexes.length, slides: [...loaded.slides] }
+      }
       console.log(`${tag} round ${round}: ${gate.summary}`)
 
       const findings = critique.slides
@@ -181,29 +185,38 @@ export async function POST(request: Request) {
         break
       }
 
-      // ── Repair the failing slides ──
+      // ── Repair the failing slides, in full-deck context ──
+      // Sequential on purpose: each repair sees the previous ones, so a
+      // contradiction resolved on one slide stays resolved on the next. That is
+      // the whole reason this replaced isolated regeneration.
       const targets = critique.slides.filter((s) => s.verdict === 'fail' && s.rewrite)
       const repaired: number[] = []
-      for (let i = 0; i < targets.length; i += REPAIR_CONCURRENCY) {
+      const working = [...loaded.slides]
+      const types = loaded.data._htmlPresentation?.slideTypes ?? []
+      for (const target of targets) {
         if (Date.now() > deadline) {
           stoppedBecause = 'time budget exhausted mid-repair'
           break
         }
-        const batch = targets.slice(i, i + REPAIR_CONCURRENCY)
-        const results = await Promise.all(
-          batch.map((s) =>
-            repairSlide(
-              base,
-              secret,
-              documentId,
-              s.slideIndex,
-              `תקן את התוכן של השקף. הביקורת: ${s.issues.join(' | ')}. הנחיה מחייבת: ${s.rewrite}`,
-              tag,
-            ),
-          ),
-        )
-        results.forEach((ok, j) => { if (ok) repaired.push(batch[j].slideIndex) })
+        const html = await repairSlideInContext({
+          slideHtml: working[target.slideIndex],
+          slideIndex: target.slideIndex,
+          slideType: types[target.slideIndex],
+          allSlideTexts: working.map(extractSlideText),
+          sourceMaterial,
+          brandName: loaded.data.brandName || '',
+          failedChecks: Object.entries(target.checks).filter(([, ok]) => !ok).map(([k]) => k),
+          issues: target.issues,
+          rewrite: target.rewrite,
+          deckIssues: critique.deck.issues,
+          budgetMs: Math.max(30_000, Math.min(120_000, deadline - Date.now())),
+        })
+        if (html) {
+          working[target.slideIndex] = html
+          repaired.push(target.slideIndex)
+        }
       }
+      if (repaired.length) await saveSlides(sb, documentId, working)
       console.log(`${tag} round ${round}: repaired ${repaired.length}/${targets.length} slides`)
       rounds.push({ round, summary: gate.summary, repaired, findings })
 
@@ -217,6 +230,21 @@ export async function POST(request: Request) {
   } catch (e) {
     console.error(`${tag} failed:`, e)
     stoppedBecause = e instanceof Error ? e.message : 'critique loop failed'
+  }
+
+  // ── Restore the best round if the loop ended on a worse one ──
+  // Repair is not monotonic: a rewrite can satisfy its own note and break
+  // something else. Shipping the final round regardless would mean the loop
+  // can leave a deck worse than it found it.
+  let restoredBest = false
+  try {
+    if (best && gate && !lastCritiqueUnchecked && gate.failingIndexes.length > best.failures) {
+      await saveSlides(sb, documentId, best.slides)
+      restoredBest = true
+      console.log(`${tag} restored best round (${best.failures} failures) over final (${gate.failingIndexes.length})`)
+    }
+  } catch (e) {
+    console.warn(`${tag} could not restore best round:`, e instanceof Error ? e.message : e)
   }
 
   // ── Persist the verdict alongside the deck ──
@@ -234,6 +262,8 @@ export async function POST(request: Request) {
             passed,
             reviewed: !lastCritiqueUnchecked,
             stoppedBecause,
+            restoredBest,
+            bestFailures: best?.failures ?? null,
             rounds,
             failingSlides: gate?.failingIndexes ?? [],
             failedChecks: gate?.failedChecks ?? {},
@@ -276,6 +306,7 @@ export async function POST(request: Request) {
     ok: true,
     documentId,
     passed,
+    restoredBest,
     stoppedBecause,
     rounds,
     summary: gate?.summary ?? null,
