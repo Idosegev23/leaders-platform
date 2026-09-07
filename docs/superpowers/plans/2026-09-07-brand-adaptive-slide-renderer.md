@@ -58,14 +58,14 @@ Modified:
 - Test: `src/lib/design/color.test.ts`
 
 **Interfaces:**
-- Produces: `hexToRgb(hex): Rgb | null`, `rgbToHex(rgb): string`, `luminance(hex): number`, `contrast(a, b): number`, `mix(color, into, t): string`, `ensureContrast(color, bg, ratio): string`, `saturation(hex): number`, `alpha(hex, a): string`, `isChromatic(hex): boolean`. All take 6-digit hex (with or without `#`); invalid input → `hexToRgb` returns `null`, the others treat it as `#808080`.
+- Produces: `hexToRgb(hex): Rgb | null`, `rgbToHex(rgb): string`, `luminance(hex): number`, `contrast(a, b): number`, `mix(color, into, t): string`, `ensureContrast(color, bg, ratio): string`, `saturation(hex): number`, `luma(hex): number` (perceived lightness 0–1 from gamma-encoded channels — NOT the WCAG linear luminance; used for the chromatic range and the dark-mood test), `alpha(hex, a): string`, `isChromatic(hex): boolean`. All take 6-digit hex (with or without `#`); invalid input → `hexToRgb` returns `null`, the others treat it as `#808080`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/design/color.test.ts
 import { describe, it, expect } from 'vitest'
-import { hexToRgb, rgbToHex, luminance, contrast, mix, ensureContrast, saturation, alpha, isChromatic } from './color'
+import { hexToRgb, rgbToHex, luminance, luma, contrast, mix, ensureContrast, saturation, alpha, isChromatic } from './color'
 
 describe('color', () => {
   it('parses and formats hex', () => {
@@ -92,7 +92,9 @@ describe('color', () => {
     expect(saturation('#181818')).toBe(0)
     expect(saturation('#d8a456')).toBeCloseTo(0.6, 1)
     expect(isChromatic('#181818')).toBe(false)   // SEACRET logo: achromatic
-    expect(isChromatic('#604830')).toBe(true)    // SEACRET hero tan
+    expect(isChromatic('#604830')).toBe(true)    // SEACRET hero tan — linear luminance is only 0.07, luma is 0.30
+    expect(luma('#604830')).toBeCloseTo(0.3, 1)
+    expect(luma('#666666')).toBeCloseTo(0.4, 1)
     expect(isChromatic('#fffbe6')).toBe(false)   // too light
   })
   it('formats rgba', () => {
@@ -176,9 +178,16 @@ export function alpha(hex: string, a: number): string {
   return `rgba(${r},${g},${b},${a})`
 }
 
+/** Perceived lightness 0–1 straight from the gamma-encoded channels. Brand colors are judged on this, not on
+ *  WCAG linear luminance: a warm brown like #604830 is 0.07 linear but plainly mid-dark to the eye (0.30). */
+export function luma(hex: string): number {
+  const [r, g, b] = rgb(hex)
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+}
+
 /** A color that can carry a brand: saturated enough and neither near-white nor near-black. */
 export function isChromatic(hex: string): boolean {
-  const l = luminance(hex)
+  const l = luma(hex)
   return saturation(hex) >= 0.25 && l > 0.12 && l < 0.92
 }
 ```
@@ -497,7 +506,7 @@ Expected: FAIL — cannot resolve `./brand-tokens`.
  * scraped palette was all grays, the logo a single #181818, and only the hero
  * photos carried the brand's warm Dead Sea tans.
  */
-import { alpha, contrast, ensureContrast, hexToRgb, isChromatic, luminance, mix, saturation } from './color'
+import { alpha, contrast, ensureContrast, hexToRgb, isChromatic, luma, mix, saturation } from './color'
 
 export type Archetype = 'editorial-luxury' | 'cinematic-dark' | 'bold-flat' | 'soft-warm'
 export type Category = 'editorial' | 'bold' | 'soft' | 'cinematic' | 'unknown'
@@ -597,7 +606,8 @@ export function buildTokens(signals: TokenSignals): DeckTokens {
     provenance.push(`accent ← default for category "${category}" ${accent}${signals.logoAchromatic ? ' (logo achromatic)' : ''}`)
   }
 
-  const dark = signals.siteColors.length > 0 && luminance(signals.siteColors[0]) < 0.25
+  // Perceived lightness, not linear luminance: #666666 is 0.13 linear (would read as dark) but 0.40 to the eye.
+  const dark = signals.siteColors.length > 0 && luma(signals.siteColors[0]) < 0.25
   const archetype = pickArchetype({ category, dark, accentSaturation: saturation(accent), brandName: signals.brandName })
   provenance.push(`archetype ← category "${category}", mood ${dark ? 'dark' : 'light'} → ${archetype}`)
 
@@ -1288,6 +1298,7 @@ import type { LayoutFn } from './types'
 import { slideDocument } from './document'
 import { GRID, esc, eyebrow, img, rule, scrimLayer } from './primitives'
 
+const HEBREW = /[\u0590-\u05FF]/
 const W8 = GRID.span(8)   // 1112
 const W10 = GRID.span(10) // 1396
 
@@ -1312,7 +1323,7 @@ export const coverSplit: LayoutFn = (c, t, ctx) => {
   const size = c.title.length > 26 ? 88 : 104
   return slideDocument(t, `
 <div style="position:absolute;top:0;bottom:0;left:0;width:${GRID.span(6) + GRID.margin}px;background:${t.accent};"></div>
-<div dir="ltr" style="position:absolute;left:${GRID.margin}px;bottom:${GRID.top}px;font-family:${t.fonts.numeral};font-size:104px;font-weight:900;color:rgba(255,255,255,0.18);line-height:1;">${esc(ctx.brandName.toUpperCase())}</div>
+<div dir="ltr" style="position:absolute;left:${GRID.margin}px;bottom:${GRID.top}px;font-family:${HEBREW.test(ctx.brandName) ? t.fonts.display : t.fonts.numeral};font-size:104px;font-weight:900;color:rgba(255,255,255,0.18);line-height:1;">${esc(ctx.brandName.toUpperCase())}</div>
 <div style="position:absolute;right:${GRID.margin}px;top:360px;width:${GRID.span(5)}px;">
   ${rule(t, 6, '160px', t.accent)}
   <h1 style="font-size:${size}px;line-height:1.06;margin-top:36px;">${esc(c.title)}</h1>
@@ -1324,11 +1335,12 @@ export const coverSplit: LayoutFn = (c, t, ctx) => {
 export const closing: LayoutFn = (c, t, ctx) => {
   const dark = t.archetype === 'cinematic-dark'
   const panelBg = c.imageUrl ? 'transparent' : dark ? t.surface : t.ink
+  // No overflow:hidden on the panel — that would be the wrapper-clips-img pattern Canva drops. The img carries the radius.
   const inner = c.imageUrl
-    ? `${img(c.imageUrl, { width: '1824px', height: '984px', radius: 40, extra: 'position:absolute;inset:0;' })}${scrimLayer(t, 'to left')}`
+    ? `${img(c.imageUrl, { width: '1824px', height: '984px', radius: 40, extra: 'position:absolute;inset:0;' })}<div style="position:absolute;inset:0;border-radius:40px;background:${t.scrim};"></div>`
     : ''
   return slideDocument(t, `
-<div style="position:absolute;inset:48px;border-radius:40px;background:${panelBg};overflow:hidden;">${inner}</div>
+<div style="position:absolute;inset:48px;border-radius:40px;background:${panelBg};">${inner}</div>
 <div style="position:absolute;right:${GRID.margin + 48}px;bottom:${GRID.top + 48}px;width:${W8}px;color:#ffffff;">
   ${rule(t, 6, '200px', t.accent)}
   <h1 style="font-size:88px;line-height:1.06;margin-top:36px;color:#ffffff;">${esc(c.title)}</h1>
@@ -1497,14 +1509,14 @@ ${cards.map((k, i) => card(`
   ${numeral(String(i + 1).padStart(2, '0'), t, 40)}
   <h3 style="font-size:40px;line-height:1.15;margin-top:20px;">${esc(k.title)}</h3>
   <div style="margin:20px 0;">${rule(t, 3, '64px', t.accent)}</div>
-  <p style="font-size:26px;line-height:1.45;color:${t.muted};">${esc(k.body)}</p>`, t, { width: `${GRID.span(4)}px`, height: '520px', padding: 48 })).join('\n')}
+  <p style="font-size:28px;line-height:1.45;color:${t.muted};">${esc(k.body)}</p>`, t, { width: `${GRID.span(4)}px`, height: '520px', padding: 48 })).join('\n')}
 </div>`)
 }
 
 export const bento: LayoutFn = (c, t, ctx) => {
   const small = (k: { title: string; body: string }, w: number, h: number) => card(`
   <h3 style="font-size:36px;line-height:1.15;">${esc(k.title)}</h3>
-  <p style="font-size:24px;line-height:1.45;margin-top:16px;color:${t.muted};">${esc(k.body)}</p>`, t, { width: `${w}px`, height: `${h}px`, fill: true, padding: 40 })
+  <p style="font-size:28px;line-height:1.45;margin-top:16px;color:${t.muted};">${esc(k.body)}</p>`, t, { width: `${w}px`, height: `${h}px`, fill: true, padding: 40 })
   const cards = c.cards.length ? c.cards : [{ title: c.title, body: c.body }]
   // With an image: the image is the wide cell, cards[0] beside it, cards[1..3] below.
   // Without: cards[0] is the wide cell, cards[1] beside it, cards[2..4] below.
@@ -1530,7 +1542,7 @@ ${eyebrow(c.slideType, ctx.slideIndex, t)}
 ${heading(c, t, GRID.span(5))}
 <div style="position:absolute;right:${GRID.margin}px;top:320px;width:${GRID.span(9)}px;">
 ${items.map((b, i) => `  <div style="display:flex;align-items:center;gap:${GRID.gutter}px;height:${rowH}px;border-bottom:2px solid ${t.rule};">
-    <div style="width:${GRID.col}px;flex:0 0 auto;">${numeral(String(i + 1).padStart(2, '0'), t, 56)}</div>
+    <div style="width:${GRID.col}px;flex:0 0 auto;">${numeral(String(i + 1).padStart(2, '0'), t, 64)}</div>
     <div style="font-size:36px;font-weight:500;line-height:1.2;">${esc(b)}</div>
   </div>`).join('\n')}
 </div>`)
@@ -1646,7 +1658,7 @@ export const comparison: LayoutFn = (c, t, ctx) => {
   const cols = cmp.columns.slice(0, 4)
   const hl = cmp.highlightColumn
   const cell = (txt: string, i: number, header: boolean, bold = header) =>
-    `<div style="display:flex;align-items:center;height:${header ? 96 : 80}px;padding:0 24px;font-size:${header ? 32 : 24}px;font-weight:${bold ? 700 : 400};border-bottom:2px solid ${t.rule};${hl === i ? `background:${t.surface};` : ''}${header && hl === i ? `border-top:3px solid ${t.accent};` : ''}">${esc(txt)}</div>`
+    `<div style="display:flex;align-items:center;height:${header ? 96 : 80}px;padding:0 24px;font-size:${header ? 32 : 28}px;font-weight:${bold ? 700 : 400};border-bottom:2px solid ${t.rule};${hl === i ? `background:${t.surface};` : ''}${header && hl === i ? `border-top:3px solid ${t.accent};` : ''}">${esc(txt)}</div>`
   return slideDocument(t, `
 ${eyebrow(c.slideType, ctx.slideIndex, t)}
 ${heading(c, t)}
@@ -1683,7 +1695,7 @@ ${people.map((p) => card(`
   ${p.imageUrl ? img(p.imageUrl, { width: `${photo}px`, height: `${photo}px`, radius: '50%', ring: `6px solid ${t.surface}`, position: 'center 20%' }) : `<div style="width:${photo}px;height:${photo}px;border-radius:50%;background:${t.surface};"></div>`}
   <h3 style="font-size:32px;line-height:1.15;margin-top:24px;">${esc(p.name)}</h3>
   ${p.handle ? `<div dir="ltr" style="font-size:22px;color:${t.muted};margin-top:6px;text-align:right;">${esc(p.handle)}</div>` : ''}
-  ${p.metric ? `<div style="margin-top:24px;">${numeral(p.metric, t, 48)}</div><div style="font-size:22px;color:${t.muted};margin-top:6px;">${esc(p.metricLabel ?? '')}</div>` : ''}
+  ${p.metric ? `<div style="margin-top:24px;">${numeral(p.metric, t, 64)}</div><div style="font-size:22px;color:${t.muted};margin-top:6px;">${esc(p.metricLabel ?? '')}</div>` : ''}
   ${p.tags?.length ? `<div style="margin-top:20px;">${p.tags.map((tag) => pill(tag, t)).join('')}</div>` : ''}`, t, { width: `${w}px`, height: '640px', padding: 40 })).join('\n')}
 </div>`)
 }
@@ -1704,7 +1716,7 @@ ${c.body ? `<p style="position:absolute;right:${GRID.margin}px;top:952px;font-si
 - [ ] **Step 3: Run test to verify it passes**
 
 Run: `npx vitest run src/lib/design/slide-layouts/layouts.test.ts`
-Expected: PASS (17 layouts × 4 + 1). `people-grid` is the one to watch for `too-many-sizes`: title 64, name 32, handle/label/pill 22, metric 48, eyebrow 22 — four sizes.
+Expected: PASS (17 layouts × 4 + 1). Every layout stays within four sizes even with a subtitle (28) present: secondary text is 28 everywhere, index numerals and people metrics share the title's 64. `people-grid`: title 64, subtitle 28, name 32, handle/label/pill/eyebrow 22, metric 64.
 
 - [ ] **Step 4: Type-check and commit**
 
@@ -2025,8 +2037,8 @@ export function slideToolDeclaration(opts: { designColors: boolean }): FunctionD
       'ערכים אמיתיים בלבד — אין @@/TBD/placeholder/שם או handle חלקי. ' +
       'imageUrl של מוצר = המוצר האמיתי של הלקוח. שקף תוכן חייב לפחות רכיב תוכן אחד. ' +
       'צורת התוכן קובעת את הפריסה: סטט אחד = מספר ענק, 3 כרטיסים = עמודי תווך, people = רשת משפיענים, steps = ציר זמן.',
-    parameters: obj(properties, required) as FunctionDeclaration['parameters'],
-  }
+    parameters: obj(properties, required),
+  } as unknown as FunctionDeclaration
 }
 
 /** Every image URL a slide would show — the provenance gate must see all of them. */
