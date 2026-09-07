@@ -21,6 +21,8 @@ export const LDRS = {
   SHARON: 'sharon@ldrsgroup.com',
   CTO: 'cto@ldrsgroup.com',
   YOAV: 'yoav@ldrsgroup.com',
+  /** Finance — receives every completed client brief for data entry (added 2026-09-07). */
+  LIHI: 'lihi@ldrsgroup.com',
   ERAN: 'eran@ldrsgroup.com',
 } as const
 

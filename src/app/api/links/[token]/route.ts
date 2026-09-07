@@ -300,8 +300,14 @@ async function runClientBriefCascade(params: {
       ? `✅ בריף התקבל מ-${params.clientName}`
       : `⚠ בריף נטוש — ${params.clientName}`
     // Include the BD-person who sent the brief so they know their client filled
-    // it out. Dedupe + blocklist applied inside getManagementRecipients.
-    const recipients = getManagementRecipients([params.senderEmail])
+    // it out, and finance (Lihi) on every COMPLETED brief — she enters each new
+    // brief into the data (requested 2026-09-07). Abandoned-brief alerts stay
+    // management + sender. Dedupe + blocklist applied inside getManagementRecipients.
+    const { LDRS } = await import('@/lib/notifications/recipients')
+    const recipients = getManagementRecipients([
+      params.senderEmail,
+      params.transition === 'completed' ? LDRS.LIHI : undefined,
+    ])
     const result = await sendToManagement({
       senderEmail: params.senderEmail || undefined,
       senderName: params.senderName || undefined,
