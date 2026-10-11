@@ -11,7 +11,8 @@
  *   3. Stamp activity_log so the dashboard ticker picks it up.
  *   3.5 Salesforce-originated kickoffs: render the filled form to a Google Doc
  *       and push `kickoff.completed` so the project's "מסמך לפגישת התנעה"
- *       field moves from the blank template to the finished document.
+ *       field moves from the blank template to the finished document, then
+ *       push `kickoff.tasks_assigned` (task name, assignee name + email, due date).
  *   4. Salesforce-originated kickoffs: fire the auto deck pipeline via QStash.
  *
  * Steps 2.5 onward are all best-effort — none of them can fail the submission.
@@ -23,6 +24,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
+import type { RolePick } from '@/lib/clickup/customer-tasks'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -118,6 +120,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 })
   }
 
+  // Role picks — the head of each role array, only roles with a real email.
+  // Shared by the ClickUp cascade (2.5) and the Salesforce task push (3.5).
+  const picks: RolePick[] = (
+    [
+      ['creativeWriter', payload.creativeWriter],
+      ['presenter', payload.presenter],
+      ['presentationMaker', payload.presentationMaker],
+      ['accountManager', payload.accountManager],
+      ['mediaPerson', payload.mediaPerson],
+    ] as Array<[RolePick['key'], Participant[] | undefined]>
+  )
+    .map(([key, arr]): RolePick | null => {
+      const head = arr?.[0]
+      if (!head?.email) return null
+      return { key, email: head.email, name: head.name, hebrewName: head.hebrewName }
+    })
+    .filter((p): p is RolePick => p !== null)
+
   // 2.5 ClickUp cascade — find-or-create customer list, then create one
   // task per picked role (assignee = the picked user). All best-effort:
   // failures here don't fail the form completion.
@@ -175,23 +195,6 @@ export async function POST(req: Request) {
         (meta.brief_drive_folder_link as string | undefined) ||
         null
     } catch { /* non-fatal */ }
-
-    // Build picks from each role-array head (only roles with a real email).
-    type RoleKey = 'creativeWriter' | 'presenter' | 'presentationMaker' | 'accountManager' | 'mediaPerson'
-    const roleEntries: Array<[RoleKey, Participant[] | undefined]> = [
-      ['creativeWriter', payload.creativeWriter],
-      ['presenter', payload.presenter],
-      ['presentationMaker', payload.presentationMaker],
-      ['accountManager', payload.accountManager],
-      ['mediaPerson', payload.mediaPerson],
-    ]
-    const picks = roleEntries
-      .map(([key, arr]) => {
-        const head = arr?.[0]
-        if (!head?.email) return null
-        return { key, email: head.email, name: head.name, hebrewName: head.hebrewName }
-      })
-      .filter((p): p is NonNullable<typeof p> => p !== null)
 
     if (picks.length === 0) {
       console.log(`${tag} ClickUp: no role-picks with emails — skipping task creation`)
@@ -283,6 +286,8 @@ export async function POST(req: Request) {
     pushed: boolean
     reason?: string
     kickoffDocLink: string | null
+    tasksPushed?: boolean
+    tasksReason?: string
   } = { pushed: false, kickoffDocLink: null }
   if (salesforceRef) {
     let kickoffDocLink: string | null = null
@@ -326,6 +331,44 @@ export async function POST(req: Request) {
     } catch (e) {
       console.warn(`${tag} salesforce kickoff.completed error:`, e instanceof Error ? e.message : e)
       salesforce = { pushed: false, reason: 'threw', kickoffDocLink }
+    }
+
+    // `kickoff.tasks_assigned` — who owns which task and by when. Built from the
+    // form's role picks (not from ClickUp results) so it's sent even when
+    // ClickUp is down, with the same names and deadlines ClickUp gets.
+    // Separate from `kickoff.completed` so a failure of one never hides the other.
+    try {
+      if (picks.length > 0) {
+        const { notifySalesforceKickoff, buildKickoffTasksPayload } = await import(
+          '@/lib/salesforce/kickoff'
+        )
+        const tasks = buildKickoffTasksPayload({
+          meetingDate: payload.meetingDate,
+          prefixWithDate: !!existingListId,
+          deadlines: {
+            creative: payload.creativeDeadline || undefined,
+            internal: payload.internalDeadline || undefined,
+            client: payload.clientDeadline || undefined,
+          },
+          picks,
+        })
+        const result = await notifySalesforceKickoff(salesforceRef, 'kickoff.tasks_assigned', {
+          token: shareToken,
+          client_name: payload.clientName,
+          tasks,
+        })
+        salesforce = { ...salesforce, tasksPushed: result.delivered, tasksReason: result.reason }
+        if (result.delivered) {
+          console.log(`${tag} salesforce kickoff.tasks_assigned delivered (${tasks.length} tasks)`)
+        } else {
+          console.warn(`${tag} salesforce kickoff.tasks_assigned not delivered: ${result.reason}`)
+        }
+      } else {
+        console.log(`${tag} salesforce kickoff.tasks_assigned skipped — no role picks with emails`)
+      }
+    } catch (e) {
+      console.warn(`${tag} salesforce kickoff.tasks_assigned error:`, e instanceof Error ? e.message : e)
+      salesforce = { ...salesforce, tasksPushed: false, tasksReason: 'threw' }
     }
   }
 

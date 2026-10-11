@@ -1,7 +1,7 @@
 /**
  * Salesforce kickoff (inner-meeting / פגישת התנעה) outbound push.
  *
- * Two events go back to Salesforce, both writing the project's
+ * Three events go back to Salesforce. The first two write the project's
  * "מסמך לפגישת התנעה" field:
  *
  *   1. `kickoff.document_ready` — fired the moment we create a kickoff form
@@ -10,6 +10,9 @@
  *   2. `kickoff.completed` — fired from /api/inner-meeting/complete when the
  *      team submits the form. `kickoff_document_url` is the Google Doc of the
  *      filled kickoff, so the field ends up on the finished document.
+ *   3. `kickoff.tasks_assigned` — fired right after `kickoff.completed`.
+ *      `tasks` is an array of { task_name, assignee_name, assignee_email,
+ *      due_date } — one per role picked on the form. Carries the same `token`.
  *
  * Best-effort: never throws, no-ops when no webhook URL is configured.
  *
@@ -30,12 +33,54 @@
  *   SALESFORCE_OUTBOUND_SECRET     — else sent as `Authorization: Bearer <secret>`.
  */
 
-export type SalesforceKickoffEvent = 'kickoff.document_ready' | 'kickoff.completed'
+import {
+  kickoffTaskName,
+  pickKickoffDeadline,
+  type RolePick,
+} from '@/lib/clickup/customer-tasks'
+
+export type SalesforceKickoffEvent =
+  | 'kickoff.document_ready'
+  | 'kickoff.completed'
+  | 'kickoff.tasks_assigned'
 
 export interface KickoffPushResult {
   delivered: boolean
   reason?: string
   status?: number
+}
+
+/** One task of the `kickoff.tasks_assigned` event. */
+export interface KickoffTaskPayload {
+  /** Exactly the name of the task created in ClickUp. */
+  task_name: string
+  /** Hebrew name when the form has one, else the Latin name. */
+  assignee_name: string
+  assignee_email: string
+  /** YYYY-MM-DD, or null when the role has no deadline. */
+  due_date: string | null
+}
+
+/**
+ * Build the `tasks` array of the `kickoff.tasks_assigned` event from the role
+ * picks on the kickoff form. Name and deadline come from the same helpers the
+ * ClickUp cascade uses, so Salesforce and ClickUp always agree.
+ */
+export function buildKickoffTasksPayload(input: {
+  meetingDate: string
+  prefixWithDate: boolean
+  deadlines: { creative?: string; internal?: string; client?: string }
+  picks: RolePick[]
+}): KickoffTaskPayload[] {
+  return input.picks.map((pick) => {
+    const due = pickKickoffDeadline(pick.key, input.deadlines)
+    return {
+      task_name: kickoffTaskName(pick.key, input.meetingDate, input.prefixWithDate),
+      assignee_name: pick.hebrewName || pick.name || pick.email,
+      assignee_email: pick.email.toLowerCase(),
+      due_date: due ? due.slice(0, 10) : null,
+    }
+  })
 }
 
 /**

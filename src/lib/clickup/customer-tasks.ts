@@ -198,6 +198,31 @@ export interface KickoffTaskResult {
 }
 
 /**
+ * Which deadline a role's task gets. Generic over the deadline type so the
+ * ClickUp cascade (ms timestamps) and the Salesforce push (date strings) share
+ * one rule and can never drift apart.
+ */
+export function pickKickoffDeadline<T>(
+  role: RoleKey,
+  d: { creative?: T; internal?: T; client?: T } = {},
+): T | undefined {
+  if (role === 'creativeWriter' || role === 'presentationMaker') return d.creative
+  if (role === 'mediaPerson') return d.internal
+  if (role === 'presenter' || role === 'accountManager') return d.client || d.internal
+  return undefined
+}
+
+/** The task's name: the role label, date-prefixed when the list already exists. */
+export function kickoffTaskName(
+  role: RoleKey,
+  meetingDate: string,
+  prefixWithDate?: boolean,
+): string {
+  const datePrefix = prefixWithDate ? `${formatHebDate(meetingDate)} — ` : ''
+  return `${datePrefix}${ROLE_HEBREW_LABEL[role]}`
+}
+
+/**
  * Create one ClickUp task per role-pick, each in the same customer list.
  * Best-effort per task — failures on one don't stop the others.
  */
@@ -205,24 +230,12 @@ export async function createKickoffTasks(
   input: KickoffTaskInput,
 ): Promise<KickoffTaskResult[]> {
   const initialStatus = input.initialStatus || 'backlog'
-  const datePrefix = input.prefixWithDate
-    ? `${formatHebDate(input.meetingDate)} — `
-    : ''
   // start_date defaults to 09:00 Asia/Jerusalem of the next calendar day —
   // gives the team a one-day buffer between form submission and "task due".
   const startDate = input.startDate ?? nextMorning09Jerusalem()
 
   // Resolve all picked emails to user ids in one shot.
   const { byEmail } = await resolveUserIdsByEmail(input.picks.map((p) => p.email))
-
-  // Pick the right deadline per role.
-  function dueFor(role: RoleKey): number | undefined {
-    const d = input.deadlines || {}
-    if (role === 'creativeWriter' || role === 'presentationMaker') return d.creative
-    if (role === 'mediaPerson') return d.internal
-    if (role === 'presenter' || role === 'accountManager') return d.client || d.internal
-    return undefined
-  }
 
   const out: KickoffTaskResult[] = []
   for (const pick of input.picks) {
@@ -232,9 +245,9 @@ export async function createKickoffTasks(
       continue
     }
     try {
-      const due = dueFor(pick.key)
+      const due = pickKickoffDeadline(pick.key, input.deadlines)
       const body: Record<string, unknown> = {
-        name: `${datePrefix}${ROLE_HEBREW_LABEL[pick.key]}`,
+        name: kickoffTaskName(pick.key, input.meetingDate, input.prefixWithDate),
         markdown_description: input.briefDescriptionHtml, // ClickUp renders Markdown; plain HTML mostly works
         assignees: [userId],
         status: initialStatus,
@@ -311,6 +324,6 @@ function nextMorning09Jerusalem(): number {
 function formatHebDate(iso: string): string {
   // YYYY-MM-DD → DD/MM
   if (!/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso
-  const [, mm, dd] = iso.match(/^(\d{4})-(\d{2})-(\d{2})/) || []
+  const [, , mm, dd] = iso.match(/^(\d{4})-(\d{2})-(\d{2})/) || []
   return `${dd}/${mm}`
 }
