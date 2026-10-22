@@ -1,7 +1,7 @@
 /**
  * Salesforce kickoff (inner-meeting / פגישת התנעה) outbound push.
  *
- * Three events go back to Salesforce. The first two write the project's
+ * Two events go back to Salesforce, both writing the project's
  * "מסמך לפגישת התנעה" field:
  *
  *   1. `kickoff.document_ready` — fired the moment we create a kickoff form
@@ -10,9 +10,9 @@
  *   2. `kickoff.completed` — fired from /api/inner-meeting/complete when the
  *      team submits the form. `kickoff_document_url` is the Google Doc of the
  *      filled kickoff, so the field ends up on the finished document.
- *   3. `kickoff.tasks_assigned` — fired right after `kickoff.completed`.
- *      `tasks` is an array of { task_name, assignee_name, assignee_email,
- *      due_date } — one per role picked on the form. Carries the same `token`.
+ *      It also carries `tasks`: an array of { task_name, assignee_name,
+ *      assignee_email, due_date } — one per role picked on the form, `[]` when
+ *      none was picked.
  *
  * Best-effort: never throws, no-ops when no webhook URL is configured.
  *
@@ -39,10 +39,7 @@ import {
   type RolePick,
 } from '@/lib/clickup/customer-tasks'
 
-export type SalesforceKickoffEvent =
-  | 'kickoff.document_ready'
-  | 'kickoff.completed'
-  | 'kickoff.tasks_assigned'
+export type SalesforceKickoffEvent = 'kickoff.document_ready' | 'kickoff.completed'
 
 export interface KickoffPushResult {
   delivered: boolean
@@ -50,7 +47,7 @@ export interface KickoffPushResult {
   status?: number
 }
 
-/** One task of the `kickoff.tasks_assigned` event. */
+/** One entry of `tasks` in the `kickoff.completed` event. */
 export interface KickoffTaskPayload {
   /** Exactly the name of the task created in ClickUp. */
   task_name: string
@@ -62,7 +59,7 @@ export interface KickoffTaskPayload {
 }
 
 /**
- * Build the `tasks` array of the `kickoff.tasks_assigned` event from the role
+ * Build the `tasks` array of the `kickoff.completed` event from the role
  * picks on the kickoff form. Name and deadline come from the same helpers the
  * ClickUp cascade uses, so Salesforce and ClickUp always agree.
  */

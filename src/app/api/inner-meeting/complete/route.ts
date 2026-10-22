@@ -11,8 +11,8 @@
  *   3. Stamp activity_log so the dashboard ticker picks it up.
  *   3.5 Salesforce-originated kickoffs: render the filled form to a Google Doc
  *       and push `kickoff.completed` so the project's "מסמך לפגישת התנעה"
- *       field moves from the blank template to the finished document, then
- *       push `kickoff.tasks_assigned` (task name, assignee name + email, due date).
+ *       field moves from the blank template to the finished document. The same
+ *       event carries `tasks` (task name, assignee name + email, due date).
  *   4. Salesforce-originated kickoffs: fire the auto deck pipeline via QStash.
  *
  * Steps 2.5 onward are all best-effort — none of them can fail the submission.
@@ -286,8 +286,6 @@ export async function POST(req: Request) {
     pushed: boolean
     reason?: string
     kickoffDocLink: string | null
-    tasksPushed?: boolean
-    tasksReason?: string
   } = { pushed: false, kickoffDocLink: null }
   if (salesforceRef) {
     let kickoffDocLink: string | null = null
@@ -312,10 +310,26 @@ export async function POST(req: Request) {
     // Push even if the doc failed — Salesforce still gets the completion
     // signal, falling back to the Hub form link so the field is never empty.
     try {
-      const { notifySalesforceKickoff } = await import('@/lib/salesforce/kickoff')
+      const { notifySalesforceKickoff, buildKickoffTasksPayload } = await import(
+        '@/lib/salesforce/kickoff'
+      )
       const appUrl =
         process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || new URL(req.url).origin
       const fallbackUrl = shareToken ? `${appUrl}/inner-meeting?form=${shareToken}` : null
+      // Who owns which task and by when. Built from the form's role picks (not
+      // from ClickUp results) so it's sent even when ClickUp is down, with the
+      // same names and deadlines ClickUp gets. Always an array — empty when no
+      // role was picked with an email — so Salesforce can rely on the key.
+      const tasks = buildKickoffTasksPayload({
+        meetingDate: payload.meetingDate,
+        prefixWithDate: !!existingListId,
+        deadlines: {
+          creative: payload.creativeDeadline || undefined,
+          internal: payload.internalDeadline || undefined,
+          client: payload.clientDeadline || undefined,
+        },
+        picks,
+      })
       const result = await notifySalesforceKickoff(salesforceRef, 'kickoff.completed', {
         token: shareToken,
         kickoff_document_url: kickoffDocLink ?? fallbackUrl,
@@ -324,6 +338,7 @@ export async function POST(req: Request) {
         meeting_date: payload.meetingDate,
         completed_at: new Date().toISOString(),
         completed_by: user.email,
+        tasks,
       })
       salesforce = { pushed: result.delivered, reason: result.reason, kickoffDocLink }
       if (result.delivered) console.log(`${tag} salesforce kickoff.completed delivered`)
@@ -331,44 +346,6 @@ export async function POST(req: Request) {
     } catch (e) {
       console.warn(`${tag} salesforce kickoff.completed error:`, e instanceof Error ? e.message : e)
       salesforce = { pushed: false, reason: 'threw', kickoffDocLink }
-    }
-
-    // `kickoff.tasks_assigned` — who owns which task and by when. Built from the
-    // form's role picks (not from ClickUp results) so it's sent even when
-    // ClickUp is down, with the same names and deadlines ClickUp gets.
-    // Separate from `kickoff.completed` so a failure of one never hides the other.
-    try {
-      if (picks.length > 0) {
-        const { notifySalesforceKickoff, buildKickoffTasksPayload } = await import(
-          '@/lib/salesforce/kickoff'
-        )
-        const tasks = buildKickoffTasksPayload({
-          meetingDate: payload.meetingDate,
-          prefixWithDate: !!existingListId,
-          deadlines: {
-            creative: payload.creativeDeadline || undefined,
-            internal: payload.internalDeadline || undefined,
-            client: payload.clientDeadline || undefined,
-          },
-          picks,
-        })
-        const result = await notifySalesforceKickoff(salesforceRef, 'kickoff.tasks_assigned', {
-          token: shareToken,
-          client_name: payload.clientName,
-          tasks,
-        })
-        salesforce = { ...salesforce, tasksPushed: result.delivered, tasksReason: result.reason }
-        if (result.delivered) {
-          console.log(`${tag} salesforce kickoff.tasks_assigned delivered (${tasks.length} tasks)`)
-        } else {
-          console.warn(`${tag} salesforce kickoff.tasks_assigned not delivered: ${result.reason}`)
-        }
-      } else {
-        console.log(`${tag} salesforce kickoff.tasks_assigned skipped — no role picks with emails`)
-      }
-    } catch (e) {
-      console.warn(`${tag} salesforce kickoff.tasks_assigned error:`, e instanceof Error ? e.message : e)
-      salesforce = { ...salesforce, tasksPushed: false, tasksReason: 'threw' }
     }
   }
 
