@@ -18,6 +18,12 @@ import {
 } from '@/lib/gmail'
 import { buildSignedConfirmationEmail } from '@/lib/signatures/email'
 import { notifySalesforceQuote } from '@/lib/salesforce/quote'
+import {
+  buildClientDetails,
+  validateClientDetails,
+  type ClientDetailsInput,
+} from '@/lib/salesforce/client-details'
+import { PAYMENT_TERMS } from '@/lib/constants/price-quote-services'
 import { generatePriceQuotePages } from '@/templates/price-quote/price-quote-template'
 import { generatePaginatedA4Pdf } from '@/lib/playwright/pdf'
 import type { PriceQuoteData, PriceQuoteSignature } from '@/types/price-quote'
@@ -57,6 +63,8 @@ export async function POST(
     signer_id_number?: string | null
     signer_company?: string | null
     signer_company_hp?: string | null
+    /** Salesforce quotes only — see lib/salesforce/client-details.ts. */
+    client_details?: ClientDetailsInput | null
   }
 
   if (!body || !body.signer_name || (!body.signature_image && !body.typed_name)) {
@@ -95,6 +103,17 @@ export async function POST(
       { error: 'בקשת החתימה עודכנה — התקבל קישור חדש. אנא השתמש/י בקישור העדכני.' },
       { status: 410 },
     )
+  }
+  // Salesforce quotes also collect the client's account details (pushed with
+  // quote.signed). Validate before any PDF/Drive work so a bad form costs nothing.
+  const sfQuote = req.payload as { source?: string; project_id?: string } | null
+  const collectsClientDetails = sfQuote?.source === 'salesforce-quote' && !!sfQuote.project_id
+  if (collectsClientDetails) {
+    const invalid = validateClientDetails(richBody.client_details, {
+      company: richBody.signer_company,
+      hp: richBody.signer_company_hp,
+    })
+    if (invalid) return NextResponse.json({ error: invalid }, { status: 400 })
   }
   if (!req.pdf_drive_file_id) {
     return NextResponse.json({ error: 'PDF המקור חסר ב-Drive' }, { status: 500 })
@@ -270,7 +289,7 @@ export async function POST(
     .eq('token', token)
 
   // Salesforce quote: push 'quote.signed' with the signed (public) PDF link.
-  const quoteMeta = req.payload as { source?: string; project_id?: string } | null
+  const quoteMeta = sfQuote
   if (quoteMeta?.source === 'salesforce-quote' && quoteMeta.project_id) {
     try {
       await notifySalesforceQuote(quoteMeta.project_id, 'quote.signed', {
@@ -278,6 +297,11 @@ export async function POST(
         signer_name: body.signer_name,
         signed_at: signedAt,
         signed_pdf_link: signedUpload.viewLink,
+        client_details: buildClientDetails(
+          richBody.client_details ?? {},
+          { company: richBody.signer_company, hp: richBody.signer_company_hp },
+          PAYMENT_TERMS.payment,
+        ),
       })
     } catch (e) {
       console.warn('[sign] salesforce quote push failed:', e instanceof Error ? e.message : e)

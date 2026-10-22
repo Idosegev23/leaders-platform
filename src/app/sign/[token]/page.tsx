@@ -18,6 +18,7 @@ type Req = {
   expires_at: string
   created_by_email: string
   created_by_name: string | null
+  payload: { source?: string; project_id?: string } | null
 }
 
 export default async function SignPage({
@@ -36,7 +37,7 @@ export default async function SignPage({
   const { data, error } = await supabase
     .from('signature_requests')
     .select(
-      'id, token, title, status, recipient_email, recipient_name, pdf_drive_view_link, signed_pdf_drive_view_link, signed_at, signer_name, expires_at, created_by_email, created_by_name',
+      'id, token, title, status, recipient_email, recipient_name, pdf_drive_view_link, signed_pdf_drive_view_link, signed_at, signer_name, expires_at, created_by_email, created_by_name, payload',
     )
     .eq('token', token)
     .maybeSingle()
@@ -67,6 +68,9 @@ export default async function SignPage({
       signedAt={req.signed_at}
       signerName={req.signer_name}
       senderName={req.created_by_name ?? req.created_by_email}
+      collectClientDetails={
+        req.payload?.source === 'salesforce-quote' && !!req.payload.project_id
+      }
     />
   )
 }
