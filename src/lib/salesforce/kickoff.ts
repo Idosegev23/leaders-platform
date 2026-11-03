@@ -45,6 +45,8 @@ export interface KickoffPushResult {
   delivered: boolean
   reason?: string
   status?: number
+  /** Exactly what was (or would have been) POSTed — kept so a submission can be audited. */
+  payload?: Record<string, unknown>
 }
 
 /** One entry of `tasks` in the `kickoff.completed` event. */
@@ -91,12 +93,12 @@ export async function notifySalesforceKickoff(
 ): Promise<KickoffPushResult> {
   const tag = `[salesforce-kickoff-push:${event}]`
   const url = process.env.SALESFORCE_KICKOFF_WEBHOOK_URL || process.env.SALESFORCE_BRIEF_WEBHOOK_URL
+  const payload = { event, projectId, ...extra }
   if (!url) {
     console.log(`${tag} no webhook URL configured — skipping`)
-    return { delivered: false, reason: 'no_url' }
+    return { delivered: false, reason: 'no_url', payload }
   }
 
-  const payload = { event, projectId, ...extra }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   const sfToken = process.env.SALESFORCE_OUTBOUND_TOKEN
   if (sfToken) headers['X-SF-Token'] = sfToken
@@ -109,12 +111,12 @@ export async function notifySalesforceKickoff(
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       console.warn(`${tag} non-2xx: ${res.status} ${body.slice(0, 200)}`)
-      return { delivered: false, reason: 'non_2xx', status: res.status }
+      return { delivered: false, reason: 'non_2xx', status: res.status, payload }
     }
     console.log(`${tag} delivered → ${res.status}`)
-    return { delivered: true, status: res.status }
+    return { delivered: true, status: res.status, payload }
   } catch (e) {
     console.warn(`${tag} push failed:`, e instanceof Error ? e.message : e)
-    return { delivered: false, reason: 'fetch_threw' }
+    return { delivered: false, reason: 'fetch_threw', payload }
   }
 }
