@@ -287,6 +287,7 @@ export async function POST(req: Request) {
     reason?: string
     kickoffDocLink: string | null
   } = { pushed: false, kickoffDocLink: null }
+  let lastPush: Record<string, unknown> | null = null
   if (salesforceRef) {
     let kickoffDocLink: string | null = null
     try {
@@ -341,11 +342,51 @@ export async function POST(req: Request) {
         tasks,
       })
       salesforce = { pushed: result.delivered, reason: result.reason, kickoffDocLink }
+      lastPush = {
+        event: 'kickoff.completed',
+        at: new Date().toISOString(),
+        delivered: result.delivered,
+        http_status: result.status ?? null,
+        reason: result.reason ?? null,
+        payload: result.payload ?? null,
+      }
       if (result.delivered) console.log(`${tag} salesforce kickoff.completed delivered`)
       else console.warn(`${tag} salesforce kickoff.completed not delivered: ${result.reason}`)
     } catch (e) {
       console.warn(`${tag} salesforce kickoff.completed error:`, e instanceof Error ? e.message : e)
       salesforce = { pushed: false, reason: 'threw', kickoffDocLink }
+      lastPush = {
+        event: 'kickoff.completed',
+        at: new Date().toISOString(),
+        delivered: false,
+        reason: 'threw',
+        error: e instanceof Error ? e.message : String(e),
+      }
+    }
+  } else {
+    lastPush = {
+      event: 'kickoff.completed',
+      at: new Date().toISOString(),
+      skipped: 'no_salesforce_ref',
+    }
+  }
+
+  // Keep the last Salesforce push on the form so a submission can be audited
+  // (what exactly was sent, and what Salesforce answered). Best-effort.
+  if (lastPush) {
+    try {
+      await service
+        .from('forms')
+        .update({
+          metadata: {
+            ...formMeta,
+            ...(salesforce.kickoffDocLink ? { kickoff_doc_link: salesforce.kickoffDocLink } : {}),
+            salesforce_last_push: lastPush,
+          },
+        })
+        .eq('id', formId)
+    } catch (e) {
+      console.warn(`${tag} salesforce_last_push stash failed:`, e instanceof Error ? e.message : e)
     }
   }
 
