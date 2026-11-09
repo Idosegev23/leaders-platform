@@ -1,5 +1,5 @@
 import type { Queryable } from './db'
-import { actorIds, actorLabel, type Ctx } from './context'
+import { actorIds, actorLabel, actorOrgId, type Ctx } from './context'
 
 const SENSITIVE = /token|secret|password|hash|address|phone|email|cookie|authorization/i
 
@@ -20,6 +20,8 @@ export function sanitizeChanges(changes: Record<string, unknown> | undefined): R
 }
 
 export interface AuditInput {
+  /** defaults to the actor's organization, else the campaign's */
+  organizationId?: string | null
   campaignId: string | null
   entityType: string
   entityId: string | null
@@ -32,14 +34,14 @@ export interface AuditInput {
 export async function audit(db: Queryable, ctx: Pick<Ctx, 'actor'>, e: AuditInput): Promise<void> {
   const ids = actorIds(ctx.actor)
   await db.query(
-    `insert into cm_audit_events (campaign_id, entity_type, entity_id, action, actor_type, actor_user_id, actor_grant_id,
+    `insert into cm_audit_events (organization_id, campaign_id, entity_type, entity_id, action, actor_type, actor_user_id, actor_grant_id,
        actor_label, summary, changes, correlation_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+     values (coalesce($12::uuid, (select organization_id from cm_campaigns where id = $1::uuid)),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       e.campaignId, e.entityType, e.entityId, e.action,
       ctx.actor.kind === 'internal' ? 'user' : ctx.actor.kind === 'portal' ? 'portal' : 'system',
       ids.userId, ids.grantId, actorLabel(ctx.actor), e.summary ?? null,
-      sanitizeChanges(e.changes), e.correlationId ?? null,
+      sanitizeChanges(e.changes), e.correlationId ?? null, e.organizationId ?? actorOrgId(ctx.actor),
     ],
   )
 }

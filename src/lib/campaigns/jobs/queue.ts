@@ -104,9 +104,11 @@ export type Relevance =
   | { shortlistId: string; shortlistStatuses: string[] }
 
 export interface NotificationInput {
-  campaignId: string
+  campaignId: string | null
+  /** required when there is no campaign */
+  organizationId?: string | null
   jobId?: string | null
-  audience: 'internal' | 'client' | 'creator' | 'agent'
+  audience: 'internal' | 'client' | 'creator' | 'agent' | 'agency'
   recipientUserId?: string | null
   recipientGrantId?: string | null
   toAddress: string
@@ -120,12 +122,12 @@ export interface NotificationInput {
 
 export async function queueNotification(db: Queryable, n: NotificationInput, now: Date): Promise<void> {
   await db.query(
-    `insert into cm_notifications (campaign_id, job_id, channel, audience, recipient_user_id, recipient_grant_id, to_address,
+    `insert into cm_notifications (organization_id, campaign_id, job_id, channel, audience, recipient_user_id, recipient_grant_id, to_address,
         subject, body_text, link_path, relevance, idempotency_key, correlation_id, next_attempt_at)
-     values ($1,$2,'email',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     values (coalesce($14::uuid, (select organization_id from cm_campaigns where id = $1::uuid)),$1,$2,'email',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      on conflict (idempotency_key) do nothing`,
     [n.campaignId, n.jobId ?? null, n.audience, n.recipientUserId ?? null, n.recipientGrantId ?? null, n.toAddress,
-      n.subject, n.bodyText, n.linkPath, n.relevance ?? null, n.idempotencyKey, n.correlationId, now],
+      n.subject, n.bodyText, n.linkPath, n.relevance ?? null, n.idempotencyKey, n.correlationId, now, n.organizationId ?? null],
   )
 }
 

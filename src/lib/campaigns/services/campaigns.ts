@@ -3,7 +3,7 @@ import type { Ctx } from '../context'
 import { many, one, withTx, type Queryable } from '../db'
 import { audit } from '../audit'
 import { DomainError, forbidden, invalid, notFound, precondition, versionConflict } from '../errors'
-import { canCreateCampaigns, internalCampaignScope, requireCampaign, requireInternal } from '../auth/policy'
+import { activeMemberSql, canCreateCampaigns, internalCampaignScope, orgHasHub, requireCampaign, requireInternal } from '../auth/policy'
 import { CAMPAIGN_MACHINE, assertTransition, type CampaignStatus } from '../domain/state-machines'
 import { parseMoney, toDecimal } from '../domain/money'
 import { cancelJobs, cancelNotifications, closeTasks } from '../jobs/queue'
@@ -35,24 +35,20 @@ export async function createCampaign(ctx: Ctx, input: unknown) {
   if (budget !== null && budget < BigInt(0)) throw invalid('תקציב לא יכול להיות שלילי')
 
   return withTx(async (tx) => {
-    if (!(await one(tx, `select 1 from clients where id = $1`, [v.client_id]))) throw invalid('הלקוח שנבחר לא נמצא')
-    if (v.brief_document_link_id && !(await one(tx, `select 1 from document_links where id = $1`, [v.brief_document_link_id]))) {
-      throw invalid('הבריף שנבחר לא נמצא')
-    }
+    if (!(await one(tx, `select 1 from cm_clients where id = $1 and organization_id = $2`, [v.client_id, actor.orgId]))) throw invalid('הלקוח שנבחר לא נמצא')
+    if (v.brief_document_link_id) await assertBrief(tx, actor.orgId, v.brief_document_link_id)
     const ownerId = v.owner_user_id ?? actor.userId
     if (ownerId !== actor.userId) {
-      const owner = await one<{ id: string }>(tx,
-        `select u.id from users u left join cm_staff_roles r on r.user_id = u.id
-          where u.id = $1 and u.is_active and (u.role = 'admin' or r.role in ('admin','manager'))`, [ownerId])
-      if (!owner) throw invalid('האחראית שנבחרה אינה מנהלת קמפיין פעילה')
+      const owner = await one<{ ok: boolean }>(tx, `select ${activeMemberSql('$1', '$2', ['admin', 'manager'])} as ok`, [ownerId, actor.orgId])
+      if (!owner?.ok) throw invalid('האחראית שנבחרה אינה מנהלת קמפיין פעילה בארגון')
     }
     const c = await one<{ id: string }>(tx,
       `insert into cm_campaigns (client_id, name, description, objectives, external_project_reference, brief_document_link_id,
-          brief_url, owner_user_id, start_date, end_date, currency, approved_budget, amounts_include_vat, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
+          brief_url, owner_user_id, start_date, end_date, currency, approved_budget, amounts_include_vat, created_by, organization_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
       [v.client_id, v.name, v.description, v.objectives, v.external_project_reference, v.brief_document_link_id ?? null,
         v.brief_url ?? null, ownerId, v.start_date ?? null, v.end_date ?? null, v.currency,
-        budget === null ? null : toDecimal(budget), v.amounts_include_vat, actor.userId],
+        budget === null ? null : toDecimal(budget), v.amounts_include_vat, actor.userId, actor.orgId],
     )
     await audit(tx, ctx, {
       campaignId: c!.id, entityType: 'campaign', entityId: c!.id, action: 'campaign.created',
@@ -82,9 +78,9 @@ export interface CampaignListRow {
 export async function listCampaigns(ctx: Ctx, input: unknown): Promise<{ rows: CampaignListRow[]; total: number; page: number; pageSize: number }> {
   const actor = requireInternal(ctx.actor)
   const v = parseInput(listCampaignsSchema, input)
-  const params: unknown[] = [actor.userId]
-  const conds = [internalCampaignScope(actor, '$1')]
-  if (v.q) { params.push(`%${v.q}%`); conds.push(`(c.name ilike $${params.length} or cl.name ilike $${params.length} or coalesce(cl.name_hebrew,'') ilike $${params.length})`) }
+  const params: unknown[] = [actor.userId, actor.orgId]
+  const conds = [internalCampaignScope(actor, '$1', '$2')]
+  if (v.q) { params.push(`%${v.q}%`); conds.push(`(c.name ilike $${params.length} or cl.name ilike $${params.length} or coalesce(cl.name_secondary,'') ilike $${params.length})`) }
   if (v.client_id) { params.push(v.client_id); conds.push(`c.client_id = $${params.length}`) }
   if (v.owner_user_id) { params.push(v.owner_user_id); conds.push(`c.owner_user_id = $${params.length}`) }
   if (v.status) { params.push(v.status); conds.push(`c.status = $${params.length}`) }
@@ -92,12 +88,12 @@ export async function listCampaigns(ctx: Ctx, input: unknown): Promise<{ rows: C
   if (v.to) { params.push(v.to); conds.push(`coalesce(c.start_date, c.created_at::date) <= $${params.length}`) }
   const where = conds.join(' and ')
   const total = await one<{ n: number }>(ctx.db,
-    `select count(*)::int as n from cm_campaigns c join clients cl on cl.id = c.client_id where ${where}`, params)
+    `select count(*)::int as n from cm_campaigns c join cm_clients cl on cl.id = c.client_id where ${where}`, params)
   params.push(ctx.now)
   const nowP = `$${params.length}`
   params.push(v.page_size, (v.page - 1) * v.page_size)
   const rows = await many<CampaignListRow>(ctx.db,
-    `select c.id, c.name, c.status, c.client_id, coalesce(cl.name_hebrew, cl.name) as client_name, u.full_name as owner_name,
+    `select c.id, c.name, c.status, c.client_id, cl.name as client_name, u.full_name as owner_name,
             to_char(c.start_date,'YYYY-MM-DD') as start_date, to_char(c.end_date,'YYYY-MM-DD') as end_date,
             c.currency, c.approved_budget::text,
             (select count(*)::int from cm_participations p where p.campaign_id = c.id and p.participation_status <> 'cancelled'
@@ -112,8 +108,8 @@ export async function listCampaigns(ctx: Ctx, input: unknown): Promise<{ rows: C
                   or (d.status = 'approved' and d.publication_due_at < ${nowP}))) as overdue,
             coalesce((select sum(b.amount) from cm_budget_lines b where b.campaign_id = c.id and b.status in ('committed','actual')), 0)::text as exposure
        from cm_campaigns c
-       join clients cl on cl.id = c.client_id
-       left join users u on u.id = c.owner_user_id
+       join cm_clients cl on cl.id = c.client_id
+       left join cm_accounts u on u.id = c.owner_user_id
       where ${where}
       order by case c.status when 'active' then 0 when 'recruiting' then 1 when 'planning' then 2 when 'reporting' then 3
                when 'draft' then 4 else 5 end, c.start_date nulls last, c.created_at desc
@@ -137,15 +133,15 @@ export async function getCampaign(ctx: Ctx, id: string): Promise<CampaignDetail>
   const acc = await requireCampaign(ctx.db, ctx, id, 'operate')
   const c = await one<Omit<CampaignDetail, 'access_level'>>(ctx.db,
     `select c.id, c.name, c.status, c.status_reason, c.description, c.objectives, c.client_id,
-            coalesce(cl.name_hebrew, cl.name) as client_name, c.external_project_reference,
+            cl.name as client_name, c.external_project_reference,
             c.brief_document_link_id, case when dl.id is null then null
               else concat_ws(' · ', dl.client_name, case dl.status when 'completed' then 'הושלם' when 'opened' then 'נפתח' when 'pending' then 'נשלח' else 'בארכיון' end, to_char(dl.created_at, 'DD.MM.YYYY')) end as brief_label,
             c.brief_url, c.owner_user_id, u.full_name as owner_name,
             to_char(c.start_date,'YYYY-MM-DD') as start_date, to_char(c.end_date,'YYYY-MM-DD') as end_date,
             c.currency, c.approved_budget::text, c.amounts_include_vat, c.closed_at, c.closed_with_exceptions,
             c.version, c.created_at, c.updated_at
-       from cm_campaigns c join clients cl on cl.id = c.client_id
-       left join users u on u.id = c.owner_user_id
+       from cm_campaigns c join cm_clients cl on cl.id = c.client_id
+       left join cm_accounts u on u.id = c.owner_user_id
        left join document_links dl on dl.id = c.brief_document_link_id
       where c.id = $1`, [id])
   if (!c) throw notFound('הקמפיין')
@@ -198,15 +194,13 @@ export async function updateCampaign(ctx: Ctx, id: string, input: unknown) {
       if (used) throw precondition('לא ניתן לשנות מטבע אחרי שנוספו משפיענים או שורות תקציב (אין המרת מטבע)')
       set('currency', v.currency)
     }
+    const actor = requireInternal(ctx.actor)
     if (v.owner_user_id) {
-      const owner = await one(tx, `select 1 from users u left join cm_staff_roles r on r.user_id = u.id
-        where u.id = $1 and u.is_active and (u.role = 'admin' or r.role in ('admin','manager'))`, [v.owner_user_id])
-      if (!owner) throw invalid('האחראית שנבחרה אינה מנהלת קמפיין פעילה')
+      const owner = await one<{ ok: boolean }>(tx, `select ${activeMemberSql('$1', '$2', ['admin', 'manager'])} as ok`, [v.owner_user_id, actor.orgId])
+      if (!owner?.ok) throw invalid('האחראית שנבחרה אינה מנהלת קמפיין פעילה בארגון')
       set('owner_user_id', v.owner_user_id)
     }
-    if (v.brief_document_link_id && !(await one(tx, `select 1 from document_links where id = $1`, [v.brief_document_link_id]))) {
-      throw invalid('הבריף שנבחר לא נמצא')
-    }
+    if (v.brief_document_link_id) await assertBrief(tx, actor.orgId, v.brief_document_link_id)
     const start = 'start_date' in raw ? v.start_date ?? null : cur.start_date
     const end = 'end_date' in raw ? v.end_date ?? null : cur.end_date
     if (start && end && end < start) throw invalid('תאריך הסיום מוקדם מתאריך ההתחלה')
@@ -312,7 +306,7 @@ export async function changeCampaignStatus(ctx: Ctx, id: string, input: unknown)
 export async function listMembers(ctx: Ctx, id: string) {
   await requireCampaign(ctx.db, ctx, id, 'operate')
   return many<{ user_id: string; full_name: string; email: string; role: string }>(ctx.db,
-    `select m.user_id, u.full_name, u.email, m.role from cm_campaign_members m join users u on u.id = m.user_id
+    `select m.user_id, u.full_name, u.email, m.role from cm_campaign_members m join cm_accounts u on u.id = m.user_id
       where m.campaign_id = $1 order by u.full_name`, [id])
 }
 
@@ -320,9 +314,8 @@ export async function setMember(ctx: Ctx, id: string, input: unknown) {
   await requireCampaign(ctx.db, ctx, id, 'manage')
   const v = parseInput(z.object({ user_id: zUuid, role: z.enum(['manager', 'staff']).nullable() }), input)
   return withTx(async (tx) => {
-    const u = await one<{ id: string }>(tx, `select u.id from users u left join cm_staff_roles r on r.user_id = u.id
-       where u.id = $1 and u.is_active and (u.role = 'admin' or r.role is not null)`, [v.user_id])
-    if (!u) throw invalid(`המשתמש אינו מורשה ב-${PRODUCT.name}`)
+    const u = await one<{ ok: boolean }>(tx, `select ${activeMemberSql('$1', '$2')} as ok`, [v.user_id, requireInternal(ctx.actor).orgId])
+    if (!u?.ok) throw invalid(`המשתמש אינו חבר פעיל בארגון ב-${PRODUCT.name}`)
     if (v.role === null) {
       await tx.query(`delete from cm_campaign_members where campaign_id = $1 and user_id = $2`, [id, v.user_id])
     } else {
@@ -335,13 +328,19 @@ export async function setMember(ctx: Ctx, id: string, input: unknown) {
   }, ctx.db)
 }
 
-/** Internal users who may own or join campaigns. */
+/** Members of the active organization who may own or join campaigns. */
 export async function listStaff(ctx: Ctx) {
-  requireInternal(ctx.actor)
+  const actor = requireInternal(ctx.actor)
   return many<{ id: string; full_name: string; email: string; role: string }>(ctx.db,
-    `select u.id, u.full_name, u.email, case when u.role = 'admin' then 'admin' else r.role end as role
-       from users u left join cm_staff_roles r on r.user_id = u.id
-      where u.is_active and (u.role = 'admin' or r.role is not null) order by u.full_name`)
+    `select u.id, u.full_name, u.email, m.role
+       from cm_memberships m join cm_accounts u on u.id = m.account_id
+      where m.organization_id = $1 and m.status = 'active' and u.status = 'active' order by u.full_name`, [actor.orgId])
+}
+
+/** Hub briefs (document_links) may be linked only by an organization with Hub integration (Leaders). */
+async function assertBrief(db: Queryable, orgId: string, briefId: string) {
+  if (!(await orgHasHub(db, orgId))) throw invalid('קישור לבריף מתוך ה-Hub זמין רק לארגון המחובר ל-Hub. אפשר לצרף קישור לבריף.')
+  if (!(await one(db, `select 1 from document_links where id = $1`, [briefId]))) throw invalid('הבריף שנבחר לא נמצא')
 }
 
 export function assertModuleEnabled() {

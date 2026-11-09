@@ -8,7 +8,7 @@ import { PNG_1PX, makeClient, makeUser, makeWorld, portalFromInvite, testPool, t
 import type { InternalActor, PortalActor } from '../context'
 import { DomainError } from '../errors'
 import { createCampaign, getCampaign, listCampaigns, updateCampaign } from '../services/campaigns'
-import { createAgent, createCreator } from '../services/creators'
+import { createAgent, createCreator, createTalentAgency, updateCreator } from '../services/creators'
 import { addCreatorsToCampaign, participationAction, respondToInvitation, updateParticipationTerms } from '../services/participations'
 import { clientShortlistDecision, clientShortlists, createShortlist, internalShortlistDecision, sendShortlistToClient } from '../services/shortlists'
 import { createDeliverable, getDeliverable, internalContentDecision, portalParticipations, submitVersion } from '../services/deliverables'
@@ -34,10 +34,10 @@ async function code(p: Promise<unknown>): Promise<string> {
 }
 
 /** A campaign with one approved, invited, accepted creator and one deliverable with an internally approved version. */
-async function buildCampaign(manager: InternalActor, clientName: string, creatorName: string, opts: { viaAgent?: string } = {}) {
+async function buildCampaign(manager: InternalActor, clientName: string, creatorName: string) {
   const clientId = await makeClient(pool, clientName)
   const { id: campaignId } = await createCampaign(w.ctx(manager, now), { client_id: clientId, name: `${clientName} campaign`, approved_budget: '10000' })
-  const cr = await createCreator(w.ctx(manager), { display_name: creatorName, email: `${creatorName}@example.test`, agent_id: opts.viaAgent ?? null })
+  const cr = await createCreator(w.ctx(manager), { display_name: creatorName, email: `${creatorName}@example.test` })
   const [pid] = (await addCreatorsToCampaign(w.ctx(manager, now), campaignId, { creator_ids: [cr.id] })).added
   await updateParticipationTerms(w.ctx(manager, now), pid, { expected_version: 1, agreed_fee: '4321', internal_notes: 'סוד פנימי: מרווח 30%' })
   const sl = await createShortlist(w.ctx(manager, now), campaignId, { participation_ids: [pid] })
@@ -49,9 +49,7 @@ async function buildCampaign(manager: InternalActor, clientName: string, creator
   await clientShortlistDecision(w.ctx(client, now), item, { decision: 'approved', shortlist_version: 1 })
   const { id: did } = await createDeliverable(w.ctx(manager, now), pid, { title: 'פוסט', type: 'post', platform: 'instagram', submission_due_at: '2026-11-20T12:00' })
   const pv = (await pool.query(`select version from cm_participations where id = $1`, [pid])).rows[0].version
-  const inv = await participationAction(w.ctx(manager, now), pid, opts.viaAgent
-    ? { action: 'invite', expected_version: pv, via: 'agent', recipient_name: 'agent', recipient_email: null }
-    : { action: 'invite', expected_version: pv, recipient_name: creatorName, recipient_email: null })
+  const inv = await participationAction(w.ctx(manager, now), pid, { action: 'invite', expected_version: pv, recipient_name: creatorName, recipient_email: null })
   const creator = await portalFromInvite(pool, inv.invite_url!, now)
   const tv = (await pool.query(`select terms_version from cm_participations where id = $1`, [pid])).rows[0].terms_version
   await respondToInvitation(w.ctx(creator, now), pid, { response: 'accepted', terms_version: tv })
@@ -74,7 +72,6 @@ beforeAll(async () => {
   managerB = await makeUser(pool, 'manager', 'managerB')
   staffA = await makeUser(pool, 'staff', 'staffA')
   outsider = await makeUser(pool, 'none', 'outsider')
-  await pool.query(`delete from cm_staff_roles where user_id = $1`, [outsider.userId])
   A = await buildCampaign(managerA, 'clientA', 'creatorA')
   B = await buildCampaign(managerB, 'clientB', 'creatorB')
   await pool.query(`insert into cm_campaign_members (campaign_id, user_id, role) values ($1,$2,'staff')`, [A.campaignId, staffA.userId])
@@ -132,21 +129,40 @@ describe('creator and agent scope (tests 5, 6)', () => {
     expect(mine.participations.map((p) => p.id)).toEqual([p2])
   })
 
-  it('an agent sees only creators they are authorized to represent (test 6)', async () => {
-    const agent = await createAgent(w.ctx(managerA), { display_name: 'סוכנות כוכבים', email: 'agency@example.test' })
-    const repped = await createCreator(w.ctx(managerA), { display_name: 'מיוצגת', email: 'repped@example.test', agent_id: agent.id })
-    const notRepped = await createCreator(w.ctx(managerA), { display_name: 'לא מיוצגת', email: 'free@example.test' })
-    const added = (await addCreatorsToCampaign(w.ctx(managerA, now), A.campaignId, { creator_ids: [repped.id, notRepped.id] })).added
-    // even if someone sets the agent on a participation it does not represent, the active link is required
+  it('an agent sees only creators assigned to them (test 6)', async () => {
+    const agency = await createTalentAgency(w.ctx(managerA), { name: 'סוכנות כוכבים' })
+    const agent = await createAgent(w.ctx(managerA), { display_name: 'רוני סוכן', email: 'roni@agency.example', talent_agency_id: agency.id })
+    const assigned = await createCreator(w.ctx(managerA), { display_name: 'מוקצית', email: 'assigned@example.test', talent_agency_id: agency.id, agent_id: agent.id })
+    const sameAgencyOther = await createCreator(w.ctx(managerA), { display_name: 'באותה סוכנות', email: 'other@example.test', talent_agency_id: agency.id })
+    const free = await createCreator(w.ctx(managerA), { display_name: 'עצמאית', email: 'free@example.test' })
+    const added = (await addCreatorsToCampaign(w.ctx(managerA, now), A.campaignId, { creator_ids: [assigned.id, sameAgencyOther.id, free.id] })).added
+    // even if someone sets the agent on every participation, only the active assignment counts
     await pool.query(`update cm_participations set agent_id = $2, selection_status = 'approved', participation_status = 'invited' where id = any($1)`, [added, agent.id])
     const g = await createGrant(w.ctx(managerA, now), A.campaignId, { kind: 'agent', agent_id: agent.id, recipient_name: 'agent' })
     const agentActor = await portalFromInvite(pool, g.inviteUrl, now)
     const mine = await portalParticipations(w.ctx(agentActor))
-    expect(mine.participations.map((p: Record<string, unknown>) => p.creator_name)).toEqual(['מיוצגת'])
-    // revoking the representation cuts access immediately
+    expect(mine.participations.map((p: Record<string, unknown>) => p.creator_name)).toEqual(['מוקצית'])
+    // the agency (higher level) sees every creator it represents, not the independent one
+    const ag = await createGrant(w.ctx(managerA, now), A.campaignId, { kind: 'agency', talent_agency_id: agency.id, recipient_name: 'agency admin' })
+    const agencyActor = await portalFromInvite(pool, ag.inviteUrl, now)
+    const theirs = await portalParticipations(w.ctx(agencyActor))
+    expect(theirs.participations.map((p: Record<string, unknown>) => p.creator_name).sort()).toEqual(['באותה סוכנות', 'מוקצית'])
+    // ending the assignment cuts the agent's access immediately; the agency keeps it
     await pool.query(`update cm_agent_creators set active = false where agent_id = $1`, [agent.id])
     expect((await portalParticipations(w.ctx(agentActor))).participations).toEqual([])
+    expect((await portalParticipations(w.ctx(agencyActor))).participations).toHaveLength(2)
+    // a creator leaving the agency drops out of the agency's view
+    const cv = (await pool.query(`select version from cm_creators where id = $1`, [sameAgencyOther.id])).rows[0].version
+    await updateCreator(w.ctx(managerA), sameAgencyOther.id, { expected_version: cv, talent_agency_id: null })
+    expect((await portalParticipations(w.ctx(agencyActor))).participations.map((p: Record<string, unknown>) => p.creator_name)).toEqual(['מוקצית'])
     expect(await code(getDeliverable(w.ctx(agentActor), A.did))).toBe('NOT_FOUND')
+  })
+
+  it('an agent from another talent agency cannot be assigned to the creator', async () => {
+    const a1 = await createTalentAgency(w.ctx(managerA), { name: 'סוכנות א' })
+    const a2 = await createTalentAgency(w.ctx(managerA), { name: 'סוכנות ב' })
+    const agentOf2 = await createAgent(w.ctx(managerA), { display_name: 'סוכן של ב', talent_agency_id: a2.id })
+    expect(await code(createCreator(w.ctx(managerA), { display_name: 'של א', talent_agency_id: a1.id, agent_id: agentOf2.id }))).toBe('VALIDATION')
   })
 })
 

@@ -18,6 +18,8 @@ export interface OutgoingMessage {
   text: string
   html: string
   idempotencyKey: string
+  /** display name of the sending organization */
+  fromName?: string
 }
 
 export type SendResult =
@@ -64,7 +66,7 @@ export class GmailTransport implements MessageTransport {
     })
     try {
       const res = await Promise.race([
-        sendGmailViaServiceAccount({ from: this.from, fromName: this.fromName, to, subject, html: m.html }),
+        sendGmailViaServiceAccount({ from: this.from, fromName: m.fromName ? `${m.fromName} via ${PRODUCT.name}` : this.fromName, to, subject, html: m.html }),
         timeout,
       ])
       return { outcome: 'sent', provider: 'gmail', providerMessageId: res.messageId }

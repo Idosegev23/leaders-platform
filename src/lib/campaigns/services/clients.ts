@@ -1,52 +1,79 @@
 /**
- * Clients and briefs are owned elsewhere (Salesforce → Hub `clients`; briefs
- * in `document_links`). This module only searches them and, when a client is
- * missing, creates a local row marked as such. It never writes to Salesforce.
+ * Clients belong to an organization (cm_clients). For the Leaders
+ * organization (settings.hub_integration) the Hub's own client list and briefs
+ * can be searched and linked; other organizations never see Hub data.
+ * Nothing is written to Salesforce or the Hub.
  */
 import { z } from 'zod'
 import type { Ctx } from '../context'
-import { many, one, withTx } from '../db'
+import { many, one, pgCode, withTx } from '../db'
 import { audit } from '../audit'
-import { forbidden, notFound } from '../errors'
-import { canCreateCampaigns, requireInternal } from '../auth/policy'
+import { DomainError, forbidden, notFound } from '../errors'
+import { canCreateCampaigns, orgHasHub, requireInternal } from '../auth/policy'
 import { parseInput, zOptText, zRequiredText } from '../validation'
 
-export async function searchClients(ctx: Ctx, q: string | undefined) {
-  requireInternal(ctx.actor)
+export interface ClientRow { id: string; name: string; name_secondary: string | null; hub_client_id: string | null; salesforce_account_id: string | null; campaigns: number }
+
+export async function searchClients(ctx: Ctx, q: string | undefined): Promise<ClientRow[]> {
+  const actor = requireInternal(ctx.actor)
   const term = (q ?? '').trim().slice(0, 100)
-  return many<{ id: string; name: string; name_hebrew: string | null; salesforce_account_id: string | null }>(ctx.db,
-    `select cl.id, cl.name, cl.name_hebrew,
+  return many<ClientRow>(ctx.db,
+    `select cl.id, cl.name, cl.name_secondary, cl.hub_client_id,
             (select r.external_id from cm_external_references r where r.entity_type = 'client' and r.entity_id = cl.id
-               and r.system = 'salesforce' limit 1) as salesforce_account_id
-       from clients cl
-      where $1 = '' or cl.name ilike $2 or coalesce(cl.name_hebrew,'') ilike $2 or exists (select 1 from unnest(coalesce(cl.aliases,'{}')) a where a ilike $2)
-      order by coalesce(cl.name_hebrew, cl.name) limit 30`, [term, `%${term}%`])
+               and r.system = 'salesforce' limit 1) as salesforce_account_id,
+            (select count(*)::int from cm_campaigns c where c.client_id = cl.id) as campaigns
+       from cm_clients cl
+      where cl.organization_id = $1 and ($2 = '' or cl.name ilike $3 or coalesce(cl.name_secondary,'') ilike $3)
+      order by cl.name limit 50`, [actor.orgId, term, `%${term}%`])
 }
 
 export const createClientSchema = z.object({
   name: zRequiredText(200),
-  name_hebrew: zOptText(200),
+  name_secondary: zOptText(200),
+  notes: zOptText(2000),
   salesforce_account_id: zOptText(100),
+  hub_client_id: z.string().uuid().optional().nullable(),
 })
 
-export async function createLocalClient(ctx: Ctx, input: unknown) {
+export async function createClient(ctx: Ctx, input: unknown) {
   const actor = requireInternal(ctx.actor)
   if (!canCreateCampaigns(actor)) throw forbidden()
   const v = parseInput(createClientSchema, input)
   return withTx(async (tx) => {
-    const dup = await one<{ id: string }>(tx, `select id from clients where lower(name) = lower($1) or lower(coalesce(name_hebrew,'')) = lower($1) limit 1`, [v.name])
+    const dup = await one<{ id: string }>(tx, `select id from cm_clients where organization_id = $1 and lower(name) = lower($2)`, [actor.orgId, v.name])
     if (dup) return { id: dup.id, existing: true }
-    const c = await one<{ id: string }>(tx,
-      `insert into clients (name, name_hebrew, aliases, metadata) values ($1, $2, '{}', $3) returning id`,
-      [v.name, v.name_hebrew, { created_by: 'campaigns', created_by_user_id: actor.userId, unverified: true }])
-    if (v.salesforce_account_id) {
-      await tx.query(`insert into cm_external_references (entity_type, entity_id, system, external_type, external_id, linked_by)
-        values ('client', $1, 'salesforce', 'account', $2, $3) on conflict do nothing`, [c!.id, v.salesforce_account_id, actor.userId])
+    if (v.hub_client_id) {
+      if (!(await orgHasHub(tx, actor.orgId))) throw forbidden('קישור ללקוח ב-Hub זמין רק לארגון המחובר ל-Hub')
+      if (!(await one(tx, `select 1 from clients where id = $1`, [v.hub_client_id]))) throw new DomainError('VALIDATION', 'הלקוח לא נמצא ב-Hub')
     }
-    await audit(tx, ctx, { campaignId: null, entityType: 'client', entityId: c!.id, action: 'client.created_locally',
-      summary: `נוצר לקוח מקומי "${v.name}" (לא סונכרן ל-Salesforce)` })
-    return { id: c!.id, existing: false }
+    try {
+      const c = await one<{ id: string }>(tx,
+        `insert into cm_clients (organization_id, name, name_secondary, notes, hub_client_id, created_by) values ($1,$2,$3,$4,$5,$6) returning id`,
+        [actor.orgId, v.name, v.name_secondary, v.notes, v.hub_client_id ?? null, actor.userId])
+      if (v.salesforce_account_id) {
+        await tx.query(`insert into cm_external_references (organization_id, entity_type, entity_id, system, external_type, external_id, linked_by)
+          values ($1, 'client', $2, 'salesforce', 'account', $3, $4) on conflict do nothing`, [actor.orgId, c!.id, v.salesforce_account_id, actor.userId])
+      }
+      await audit(tx, ctx, { campaignId: null, entityType: 'client', entityId: c!.id, action: 'client.created', summary: `נוסף לקוח "${v.name}"` })
+      return { id: c!.id, existing: false }
+    } catch (e) {
+      if (pgCode(e) === '23505') throw new DomainError('CONFLICT', 'לקוח בשם זה כבר קיים בארגון')
+      throw e
+    }
   }, ctx.db)
+}
+
+/** Leaders only: search the Hub's client list (to link, not to copy wholesale). */
+export async function searchHubClients(ctx: Ctx, q: string | undefined) {
+  const actor = requireInternal(ctx.actor)
+  if (!(await orgHasHub(ctx.db, actor.orgId))) return []
+  const term = (q ?? '').trim().slice(0, 100)
+  return many<{ id: string; name: string; name_hebrew: string | null; linked: boolean }>(ctx.db,
+    `select h.id, h.name, h.name_hebrew,
+            exists (select 1 from cm_clients c where c.organization_id = $1 and c.hub_client_id = h.id) as linked
+       from clients h
+      where $2 = '' or h.name ilike $3 or coalesce(h.name_hebrew,'') ilike $3
+      order by coalesce(h.name_hebrew, h.name) limit 30`, [actor.orgId, term, `%${term}%`])
 }
 
 export interface BriefOption {
@@ -54,8 +81,10 @@ export interface BriefOption {
   salesforce_ref: string | null
 }
 
+/** Leaders only: Hub client briefs. Other organizations attach a brief link instead. */
 export async function searchBriefs(ctx: Ctx, q: string | undefined): Promise<BriefOption[]> {
-  requireInternal(ctx.actor)
+  const actor = requireInternal(ctx.actor)
+  if (!(await orgHasHub(ctx.db, actor.orgId))) return []
   const term = (q ?? '').trim().slice(0, 100)
   return many<BriefOption>(ctx.db,
     `select dl.id, dl.client_name, dl.status, dl.created_at, dl.completed_at, dl.metadata->>'salesforce_ref' as salesforce_ref
@@ -65,12 +94,13 @@ export async function searchBriefs(ctx: Ctx, q: string | undefined): Promise<Bri
 }
 
 /**
- * Suggested campaign fields from a completed brief. Shown to the manager for
- * review; nothing is saved until she submits the form. The brief's budget is
- * free text, so it is shown as a hint and never copied into approved_budget.
+ * Suggested campaign fields from a completed Hub brief. Shown to the manager
+ * for review; nothing is saved until she submits. The brief's budget is free
+ * text, so it is shown as a hint and never copied into approved_budget.
  */
 export async function briefPrefill(ctx: Ctx, briefId: string) {
-  requireInternal(ctx.actor)
+  const actor = requireInternal(ctx.actor)
+  if (!(await orgHasHub(ctx.db, actor.orgId))) throw notFound('הבריף')
   const b = await one<{ client_name: string | null; status: string; metadata: Record<string, unknown> | null }>(ctx.db,
     `select dl.client_name, dl.status, dl.metadata from document_links dl join document_types dt on dt.id = dl.document_type_id
       where dl.id = $1 and dt.slug = 'client-brief'`, [briefId])

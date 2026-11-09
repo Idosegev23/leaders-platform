@@ -15,7 +15,7 @@ import type { Ctx, PortalActor } from '../context'
 import { many, one, withTx, type Queryable } from '../db'
 import { audit } from '../audit'
 import { DomainError, invalid, notFound, precondition, versionConflict } from '../errors'
-import { requireCampaign, requireInternal, requirePortal, requirePortalParticipation } from '../auth/policy'
+import { orgHasHub, requireCampaign, requireInternal, requirePortal, requirePortalParticipation } from '../auth/policy'
 import { PARTICIPATION_MACHINE, SELECTION_MACHINE, assertTransition, type ParticipationStatus, type SelectionStatus } from '../domain/state-machines'
 import { parseMoney, toDecimal } from '../domain/money'
 import { cancelJobs, closeTasks, ensureTask } from '../jobs/queue'
@@ -81,16 +81,19 @@ export async function addCreatorsToCampaign(ctx: Ctx, campaignId: string, input:
     const added: string[] = []
     const duplicates: string[] = []
     for (const cid of Array.from(new Set(v.creator_ids))) {
+      // Default handling agent: an active agent assigned to the creator.
       const cr = await one<{ id: string; status: string; agent_id: string | null; display_name: string }>(tx,
         `select c.id, c.status, c.display_name,
-                (select ac.agent_id from cm_agent_creators ac where ac.creator_id = c.id and ac.agent_id = c.agent_id and ac.active) as agent_id
-           from cm_creators c where c.id = $1`, [cid])
+                (select ac.agent_id from cm_agent_creators ac join cm_agents a on a.id = ac.agent_id
+                  where ac.creator_id = c.id and ac.active and (a.talent_agency_id is null or a.talent_agency_id = c.talent_agency_id)
+                  order by ac.created_at limit 1) as agent_id
+           from cm_creators c where c.id = $1 and c.organization_id = $2`, [cid, acc.orgId])
       if (!cr) throw invalid('אחד היוצרים שנבחרו לא נמצא')
       if (cr.status === 'blocked') throw precondition(`היוצר "${cr.display_name}" חסום לשיוך`)
       const row = await one<{ id: string }>(tx,
-        `insert into cm_participations (campaign_id, creator_id, agent_id, currency, created_by)
-         values ($1,$2,$3,$4,$5) on conflict on constraint cm_participations_unique do nothing returning id`,
-        [campaignId, cid, cr.agent_id, acc.currency, actor.userId])
+        `insert into cm_participations (organization_id, campaign_id, creator_id, agent_id, currency, created_by)
+         values ($1,$2,$3,$4,$5,$6) on conflict on constraint cm_participations_unique do nothing returning id`,
+        [acc.orgId, campaignId, cid, cr.agent_id, acc.currency, actor.userId])
       if (row) {
         added.push(row.id)
         await audit(tx, ctx, { campaignId, entityType: 'participation', entityId: row.id, action: 'participation.added', summary: `"${cr.display_name}" נוסף/ה כמועמד/ת` })
@@ -149,6 +152,9 @@ export async function updateParticipationTerms(ctx: Ctx, participationId: string
     }
     if ('contract_signature_request_id' in raw) {
       if (v.contract_signature_request_id) {
+        if (!(await orgHasHub(tx, requireInternal(ctx.actor).orgId))) {
+          throw invalid('קישור לחוזה במערכת החתימות של ה-Hub זמין רק לארגון המחובר ל-Hub')
+        }
         const sr = await one(tx, `select 1 from signature_requests where id = $1 and payload->>'source' = 'influencer-contract'`, [v.contract_signature_request_id])
         if (!sr) throw invalid('לא נמצא חוזה משפיען במערכת החתימות עם מזהה זה')
       }
@@ -198,7 +204,7 @@ export async function updateParticipationTerms(ctx: Ctx, participationId: string
 // ── Manager actions ────────────────────────────────────────────────────────
 
 export const participationActionSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('invite'), expected_version: zVersion, via: z.enum(['creator', 'agent']).default('creator'),
+  z.object({ action: z.literal('invite'), expected_version: zVersion, via: z.enum(['creator', 'agent', 'agency']).default('creator'),
     recipient_name: z.string().trim().min(1).max(200), recipient_email: zOptText(200), send_email: z.boolean().default(false) }),
   z.object({ action: z.literal('record_response'), expected_version: zVersion, response: z.enum(['accepted', 'declined']), note: z.string().trim().min(3, 'יש לתעד איך התקבלה התשובה').max(1000) }),
   z.object({ action: z.literal('activate'), expected_version: zVersion }),
@@ -223,15 +229,19 @@ export async function participationAction(ctx: Ctx, participationId: string, inp
         if (p.selection_status !== 'approved') throw precondition('אפשר להזמין יוצר רק אחרי שהלקוח אישר אותו')
         if (p.participation_status !== 'invited') assertTransition(PARTICIPATION_MACHINE, p.participation_status, 'invited', 'השתתפות')
         if (v.via === 'agent' && !p.agent_id) throw invalid('אין סוכן משויך להשתתפות')
+        const agency = v.via === 'agency'
+          ? await one<{ talent_agency_id: string | null }>(tx, `select talent_agency_id from cm_creators where id = $1`, [p.creator_id]) : null
+        if (v.via === 'agency' && !agency?.talent_agency_id) throw invalid('היוצר אינו מיוצג על ידי סוכנות')
         const grant = await createGrantTx(tx, ctx, p.campaign_id, {
           kind: v.via, creator_id: v.via === 'creator' ? p.creator_id : undefined, agent_id: v.via === 'agent' ? p.agent_id ?? undefined : undefined,
+          talent_agency_id: v.via === 'agency' ? agency!.talent_agency_id ?? undefined : undefined, all_campaigns: false,
           recipient_name: v.recipient_name, recipient_email: v.recipient_email, send_email: v.send_email,
         })
         inviteUrl = grant.inviteUrl
         await tx.query(`update cm_participations set participation_status = 'invited', invitation_status = 'sent', version = version + 1 where id = $1`, [p.id])
         await closeTasks(tx, { participationId: p.id, types: ['invite_creator'] }, 'done', ctx.now)
         await audit(tx, ctx, { campaignId: p.campaign_id, entityType: 'participation', entityId: p.id, action: 'participation.invited',
-          summary: `נשלחה הזמנה ל-${label} (${v.via === 'agent' ? 'דרך הסוכן' : 'ישירות'})` })
+          summary: `נשלחה הזמנה ל-${label} (${v.via === 'agent' ? 'דרך הסוכן' : v.via === 'agency' ? 'דרך הסוכנות' : 'ישירות'})` })
         break
       }
       case 'record_response': {
@@ -364,6 +374,7 @@ export async function listCampaignParticipations(ctx: Ctx, campaignId: string) {
   await requireCampaign(ctx.db, ctx, campaignId, 'operate')
   return many(ctx.db,
     `select p.id, p.creator_id, cr.display_name as creator_name, p.agent_id, a.display_name as agent_name,
+            cr.talent_agency_id, ta.name as agency_name,
             p.selection_status, p.participation_status, p.status_reason, p.agreed_fee::text, p.currency, p.payment_status,
             p.contract_reference, p.contract_signature_request_id, to_char(p.rights_expires_at,'YYYY-MM-DD') as rights_expires_at,
             p.rights_notes, p.internal_notes, p.client_visible_notes, p.deliverables_summary, p.terms_version,
@@ -378,6 +389,7 @@ export async function listCampaignParticipations(ctx: Ctx, campaignId: string) {
        from cm_participations p
        join cm_creators cr on cr.id = p.creator_id
        left join cm_agents a on a.id = p.agent_id
+       left join cm_talent_agencies ta on ta.id = cr.talent_agency_id
        left join cm_shipments sh on sh.participation_id = p.id
       where p.campaign_id = $1
       order by case p.selection_status when 'approved' then 0 when 'client_review' then 1 when 'internal_review' then 2 when 'proposed' then 3 else 4 end,

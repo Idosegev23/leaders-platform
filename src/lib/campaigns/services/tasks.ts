@@ -3,7 +3,7 @@ import type { Ctx } from '../context'
 import { many, one, withTx } from '../db'
 import { audit } from '../audit'
 import { invalid, notFound, versionConflict } from '../errors'
-import { internalCampaignScope, requireCampaign, requireInternal } from '../auth/policy'
+import { activeMemberSql, internalCampaignScope, requireCampaign, requireInternal } from '../auth/policy'
 import { parseInput, zOptBusinessDateTime, zOptText, zRequiredText, zVersion } from '../validation'
 
 export const listTasksSchema = z.object({
@@ -20,8 +20,8 @@ export async function listTasks(ctx: Ctx, input: unknown) {
   const actor = requireInternal(ctx.actor)
   const v = parseInput(listTasksSchema, input)
   if (v.campaign_id) await requireCampaign(ctx.db, ctx, v.campaign_id, 'operate')
-  const params: unknown[] = [actor.userId]
-  const conds = [internalCampaignScope(actor, '$1')]
+  const params: unknown[] = [actor.userId, actor.orgId]
+  const conds = [internalCampaignScope(actor, '$1', '$2')]
   if (v.campaign_id) { params.push(v.campaign_id); conds.push(`t.campaign_id = $${params.length}`) }
   if (v.mine) conds.push(`t.assignee_user_id = $1`)
   if (v.status === 'active') conds.push(`t.status in ('open','in_progress')`)
@@ -39,7 +39,7 @@ export async function listTasks(ctx: Ctx, input: unknown) {
             (t.due_at < ${now} and t.status in ('open','in_progress')) as overdue,
             cr.display_name as creator_name, d.title as deliverable_title
        from cm_tasks t join cm_campaigns c on c.id = t.campaign_id
-       left join users u on u.id = t.assignee_user_id
+       left join cm_accounts u on u.id = t.assignee_user_id
        left join cm_participations p on p.id = t.participation_id left join cm_creators cr on cr.id = p.creator_id
        left join cm_deliverables d on d.id = t.deliverable_id
       where ${where}
@@ -66,7 +66,7 @@ export async function createTask(ctx: Ctx, campaignId: string, input: unknown) {
   return withTx(async (tx) => {
     if (v.participation_id && !(await one(tx, `select 1 from cm_participations where id = $1 and campaign_id = $2`, [v.participation_id, campaignId]))) throw invalid('ההשתתפות אינה שייכת לקמפיין')
     if (v.deliverable_id && !(await one(tx, `select 1 from cm_deliverables where id = $1 and campaign_id = $2`, [v.deliverable_id, campaignId]))) throw invalid('התוצר אינו שייך לקמפיין')
-    if (v.assignee_user_id && !(await one(tx, `select 1 from users u left join cm_staff_roles r on r.user_id = u.id where u.id = $1 and (u.role = 'admin' or r.role is not null)`, [v.assignee_user_id]))) {
+    if (v.assignee_user_id && !(await one<{ ok: boolean }>(tx, `select ${activeMemberSql('$1', '$2')} as ok`, [v.assignee_user_id, requireInternal(ctx.actor).orgId]))?.ok) {
       throw invalid('המשתמש אינו מורשה במודול')
     }
     const t = await one<{ id: string }>(tx,

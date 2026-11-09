@@ -43,10 +43,10 @@ export interface CampaignReport {
 async function loadReport(db: Queryable, campaignId: string, audience: 'internal' | 'client', now: Date): Promise<CampaignReport> {
   const c = await one<{ id: string; name: string; client_name: string; status: string; start_date: string | null; end_date: string | null
     currency: string; amounts_include_vat: boolean; approved_budget: string | null; closed_with_exceptions: boolean; status_reason: string | null }>(db,
-    `select c.id, c.name, coalesce(cl.name_hebrew, cl.name) as client_name, c.status, to_char(c.start_date,'YYYY-MM-DD') as start_date,
+    `select c.id, c.name, cl.name as client_name, c.status, to_char(c.start_date,'YYYY-MM-DD') as start_date,
             to_char(c.end_date,'YYYY-MM-DD') as end_date, c.currency, c.amounts_include_vat, c.approved_budget::text,
             c.closed_with_exceptions, c.status_reason
-       from cm_campaigns c join clients cl on cl.id = c.client_id where c.id = $1`, [campaignId])
+       from cm_campaigns c join cm_clients cl on cl.id = c.client_id where c.id = $1`, [campaignId])
   if (!c) throw notFound('הקמפיין')
   const parts = await one<{ total: number; accepted: number; declined: number; cancelled: number }>(db,
     `select count(*) filter (where selection_status = 'approved')::int as total,
@@ -191,16 +191,18 @@ export async function createReportSnapshot(ctx: Ctx, campaignId: string, input: 
 export async function listReportSnapshots(ctx: Ctx, campaignId: string) {
   await requireCampaign(ctx.db, ctx, campaignId, 'operate')
   return many(ctx.db, `select s.id, s.audience, s.summary_notes, s.created_at, s.published_to_client_at, u.full_name as created_by_name
-    from cm_report_snapshots s left join users u on u.id = s.created_by where s.campaign_id = $1 order by s.created_at desc`, [campaignId])
+    from cm_report_snapshots s left join cm_accounts u on u.id = s.created_by where s.campaign_id = $1 order by s.created_at desc`, [campaignId])
 }
 
 export async function getSnapshot(ctx: Ctx, snapshotId: string): Promise<CampaignReport & { snapshotId: string }> {
   if (ctx.actor.kind === 'portal') {
     const actor = requirePortal(ctx.actor)
-    await requireClientCampaign(ctx.db, actor)
+    const own = await one<{ campaign_id: string }>(ctx.db, `select campaign_id from cm_report_snapshots where id = $1`, [snapshotId])
+    if (!own) throw notFound('הדוח')
+    await requireClientCampaign(ctx.db, actor, own.campaign_id)
     const s = await one<{ id: string; data: CampaignReport }>(ctx.db,
       `select id, data from cm_report_snapshots where id = $1 and campaign_id = $2 and audience = 'client' and published_to_client_at is not null`,
-      [snapshotId, actor.campaignId])
+      [snapshotId, own.campaign_id])
     if (!s) throw notFound('הדוח')
     return { ...s.data, snapshotId: s.id }
   }
@@ -210,9 +212,9 @@ export async function getSnapshot(ctx: Ctx, snapshotId: string): Promise<Campaig
   return { ...s.data, snapshotId: s.id }
 }
 
-export async function clientPublishedReports(ctx: Ctx) {
+export async function clientPublishedReports(ctx: Ctx, campaignId?: string | null) {
   const actor = requirePortal(ctx.actor)
-  await requireClientCampaign(ctx.db, actor)
+  const camp = await requireClientCampaign(ctx.db, actor, campaignId)
   return many<{ id: string; published_to_client_at: Date }>(ctx.db, `select id, published_to_client_at from cm_report_snapshots
-    where campaign_id = $1 and audience = 'client' and published_to_client_at is not null order by published_to_client_at desc`, [actor.campaignId])
+    where campaign_id = $1 and audience = 'client' and published_to_client_at is not null order by published_to_client_at desc`, [camp.id])
 }

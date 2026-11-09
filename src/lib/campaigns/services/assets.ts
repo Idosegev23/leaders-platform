@@ -12,7 +12,7 @@ import type { Ctx, PortalActor } from '../context'
 import { many, one, withTx, type Queryable } from '../db'
 import { audit } from '../audit'
 import { forbidden, invalid, notFound } from '../errors'
-import { isUuid, portalParticipationScope, portalSubjectId, requireCampaign, requirePortal, requirePortalParticipation } from '../auth/policy'
+import { clientCampaignScope, isUuid, portalParticipationScope, portalScopeParams, requireCampaign, requirePortal, requirePortalParticipation } from '../auth/policy'
 import { MIME_RULES, maxBytesFor, sniffMatches, type StorageProvider } from '../storage/provider'
 import { rateLimit } from '../rate-limit'
 import { parseInput } from '../validation'
@@ -64,8 +64,8 @@ export async function createUploadIntent(ctx: Ctx, input: unknown) {
   const key = `${campaignId}/${id}.${rule.ext}`
   await ctx.db.query(
     `insert into cm_assets (id, campaign_id, participation_id, purpose, storage_provider, storage_key, original_filename, mime_type,
-        declared_size, uploaded_by_user_id, uploaded_by_grant_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        declared_size, uploaded_by_user_id, uploaded_by_grant_id, organization_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,(select organization_id from cm_campaigns where id = $2))`,
     [id, campaignId, participationId, v.purpose, ctx.deps.storage.name, key, v.filename.slice(0, 200), v.mime_type, v.size, byUser, byGrant],
   )
   const target = await ctx.deps.storage.createUploadTarget(key, v.mime_type)
@@ -144,15 +144,15 @@ export async function getAssetUrl(ctx: Ctx, assetId: string) {
     if (actor.grantKind === 'client') {
       const ok = await one(ctx.db,
         `select 1 from cm_content_versions v join cm_deliverables d on d.id = v.deliverable_id join cm_campaigns c on c.id = d.campaign_id
-          where v.asset_id = $1 and d.campaign_id = $2 and c.client_id = $3
+          where v.asset_id = $1 and ${clientCampaignScope('$2', '$3', '$4')}
             and exists (select 1 from cm_approval_decisions ad where ad.target_type = 'content_version' and ad.target_id = v.id
                          and ad.approval_stage = 'internal' and ad.decision = 'approved')`,
-        [a.id, actor.campaignId, actor.clientId])
+        [a.id, actor.orgId, actor.clientId, actor.campaignId])
       if (!ok) throw notFound('הקובץ')
     } else {
       const ok = await one(ctx.db,
-        `select 1 from cm_participations p where p.id = $1 and ${portalParticipationScope(actor, '$2', '$3')}`,
-        [a.participation_id, actor.campaignId, portalSubjectId(actor)])
+        `select 1 from cm_participations p where p.id = $1 and ${portalParticipationScope(actor, '$2', '$3', '$4')}`,
+        [a.participation_id, ...portalScopeParams(actor)])
       if (!a.participation_id || !ok) throw notFound('הקובץ')
     }
   }

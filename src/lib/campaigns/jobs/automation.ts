@@ -87,7 +87,8 @@ export async function scheduleRightsJob(db: Queryable, p: { id: string; campaign
 // ── Messages ───────────────────────────────────────────────────────────────
 
 export interface MessageSpec {
-  campaignId: string
+  campaignId: string | null
+  organizationId?: string | null
   key: string
   subject: string
   body: string
@@ -104,7 +105,7 @@ export async function sendTo(db: Queryable, recipients: (Recipient | null)[], m:
   for (const r of recipients) {
     if (!r || !r.email) continue
     await queueNotification(db, {
-      campaignId: m.campaignId, jobId: m.jobId ?? null, audience: r.audience,
+      campaignId: m.campaignId, organizationId: m.organizationId ?? null, jobId: m.jobId ?? null, audience: r.audience,
       recipientUserId: r.userId, recipientGrantId: r.grantId, toAddress: r.email,
       subject: m.subject, bodyText: m.body,
       linkPath: r.audience === 'internal' ? m.internalPath : m.portalPath,

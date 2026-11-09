@@ -4,16 +4,19 @@
  */
 import { cookies } from 'next/headers'
 import { createClient as createSupabaseServer } from '@/lib/supabase/server'
-import { getPool } from './db'
-import { one } from './db'
-import type { Ctx, Deps, InternalActor, InternalRole, PortalActor } from './context'
+import { getPool, one } from './db'
+import type { Ctx, Deps, InternalActor, PortalActor } from './context'
 import { resolvePortalSession, SESSION_COOKIE } from './portal/access'
+import {
+  ACTIVE_ORG_COOKIE, STAFF_SESSION_COOKIE, actorFor, bridgeHubUser, isPlatformAdmin, loadMemberships, resolveAccountSession,
+  type Account, type Membership,
+} from './auth/accounts'
 import { LocalStorage } from './storage/local'
 import { SupabaseStorage } from './storage/supabase'
 import type { StorageProvider } from './storage/provider'
 import { transportFromEnv } from './messaging/transport'
+import { PRODUCT } from './brand'
 import { DomainError } from './errors'
-import { PRODUCT } from '@/lib/campaigns/brand'
 
 export const DEV_USER_COOKIE = 'cm_dev_user'
 
@@ -21,10 +24,19 @@ export function moduleEnabled(): boolean {
   return process.env.CAMPAIGNS_MODULE_ENABLED === 'true'
 }
 
+/** Leaders staff may sign in with their Hub (Google) session. */
+export function hubLoginEnabled(): boolean {
+  return process.env.CAMPAIGNS_HUB_LOGIN === 'true' && !!process.env.NEXT_PUBLIC_SUPABASE_URL
+}
+
+export function selfSignupEnabled(): boolean {
+  return process.env.BRIEFLOW_SELF_SIGNUP === 'true'
+}
+
 /**
  * Local development login. Only when ALL hold: explicit flag, not a
- * production build, and the database is on localhost. There is no password:
- * it picks one of the locally seeded users.
+ * production build, and the database is on localhost. No password: it picks
+ * one of the locally seeded accounts.
  */
 export function devAuthEnabled(): boolean {
   if (process.env.NODE_ENV === 'production') return false
@@ -55,29 +67,46 @@ export function deps(): Deps {
   return { storage: getStorage(), transport: transportFromEnv(), baseUrl: appBaseUrl() }
 }
 
-async function loadInternal(userId: string): Promise<InternalActor | null> {
-  const u = await one<{ id: string; email: string; full_name: string; role: string; is_active: boolean; cm_role: InternalRole | null }>(getPool(),
-    `select u.id, u.email, u.full_name, u.role::text as role, u.is_active, r.role as cm_role
-       from users u left join cm_staff_roles r on r.user_id = u.id where u.id = $1`, [userId])
-  if (!u || !u.is_active) return null
-  const role: InternalRole | null = u.role === 'admin' ? 'admin' : u.cm_role
-  if (!role) return null
-  return { kind: 'internal', userId: u.id, email: u.email, name: u.full_name || u.email, role }
+export interface StaffState {
+  account: Account | null
+  memberships: Membership[]
+  actor: InternalActor | null
+  platformAdmin: boolean
 }
 
-/** null = not signed in; throws FORBIDDEN when signed in but without a campaigns role. */
-export async function currentInternalActor(): Promise<InternalActor | null> {
+/** Who is signed in on the staff side, and in which organizations. */
+export async function currentStaff(): Promise<StaffState> {
+  const pool = getPool()
+  const now = new Date()
+  let account: Account | null = null
   if (devAuthEnabled()) {
     const id = cookies().get(DEV_USER_COOKIE)?.value
-    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null
-    return loadInternal(id)
+    if (id && /^[0-9a-f-]{36}$/i.test(id)) {
+      account = await one<Account>(pool, `select id, email, full_name from cm_accounts where id = $1 and status = 'active'`, [id])
+    }
   }
-  const supabase = await createSupabaseServer()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  const actor = await loadInternal(user.id)
-  if (!actor) throw new DomainError('FORBIDDEN', `אין לך הרשאה ל-${PRODUCT.name}. פנו למנהל המערכת.`)
-  return actor
+  if (!account) account = await resolveAccountSession(pool, cookies().get(STAFF_SESSION_COOKIE)?.value, now)
+  if (!account && hubLoginEnabled()) {
+    try {
+      const supabase = await createSupabaseServer()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) account = await bridgeHubUser(pool, { id: user.id, email: user.email })
+    } catch {
+      // Hub auth unavailable: fall through to "not signed in"
+    }
+  }
+  if (!account) return { account: null, memberships: [], actor: null, platformAdmin: false }
+  const memberships = await loadMemberships(pool, account.id)
+  const actor = actorFor(account, memberships, cookies().get(ACTIVE_ORG_COOKIE)?.value)
+  return { account, memberships, actor, platformAdmin: isPlatformAdmin(account.email) }
+}
+
+/** null = not signed in; throws FORBIDDEN when signed in but not a member of any organization. */
+export async function currentInternalActor(): Promise<InternalActor | null> {
+  const s = await currentStaff()
+  if (!s.account) return null
+  if (!s.actor) throw new DomainError('FORBIDDEN', `החשבון אינו חבר באף ארגון פעיל ב-${PRODUCT.name}. פנו למנהל הארגון שלכם.`)
+  return s.actor
 }
 
 export async function currentPortalActor(now = new Date()): Promise<PortalActor | null> {

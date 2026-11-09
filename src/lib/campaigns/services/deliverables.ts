@@ -21,7 +21,7 @@ import { many, one, pgCode, withTx, type Queryable } from '../db'
 import { audit } from '../audit'
 import { DomainError, forbidden, invalid, notFound, precondition, versionConflict } from '../errors'
 import {
-  isUuid, portalParticipationScope, portalSubjectId, requireCampaign, requireInternal, requirePortal, requirePortalDeliverable, requirePortalParticipation,
+  isUuid, portalParticipationScope, portalScopeParams, requireCampaign, requireInternal, requirePortal, requirePortalDeliverable, requirePortalParticipation,
 } from '../auth/policy'
 import { DELIVERABLE_MACHINE, SUBMITTABLE, WORKING_PARTICIPATION, assertTransition, type DeliverableStatus } from '../domain/state-machines'
 import { closeTasks, ensureTask } from '../jobs/queue'
@@ -667,7 +667,7 @@ export async function getDeliverable(ctx: Ctx, deliverableId: string) {
                  and ($2::boolean = false or ad.approval_stage = 'client' or ad.decision = 'approved')), '[]') as decisions,
             coalesce((select json_agg(json_build_object('id', cc.id, 'body', cc.body, 'ts', cc.video_timestamp_seconds, 'visibility', cc.visibility,
                        'at', cc.created_at, 'author', coalesce(u.full_name, g.recipient_name)) order by cc.created_at)
-               from cm_content_comments cc left join users u on u.id = cc.author_user_id left join cm_portal_grants g on g.id = cc.author_grant_id
+               from cm_content_comments cc left join cm_accounts u on u.id = cc.author_user_id left join cm_portal_grants g on g.id = cc.author_grant_id
               where cc.content_version_id = v.id and ($3::boolean = false or cc.visibility = 'shared')), '[]') as comments
        from cm_content_versions v left join cm_assets a on a.id = v.asset_id
       where v.deliverable_id = $1
@@ -693,18 +693,27 @@ export async function getDeliverable(ctx: Ctx, deliverableId: string) {
   }
 }
 
-/** Creator/agent portal: participations and their deliverables (no internal notes, no other creators). */
-export async function portalParticipations(ctx: Ctx) {
+/**
+ * Influencer-side portal (creator, agent, talent agency): participations,
+ * deliverables and open tasks, across every campaign the grant covers or for
+ * one selected campaign. Never internal notes, never other creators.
+ */
+export async function portalParticipations(ctx: Ctx, campaignId?: string | null) {
   const actor = requirePortal(ctx.actor)
   if (actor.grantKind === 'client') throw forbidden()
-  const rows = await many<{ id: string }>(ctx.db,
+  if (campaignId && !isUuid(campaignId)) throw notFound('הקמפיין')
+  const rows = await many<{ id: string; campaign_id: string }>(ctx.db,
     `select p.id, p.campaign_id, c.name as campaign_name, c.description as campaign_description, c.status as campaign_status,
-            cr.display_name as creator_name, p.selection_status, p.participation_status, p.agreed_fee::text, p.currency,
+            to_char(c.start_date,'YYYY-MM-DD') as campaign_start, to_char(c.end_date,'YYYY-MM-DD') as campaign_end,
+            cr.display_name as creator_name, a.display_name as agent_name, ta.name as agency_name,
+            p.selection_status, p.participation_status, p.agreed_fee::text, p.currency,
             c.amounts_include_vat, p.deliverables_summary, to_char(p.rights_expires_at,'YYYY-MM-DD') as rights_expires_at, p.rights_notes,
             p.contract_reference, p.terms_version, p.accepted_terms_version, p.creator_reacceptance_required, p.client_visible_notes
        from cm_participations p join cm_campaigns c on c.id = p.campaign_id join cm_creators cr on cr.id = p.creator_id
-      where ${portalParticipationScope(actor, '$1', '$2')}
-      order by cr.display_name`, [actor.campaignId, portalSubjectId(actor)])
+       left join cm_agents a on a.id = p.agent_id left join cm_talent_agencies ta on ta.id = cr.talent_agency_id
+      where ${portalParticipationScope(actor, '$1', '$2', '$3')} and ($4::uuid is null or p.campaign_id = $4::uuid)
+        and c.status <> 'cancelled'
+      order by c.start_date desc nulls last, c.name, cr.display_name`, [...portalScopeParams(actor), campaignId ?? null])
   const ids = rows.map((r) => r.id)
   const deliverables = ids.length ? await many(ctx.db,
     `select d.id, d.participation_id, d.title, d.type, d.platform, d.status, d.submission_due_at, d.publication_due_at, d.current_version_id
@@ -712,7 +721,9 @@ export async function portalParticipations(ctx: Ctx) {
   const tasks = ids.length ? await many(ctx.db,
     `select id, participation_id, deliverable_id, type, title, description, due_at from cm_tasks
       where participation_id = any($1) and audience = 'creator' and status in ('open','in_progress') order by due_at nulls last`, [ids]) : []
-  return { participations: rows, deliverables, tasks }
+  const campaigns = Array.from(new Map(rows.map((r) => [r.campaign_id, r])).values())
+    .map((r) => ({ id: r.campaign_id, name: (r as Record<string, unknown>).campaign_name as string }))
+  return { participations: rows, deliverables, tasks, campaigns }
 }
 
 export { requirePortalParticipation }

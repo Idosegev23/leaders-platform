@@ -48,17 +48,42 @@ export function makeWorld(pool: Pool): World {
   }
 }
 
-export async function makeUser(pool: Pool, role: InternalRole | 'none', name = `user-${randomUUID().slice(0, 6)}`): Promise<InternalActor> {
-  const id = randomUUID()
-  const email = `${name}-${id.slice(0, 6)}@example.test`
-  await pool.query(`insert into auth.users (id, email) values ($1,$2)`, [id, email])
-  await pool.query(`insert into users (id, email, full_name, role) values ($1,$2,$3,$4)`, [id, email, name, role === 'admin' ? 'admin' : 'user'])
-  if (role !== 'none' && role !== 'admin') await pool.query(`insert into cm_staff_roles (user_id, role) values ($1,$2)`, [id, role])
-  return { kind: 'internal', userId: id, email, name, role: role === 'none' ? 'staff' : role }
+export interface Org { id: string; name: string }
+
+/** A tenant. hub = Leaders-style organization that may link Hub briefs/contracts. */
+export async function makeOrg(pool: Pool, name = `Org ${randomUUID().slice(0, 6)}`, opts: { hub?: boolean } = {}): Promise<Org> {
+  const slug = `t-${randomUUID().slice(0, 12)}`
+  const { rows } = await pool.query<{ id: string }>(`insert into cm_organizations (name, slug, settings) values ($1,$2,$3) returning id`,
+    [name, slug, { hub_integration: !!opts.hub }])
+  return { id: rows[0].id, name }
 }
 
-export async function makeClient(pool: Pool, name = `Client ${randomUUID().slice(0, 6)}`): Promise<string> {
-  const { rows } = await pool.query<{ id: string }>(`insert into clients (name) values ($1) returning id`, [name])
+const defaultOrgs = new WeakMap<Pool, Promise<Org>>()
+/** The organization most tests run in (Leaders-like, Hub integration on). */
+export function defaultOrg(pool: Pool): Promise<Org> {
+  if (!defaultOrgs.has(pool)) defaultOrgs.set(pool, makeOrg(pool, 'Leaders (test)', { hub: true }))
+  return defaultOrgs.get(pool)!
+}
+
+/** A staff account with an active membership in `org` (default org when omitted). 'none' = account without membership. */
+export async function makeUser(pool: Pool, role: InternalRole | 'none', name = `user-${randomUUID().slice(0, 6)}`, org?: Org): Promise<InternalActor> {
+  const o = org ?? (await defaultOrg(pool))
+  const email = `${name.replace(/\s+/g, '.')}-${randomUUID().slice(0, 6)}@example.test`
+  const { rows } = await pool.query<{ id: string }>(`insert into cm_accounts (email, full_name) values ($1,$2) returning id`, [email, name])
+  const id = rows[0].id
+  if (role !== 'none') await pool.query(`insert into cm_memberships (organization_id, account_id, role) values ($1,$2,$3)`, [o.id, id, role])
+  return { kind: 'internal', userId: id, email, name, orgId: o.id, orgName: o.name, role: role === 'none' ? 'staff' : role }
+}
+
+/** Add an existing account to another organization (same person, second tenant). */
+export async function addMembership(pool: Pool, actor: InternalActor, org: Org, role: InternalRole): Promise<InternalActor> {
+  await pool.query(`insert into cm_memberships (organization_id, account_id, role) values ($1,$2,$3)`, [org.id, actor.userId, role])
+  return { ...actor, orgId: org.id, orgName: org.name, role }
+}
+
+export async function makeClient(pool: Pool, name = `Client ${randomUUID().slice(0, 6)}`, org?: Org): Promise<string> {
+  const o = org ?? (await defaultOrg(pool))
+  const { rows } = await pool.query<{ id: string }>(`insert into cm_clients (organization_id, name) values ($1,$2) returning id`, [o.id, name])
   return rows[0].id
 }
 
@@ -71,17 +96,16 @@ export async function makeBrief(pool: Pool, clientName: string): Promise<string>
   return rows[0].id
 }
 
+export function tokenFromInvite(inviteUrl: string): string {
+  return new URL(inviteUrl).hash.replace(/^#/, '').split('&').find((p) => p.startsWith('t='))!.slice(2)
+}
+
 /** Turn an invite URL (…/portal/enter#t=TOKEN) into a portal actor, as the browser would. */
 export async function portalFromInvite(pool: Pool, inviteUrl: string, now = new Date()): Promise<PortalActor> {
-  const token = new URL(inviteUrl).hash.replace(/^#/, '').split('&').find((p) => p.startsWith('t='))!.slice(2)
-  const { sessionSecret } = await redeemToken(pool, token, now)
+  const { sessionSecret } = await redeemToken(pool, tokenFromInvite(inviteUrl), now)
   const actor = await resolvePortalSession(pool, sessionSecret, now)
   if (!actor) throw new Error('session did not resolve')
   return actor
-}
-
-export function tokenFromInvite(inviteUrl: string): string {
-  return new URL(inviteUrl).hash.replace(/^#/, '').split('&').find((p) => p.startsWith('t='))!.slice(2)
 }
 
 export const PNG_1PX = Buffer.from(

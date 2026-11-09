@@ -197,19 +197,19 @@ export async function listShortlists(ctx: Ctx, campaignId: string) {
 // ── Client portal ──────────────────────────────────────────────────────────
 
 /** What the client sees: only internally approved items, only snapshot fields. */
-export async function clientShortlists(ctx: Ctx) {
+export async function clientShortlists(ctx: Ctx, campaignId?: string | null) {
   const actor = requirePortal(ctx.actor)
-  await requireClientCampaign(ctx.db, actor)
+  const camp = await requireClientCampaign(ctx.db, actor, campaignId)
   const lists = await many<{ id: string; version_number: number; status: string; sent_to_client_at: Date | null }>(ctx.db,
     `select id, version_number, status, sent_to_client_at from cm_shortlists where campaign_id = $1 and status in ('client_review','completed')
-      order by version_number desc`, [actor.campaignId])
+      order by version_number desc`, [camp.id])
   const items = await many<{ shortlist_id: string }>(ctx.db,
     `select si.id, si.shortlist_id, si.client_snapshot, si.client_decision,
             (select a.feedback from cm_approval_decisions a where a.target_type = 'shortlist_item' and a.target_id = si.id
                 and a.approval_stage = 'client' and a.target_version = s.version_number) as client_feedback
        from cm_shortlist_items si join cm_shortlists s on s.id = si.shortlist_id
       where s.campaign_id = $1 and s.status in ('client_review','completed') and si.internal_decision = 'approved'
-      order by si.created_at`, [actor.campaignId])
+      order by si.created_at`, [camp.id])
   return lists.map((l) => ({ ...l, items: items.filter((i) => i.shortlist_id === l.id) }))
 }
 
@@ -217,10 +217,14 @@ export async function clientShortlistDecision(ctx: Ctx, itemId: string, input: u
   const actor = requirePortal(ctx.actor)
   const v = parseInput(decisionSchema, input)
   return withTx(async (tx) => {
-    await requireClientCampaign(tx, actor)
+    const itemCampaign = await one<{ campaign_id: string }>(tx,
+      `select s.campaign_id from cm_shortlist_items si join cm_shortlists s on s.id = si.shortlist_id where si.id = $1`, [itemId])
+    if (!itemCampaign) throw notFound('המועמד')
+    // The item's campaign must be one this client grant covers (org + client + campaign).
+    await requireClientCampaign(tx, actor, itemCampaign.campaign_id)
     const item = await one<{ id: string; shortlist_id: string; participation_id: string; internal_decision: string }>(tx,
       `select si.id, si.shortlist_id, si.participation_id, si.internal_decision from cm_shortlist_items si
-         join cm_shortlists s on s.id = si.shortlist_id where si.id = $1 and s.campaign_id = $2`, [itemId, actor.campaignId])
+         join cm_shortlists s on s.id = si.shortlist_id where si.id = $1 and s.campaign_id = $2`, [itemId, itemCampaign.campaign_id])
     if (!item || item.internal_decision !== 'approved') throw notFound('המועמד')
     const s = await lockShortlist(tx, item.shortlist_id)
     if (s.version_number !== v.shortlist_version) {

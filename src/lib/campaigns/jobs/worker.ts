@@ -16,6 +16,7 @@ import type { Pool } from 'pg'
 import { withTx } from '../db'
 import type { Deps } from '../context'
 import { issueToken } from '../portal/access'
+import { issueLoginToken, type LoginPurpose } from '../auth/accounts'
 import { JOB_HANDLERS, stillRelevant, type JobRow } from './automation'
 import type { Relevance } from './queue'
 import { TransportError } from '../messaging/transport'
@@ -94,12 +95,16 @@ export async function dispatchNotifications(pool: Pool, deps: Deps, now: Date, l
       id: string; campaign_id: string | null; audience: string; recipient_grant_id: string | null; to_address: string
       subject: string; body_text: string; link_path: string | null; relevance: Relevance | null
       idempotency_key: string; attempts: number; max_attempts: number
+      recipient_user_id: string | null; login_link_purpose: LoginPurpose | null; organization_id: string | null; sender_name: string | null
     }>(
       `update cm_notifications set status = 'sending', attempts = attempts + 1
         where id in (select id from cm_notifications where status in ('pending','failed') and next_attempt_at <= $1
                       order by next_attempt_at limit $2 for update skip locked)
         returning id, campaign_id, audience, recipient_grant_id, to_address, subject, body_text, link_path, relevance,
-                  idempotency_key, attempts, max_attempts`,
+                  idempotency_key, attempts, max_attempts, recipient_user_id, login_link_purpose,
+                  coalesce(organization_id, (select c.organization_id from cm_campaigns c where c.id = cm_notifications.campaign_id)) as organization_id,
+                  (select coalesce(o.settings->>'sender_name', o.name) from cm_organizations o
+                    where o.id = coalesce(cm_notifications.organization_id, (select c.organization_id from cm_campaigns c where c.id = cm_notifications.campaign_id))) as sender_name`,
       [now, limit],
     )
     return rows
@@ -113,15 +118,19 @@ export async function dispatchNotifications(pool: Pool, deps: Deps, now: Date, l
     }
     let link: string | null = null
     try {
-      if (n.link_path && n.recipient_grant_id) {
-        // Fresh single-use login link per send; only its hash is stored.
+      if (n.login_link_purpose && n.recipient_user_id) {
+        // Staff sign-in / invitation link, minted now; only its hash is stored.
+        const token = await issueLoginToken(pool, n.recipient_user_id, n.login_link_purpose, now, n.organization_id)
+        link = `${deps.baseUrl}/campaigns/enter#t=${token}`
+      } else if (n.link_path && n.recipient_grant_id) {
+        // Fresh single-use portal login link per send; only its hash is stored.
         const { token } = await issueToken(pool, n.recipient_grant_id, 'login', now, null, PORTAL_EMAIL_LINK_HOURS * 3_600_000)
         link = `${deps.baseUrl}/portal/enter#t=${token}&next=${encodeURIComponent(n.link_path)}`
       } else if (n.link_path) {
         link = `${deps.baseUrl}${n.link_path}`
       }
       const { text, html } = renderEmail(n.body_text, link)
-      const res = await deps.transport.send({ to: n.to_address, subject: n.subject, text, html, idempotencyKey: n.idempotency_key })
+      const res = await deps.transport.send({ to: n.to_address, subject: n.subject, text, html, idempotencyKey: n.idempotency_key, fromName: n.sender_name ?? undefined })
       if (res.outcome === 'sent') {
         await pool.query(`update cm_notifications set status = 'sent', provider = $2, provider_message_id = $3, sent_at = $4, last_error = null where id = $1`,
           [n.id, res.provider, res.providerMessageId, now])

@@ -55,8 +55,8 @@ export async function redeemToken(db: Queryable, rawToken: string, now: Date): P
   if (typeof rawToken !== 'string' || rawToken.length < 20 || rawToken.length > 100) throw DENIED()
   const tok = await one<{ id: string; grant_id: string }>(db,
     `update cm_portal_tokens t set used_at = $2
-       from cm_portal_grants g
-      where t.token_hash = $1 and t.grant_id = g.id
+       from cm_portal_grants g, cm_organizations o
+      where t.token_hash = $1 and t.grant_id = g.id and o.id = g.organization_id and o.status = 'active'
         and t.used_at is null and t.revoked_at is null and t.expires_at > $2
         and g.status = 'active' and g.expires_at > $2
       returning t.id, t.grant_id`,
@@ -78,14 +78,17 @@ export async function redeemToken(db: Queryable, rawToken: string, now: Date): P
 export async function resolvePortalSession(db: Queryable, sessionSecret: string | undefined | null, now: Date): Promise<PortalActor | null> {
   if (!sessionSecret || sessionSecret.length < 20 || sessionSecret.length > 100) return null
   const row = await one<{
-    session_id: string; grant_id: string; kind: 'client' | 'creator' | 'agent'; campaign_id: string
-    client_id: string | null; creator_id: string | null; agent_id: string | null; recipient_name: string; last_seen_at: Date | null
+    session_id: string; grant_id: string; kind: PortalActor['grantKind']; organization_id: string; org_name: string
+    campaign_id: string | null; client_id: string | null; creator_id: string | null; agent_id: string | null
+    talent_agency_id: string | null; recipient_name: string; last_seen_at: Date | null
   }>(db,
-    `select s.id as session_id, g.id as grant_id, g.kind, g.campaign_id, g.client_id, g.creator_id, g.agent_id,
-            g.recipient_name, s.last_seen_at
-       from cm_portal_sessions s join cm_portal_grants g on g.id = s.grant_id
+    `select s.id as session_id, g.id as grant_id, g.kind, g.organization_id, o.name as org_name, g.campaign_id, g.client_id,
+            g.creator_id, g.agent_id, g.talent_agency_id, g.recipient_name, s.last_seen_at
+       from cm_portal_sessions s
+       join cm_portal_grants g on g.id = s.grant_id
+       join cm_organizations o on o.id = g.organization_id
       where s.session_hash = $1 and s.revoked_at is null and s.expires_at > $2
-        and g.status = 'active' and g.expires_at > $2`,
+        and g.status = 'active' and g.expires_at > $2 and o.status = 'active'`,
     [hashSecret(sessionSecret), now],
   )
   if (!row) return null
@@ -93,8 +96,9 @@ export async function resolvePortalSession(db: Queryable, sessionSecret: string 
     await db.query(`update cm_portal_sessions set last_seen_at = $2 where id = $1`, [row.session_id, now])
   }
   return {
-    kind: 'portal', sessionId: row.session_id, grantId: row.grant_id, grantKind: row.kind, campaignId: row.campaign_id,
-    clientId: row.client_id, creatorId: row.creator_id, agentId: row.agent_id, name: row.recipient_name,
+    kind: 'portal', sessionId: row.session_id, grantId: row.grant_id, grantKind: row.kind, orgId: row.organization_id,
+    orgName: row.org_name, campaignId: row.campaign_id, clientId: row.client_id, creatorId: row.creator_id,
+    agentId: row.agent_id, talentAgencyId: row.talent_agency_id, name: row.recipient_name,
   }
 }
 
