@@ -39,16 +39,16 @@ rights-expiry alert, re-acceptance after term changes, staff limits, every list 
 conversion on both 2026 transition days, and the influencer-contracts auth regression
 (`src/app/api/quotes/[id]/influencer-contracts/route.test.ts`).
 
-## Commands and results (2026-10-26)
+## Commands and results (2026-11-09, after multi-tenancy)
 
 | Command | Result |
 |---|---|
 | `npm test` (all Vitest unit tests, incl. pre-existing) | 15 files, 154 tests passed |
-| `npm run test:campaigns` (local Postgres) | 3 files, 42 tests passed |
+| `npm run test:campaigns` (local Postgres) | 4 files, 58 tests passed (incl. `tenancy.int.test.ts`: org isolation in services and in the DB, a person in two orgs, Hub-only features, multi-campaign client grant, agency org-wide grant, suspension, staff invite / login / disable, platform org creation, CSV import) |
 | `npm run typecheck` | 0 errors |
 | ESLint with `next/core-web-vitals` on all new/changed code | 0 problems (the repo itself has no ESLint config, see status) |
 | `npm run build` | success (needs `SUPABASE_SERVICE_ROLE_KEY` set to any value because an existing route is prerendered at build time) |
-| `scripts/campaigns/browser-smoke.ts` (real Chrome, headless) | 10/10 steps pass |
+| `scripts/campaigns/browser-smoke.ts` (real Chrome, headless) | 14/14 steps pass |
 | Migrations on an empty DB (shim + all 27 files) and re-applying the campaigns migration | pass |
 
 ## Browser check (real Chrome, desktop 1366×900 and mobile 390×844)
@@ -58,6 +58,10 @@ conversion on both 2026 transition days, and the influencer-contracts auth regre
 | Manager: list, all 8 campaign tabs, deliverable, internal approval click, print view, CSV | yes | list checked (no horizontal overflow) |
 | Client: enter via link, home, content decision | — | yes (no horizontal overflow; no prices on page) |
 | Creator: enter via link, home, upload file, submit version, URL tamper | — | yes |
+| Talent agency: enter via link, per-creator dashboard across campaigns, sees only represented creators | — | yes |
+| Second organization: own campaigns only, Leaders campaign URL → not found, settings | yes | — |
+| Platform admin: organizations list | yes | — |
+| CSV import: preview flags the duplicate, creates the new creator under its agency | yes | — |
 
 Not covered by the browser run: screen-reader testing, keyboard-only walkthrough (labels, focus rings and
 Escape-to-close are implemented but were not driven by keyboard in the run), Safari/iOS, real Supabase storage,

@@ -10,14 +10,15 @@ src/lib/campaigns/
   auth/policy.ts   every access decision (internal levels, portal scopes)
   services/        business operations, one transaction each: campaigns, clients, creators, participations,
                    shortlists, deliverables (versions, approvals, publications, metrics), assets, tasks,
-                   budget, shipments, grants, reporting, overview, portal, admin, recipients
+                   budget, shipments, grants, reporting, overview, portal, admin (members, organizations), import (CSV), recipients
   jobs/            queue.ts (outbox primitives), automation.ts (scheduling + handlers), worker.ts (cron worker)
-  portal/access.ts invitation tokens and sessions for clients / creators / agents
+  auth/accounts.ts staff accounts, memberships, email-link login, Hub bridge, platform admins
+  portal/access.ts invitation tokens and sessions for clients / creators / agents / talent agencies
   storage/         provider interface, Supabase private bucket, local dev adapter
   messaging/       transport interface, Gmail (existing service-account sender), dev transport
   db.ts, http.ts, runtime.ts, validation.ts, errors.ts, audit.ts, rate-limit.ts
 src/app/campaigns/**      internal screens (server components + client components for actions)
-src/app/portal/**         external portal (client, creator, agent)
+src/app/portal/**         external portal (client, creator, agent, talent agency)
 src/app/api/campaigns/**  internal REST API (thin adapters over services)
 src/app/api/portal/**     portal REST API
 src/app/api/cron/campaigns  worker (Vercel cron, every 5 min)
@@ -39,19 +40,55 @@ reporting, integrations (external references, Gmail, storage adapters).
 | Business rules in one place (`domain/state-machines.ts` + services) | Screens and routes never change status directly. |
 | Optimistic concurrency (`version` columns + `expected_version`) | Lost updates return VERSION_CONFLICT with a "refresh" action. |
 | Outbox in Postgres (`cm_jobs`, `cm_notifications`) | The business change and its follow-up (task, reminder, message) commit in one transaction. No `setTimeout` in the web server. |
-| Portal access by invitation, not accounts | Clients and creators have no Hub login. See below. |
-| Existing clients table (`clients`, 424 rows) reused | No second client master. Missing clients can be created locally and are flagged `metadata.created_by='campaigns'`. |
+| Portal access by invitation, not accounts | Clients and creators have no login. See below. |
+| Multi-tenant from the start (`cm_organizations`) | Brieflow is a product for agencies, Leaders being the first. Every business table carries `organization_id`. |
+| Own staff accounts (`cm_accounts`), independent of the Hub | Other agencies have no Leaders Google account. The Hub login is an optional bridge for Leaders only. |
+| Own clients table (`cm_clients`, per organization) | The Hub `clients` table belongs to Leaders. A Hub-linked organization can copy a client from it (`hub_client_id` kept as a reference). |
+
+## Tenancy
+
+- **Organization** (`cm_organizations`): name, slug, status (`active` / `suspended`), `settings` (`sender_name`
+  shown on emails, `hub_integration` for the Leaders org only).
+- **Account** (`cm_accounts`): one per email, can belong to several organizations through `cm_memberships`
+  (`admin` / `manager` / `staff`, `invited` / `active` / `disabled`). The active organization is a cookie
+  (`cm_org`) checked against the memberships on every request.
+- **Isolation in two layers.** (1) Every service query is scoped by `actor.orgId`; ids from another
+  organization answer "not found". (2) The database refuses cross-tenant links: child tables reference
+  `(id, organization_id)` of their parent through composite foreign keys, so a participation cannot join a
+  campaign of org A with a creator of org B even through a bug. Verified in `tenancy.int.test.ts`.
+- **Hub-only features** (brief prefill from `document_links`, copying a Hub client, influencer contract links)
+  check `settings.hub_integration` and are refused for other organizations.
+- **Suspension**: a suspended organization's staff and portal sessions stop working immediately; data stays.
+- **Platform admins** (`BRIEFLOW_PLATFORM_ADMINS`, comma-separated emails) create, list and suspend
+  organizations at `/campaigns/platform`. They see no campaign data unless they are also members.
+
+## Staff sign-in
+
+- Email link: a single-use token (sha256 stored) sent to the account's email; login 30 minutes, invitation
+  7 days, signup 24 hours. Same fragment + POST pattern as the portal (`/campaigns/enter#t=…`).
+- Session: `cm_session` httpOnly cookie, sha256 stored, re-checked on every request with the membership and
+  organization status.
+- Hub bridge (`CAMPAIGNS_HUB_LOGIN=true`): a signed-in Hub user is matched to an **existing** account by
+  `hub_user_id` or email. It never creates accounts or memberships; someone must be invited first.
+- Self signup (`BRIEFLOW_SELF_SIGNUP=true`): a new agency enters a name and email, confirms by link, and
+  becomes admin of a new organization. Off by default.
+- Dev login (`CAMPAIGNS_DEV_AUTH=true`, non-production build, localhost database only).
 
 ## Roles and access
 
 | Role | Where | Can |
 |---|---|---|
-| Module admin (`cm_staff_roles.role='admin'` or Hub `users.role='admin'`) | internal | everything, incl. module roles |
-| Campaign manager | internal | open campaigns; manage campaigns she owns or is a manager member of |
+| Organization admin (`cm_memberships.role='admin'`) | internal | everything in the organization, incl. members, invitations and organization settings |
+| Campaign manager | internal | open campaigns; manage campaigns they own or are a manager member of |
 | Staff | internal | view and operate (tasks, shipments, comments, start review) on campaigns they are members of; no approvals, invitations, money or closing |
-| Client representative | portal grant `kind=client` | one campaign of their own client: approved candidates (snapshot only), released content, decisions, published reports. Never fees, budget, internal notes |
-| Creator | portal grant `kind=creator` | their own participation in one campaign: terms incl. own fee, deliverables, uploads, publication, metrics |
-| Agent | portal grant `kind=agent` | participations in one campaign where they are the agent AND hold an active representation link |
+| Client representative | portal grant `kind=client` | one campaign, or all campaigns of their client (`campaign_id` null): approved candidates (snapshot only), released content, decisions, published reports. Never fees, budget, internal notes |
+| Talent agency | portal grant `kind=agency` | every participation, in every campaign of the organization, of the creators it represents (`cm_creators.talent_agency_id`); a dashboard per creator |
+| Agent | portal grant `kind=agent` | participations of creators assigned to them (`cm_agent_creators`, active) inside their agency, one campaign or all |
+| Creator | portal grant `kind=creator` | their own participation: terms incl. own fee, deliverables, uploads, publication, metrics |
+
+The influencer side is a hierarchy: agency ⊃ agent ⊃ creator. The agency sees its whole roster; an agent sees
+only assigned creators; a creator sees only themself. Moving a creator to another agency changes what the old
+agency sees immediately (the scope is computed live, not copied into the grant).
 
 Client data is built with explicit column lists (`clientShortlists`, `getDeliverable` client branch,
 `portalHome`); internal rows are never sent and then hidden.

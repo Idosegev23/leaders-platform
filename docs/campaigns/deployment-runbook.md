@@ -21,6 +21,8 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=local-dev-placeholder
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 CAMPAIGNS_MODULE_ENABLED=true
+BRIEFLOW_PLATFORM_ADMINS=platform@brieflow.example
+BRIEFLOW_SELF_SIGNUP=true
 CAMPAIGNS_DATABASE_URL=postgres://postgres@localhost:54329/leaders_dev
 CAMPAIGNS_DEV_AUTH=true
 CAMPAIGNS_STORAGE=local
@@ -35,9 +37,11 @@ CAMPAIGNS_DATABASE_URL=postgres://postgres@localhost:54329/leaders_dev npm run c
 npm run dev
 ```
 
-Open `/campaigns` and pick a seeded user (dev login exists only with `CAMPAIGNS_DEV_AUTH=true`, a
-non-production build and a localhost database). Open a printed portal link to act as a client, creator or
-agent (replace the port if you run on another one).
+Open `/campaigns/login` and pick a seeded account (dev login exists only with `CAMPAIGNS_DEV_AUTH=true`, a
+non-production build and a localhost database). The seed creates two organizations: "לידרס (הדגמה)"
+(Hub-linked) and "סוכנות דמו ב׳" (to show isolation; דנה לוי is a member of both and can switch), plus
+`platform@brieflow.example` as a platform admin. Fresh single-use portal links (client for all campaigns,
+talent agency, agent, creators) are written to `demo-links.local.txt`.
 
 Worker: `curl localhost:3000/api/cron/campaigns` (allowed without a secret only in development).
 
@@ -57,7 +61,7 @@ The integration suite refuses non-local database hosts. Tests never contact real
 
 1. **Database**: use a Supabase **branch or separate project**, not production. Apply
    `supabase/migrations/20261026_campaigns_mvp.sql` in the SQL editor. It is additive and idempotent, and it
-   only creates new `cm_` tables (the `clients` statement is a no-op where the table exists). It
+   only creates new `cm_` tables and does not alter any Hub table (it references `document_links` only). It
    takes no locks on existing tables beyond a catalog check, needs no backfill, and can be re-run.
 2. **Check grants after applying**:
    ```sql
@@ -72,7 +76,12 @@ The integration suite refuses non-local database hosts. Tests never contact real
    `CAMPAIGNS_STORAGE=supabase`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`.
    Email: `CAMPAIGNS_EMAIL_TRANSPORT=gmail`, `CAMPAIGNS_EMAIL_FROM=<mailbox the service account may impersonate>`, and on staging
    **`CAMPAIGNS_EMAIL_REDIRECT_TO=<test inbox>`** so nothing reaches real people.
-5. **Roles**: as a Hub admin, open `/campaigns/admin` and grant `manager` / `staff`.
+   Organizations: `BRIEFLOW_PLATFORM_ADMINS=<your email>`, `CAMPAIGNS_HUB_LOGIN=true`, `BRIEFLOW_SELF_SIGNUP` off.
+5. **Bootstrap the first organization**: sign in at `/campaigns/login` with a platform-admin email (email link,
+   or via the Hub bridge once an account exists), open `/campaigns/platform`, create "Leaders" with Hub
+   integration on and its first admin. That admin invites the team from `/campaigns/settings`
+   (`manager` / `staff`). Invitations arrive by email (redirected to the test inbox on staging).
+   To add another agency, create another organization the same way; its users never see Leaders data.
 6. **Smoke test on staging** (by hand):
    - open a campaign from a brief, add 2 creators, create a shortlist, approve internally, send to client;
    - create a client invitation, open it in a private window, approve one creator;
@@ -81,7 +90,8 @@ The integration suite refuses non-local database hosts. Tests never contact real
    - download the CSV and open it in Excel (Hebrew must display correctly);
    - call the cron with the secret: `curl -H "Authorization: Bearer $CRON_SECRET" https://<staging>/api/cron/campaigns`;
      check the Activity tab: messages should be `sent` (redirected to the test inbox) with provider ids;
-   - revoke the client invitation and confirm the portal session ends.
+   - revoke the client invitation and confirm the portal session ends;
+   - create a second organization, sign in as its admin, and confirm a Leaders campaign URL answers "not found".
 
 ## 4. Production (only with explicit approval)
 
@@ -90,7 +100,7 @@ The integration suite refuses non-local database hosts. Tests never contact real
 3. Set production env (3.4) **without** `CAMPAIGNS_EMAIL_REDIRECT_TO` and **without** `CAMPAIGNS_DEV_AUTH`.
    `CRON_SECRET` is mandatory (the worker refuses without it). Note: setting `CRON_SECRET` also gates the three existing cron routes, which is the desired fix for their currently public state.
 4. Deploy. `vercel.json` adds the `*/5 * * * *` cron for `/api/cron/campaigns`.
-5. Grant roles to the pilot team. Keep `CAMPAIGNS_MODULE_ENABLED=true` only after the smoke test passes.
+5. Bootstrap the Leaders organization and invite the pilot team (step 3.5). Keep `CAMPAIGNS_MODULE_ENABLED=true` only after the smoke test passes.
 
 ## 5. Monitoring
 

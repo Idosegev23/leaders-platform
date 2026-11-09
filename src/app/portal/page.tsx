@@ -6,7 +6,7 @@ import { loadPortal, portalCtx } from './_server'
 
 export const dynamic = 'force-dynamic'
 
-export default async function PortalHome() {
+export default async function PortalHome({ searchParams }: { searchParams: { campaign?: string } }) {
   const ctx = await portalCtx()
   if (!ctx) {
     return (
@@ -17,7 +17,7 @@ export default async function PortalHome() {
       </div>
     )
   }
-  const home = await loadPortal(() => portalHome(ctx))
+  const home = await loadPortal(() => portalHome(ctx, searchParams.campaign ?? null))
   const data = JSON.parse(JSON.stringify(home))
   return ctx.actor.grantKind === 'client' ? <ClientHome data={data} /> : <CreatorHome data={data} />
 }

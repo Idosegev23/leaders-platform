@@ -7,17 +7,21 @@ import { toast } from 'sonner'
 import { api, ApiError, newIdempotencyKey } from './client-api'
 import { Btn, Dialog, Empty, Field, Notice, SelectInput, StatusBadge, TextArea, TextInput, useAction, useUnsavedGuard } from './ui'
 
-type Creator = { id: string; display_name: string; status: string; categories: string[]; agent_name: string | null; accounts: { platform: string; handle: string; follower_count: number | null }[]; in_campaign: boolean }
+type Creator = { id: string; display_name: string; status: string; categories: string[]; agency_name: string | null; agent_names: string | null; accounts: { platform: string; handle: string; follower_count: number | null }[]; in_campaign: boolean }
 const PLATFORMS = ['instagram', 'tiktok', 'youtube', 'facebook', 'x', 'linkedin', 'other']
 
-export function CreatorPool({ creators, agents, campaigns, initialCampaign, filters }: {
-  creators: { rows: Creator[]; total: number; page: number; pageSize: number }; agents: { id: string; display_name: string }[]
+type AgencyOpt = { id: string; name: string }
+type AgentOpt = { id: string; display_name: string; talent_agency_id: string | null }
+
+export function CreatorPool({ creators, agencies, agents, campaigns, initialCampaign, filters }: {
+  creators: { rows: Creator[]; total: number; page: number; pageSize: number }; agencies: AgencyOpt[]; agents: AgentOpt[]
   campaigns: { id: string; name: string }[]; initialCampaign: string; filters: Record<string, string>
 }) {
   const router = useRouter()
   const [campaign, setCampaign] = React.useState(initialCampaign)
   const [picked, setPicked] = React.useState<Set<string>>(new Set())
   const [creating, setCreating] = React.useState(false)
+  const [importing, setImporting] = React.useState(false)
   const { busy, run } = useAction()
   const pages = Math.max(1, Math.ceil(creators.total / creators.pageSize))
   const qs = (extra: Record<string, string>) => new URLSearchParams({ ...filters, ...(campaign ? { campaign } : {}), ...extra }).toString()
@@ -32,10 +36,13 @@ export function CreatorPool({ creators, agents, campaigns, initialCampaign, filt
 
   return (
     <div className="space-y-3">
-      <form method="get" role="search" aria-label="סינון משפיענים" className="grid gap-2 rounded-2xl border border-wizard-border bg-white p-3 sm:grid-cols-5">
+      <form method="get" role="search" aria-label="סינון משפיענים" className="grid gap-2 rounded-2xl border border-wizard-border bg-white p-3 sm:grid-cols-6">
         {campaign && <input type="hidden" name="campaign" value={campaign} />}
         <label className="sm:col-span-2"><span className="sr-only">חיפוש</span><input name="q" defaultValue={filters.q} placeholder="שם, דוא״ל או @handle" className="h-10 w-full rounded-xl border border-wizard-border px-3 text-sm" /></label>
         <label><span className="sr-only">קטגוריה</span><input name="category" defaultValue={filters.category} placeholder="קטגוריה (למשל ספורט)" className="h-10 w-full rounded-xl border border-wizard-border px-3 text-sm" /></label>
+        <label><span className="sr-only">סוכנות</span>
+          <select name="talent_agency_id" defaultValue={filters.talent_agency_id ?? ''} className="h-10 w-full rounded-xl border border-wizard-border px-2 text-sm"><option value="">כל הסוכנויות</option>{agencies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+        </label>
         <label><span className="sr-only">פלטפורמה</span>
           <select name="platform" defaultValue={filters.platform ?? ''} className="h-10 w-full rounded-xl border border-wizard-border px-2 text-sm"><option value="">כל הפלטפורמות</option>{PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}</select>
         </label>
@@ -50,7 +57,8 @@ export function CreatorPool({ creators, agents, campaigns, initialCampaign, filt
         </Field>
         <Btn busy={busy} disabled={!campaign || picked.size === 0} onClick={() => void addToCampaign()}>הוספת {picked.size} נבחרים</Btn>
         {campaign && <Link href={`/campaigns/${campaign}?tab=creators`} className="self-center text-sm text-brand-primary underline">לקמפיין</Link>}
-        <Btn tone="secondary" className="ms-auto" onClick={() => setCreating(true)}>יוצר/ת חדש/ה</Btn>
+        <Btn tone="secondary" className="ms-auto" onClick={() => setImporting(true)}>ייבוא מקובץ</Btn>
+        <Btn tone="secondary" onClick={() => setCreating(true)}>יוצר/ת חדש/ה</Btn>
       </div>
 
       {creators.rows.length === 0 ? <Empty title="לא נמצאו משפיענים">אפשר להוסיף יוצר/ת חדש/ה ידנית.</Empty> : (
@@ -63,7 +71,7 @@ export function CreatorPool({ creators, agents, campaigns, initialCampaign, filt
                 <div className="min-w-0 flex-1">
                   <Link href={`/campaigns/creators/${c.id}`} className="font-semibold text-brand-primary hover:underline">{c.display_name}</Link>
                   <div className="text-xs text-wizard-text-secondary">{c.accounts.map((a) => `${a.platform} @${a.handle}${a.follower_count ? ` · ${a.follower_count.toLocaleString('he-IL')}` : ''}`).join(' | ') || 'ללא חשבונות'}</div>
-                  {c.agent_name && <div className="text-xs">סוכן: {c.agent_name}</div>}
+                  {(c.agency_name || c.agent_names) && <div className="text-xs">{c.agency_name ? `סוכנות: ${c.agency_name}` : ''}{c.agent_names ? ` · סוכן: ${c.agent_names}` : ''}</div>}
                   <div className="mt-1 flex flex-wrap gap-1">
                     {c.categories.map((cat) => <span key={cat} className="rounded bg-brand-pearl px-1.5 text-[11px]">{cat}</span>)}
                     {c.in_campaign && <StatusBadge status="active" label="כבר בקמפיין" />}
@@ -82,14 +90,15 @@ export function CreatorPool({ creators, agents, campaigns, initialCampaign, filt
           {creators.page < pages && <Link className="rounded-lg border border-wizard-border bg-white px-3 py-1" href={`/campaigns/creators?${qs({ page: String(creators.page + 1) })}`}>הבא</Link>}
         </nav>
       )}
-      {creating && <CreatorForm agents={agents} onClose={() => setCreating(false)} />}
+      {creating && <CreatorForm agencies={agencies} agents={agents} onClose={() => setCreating(false)} />}
+      {importing && <ImportDialog onClose={() => setImporting(false)} />}
     </div>
   )
 }
 
-export function CreatorForm({ agents, onClose }: { agents: { id: string; display_name: string }[]; onClose: () => void }) {
+export function CreatorForm({ agencies, agents, onClose }: { agencies: AgencyOpt[]; agents: AgentOpt[]; onClose: () => void }) {
   const router = useRouter()
-  const [f, setF] = React.useState({ display_name: '', email: '', phone: '', agent_id: '', categories: '', internal_notes: '', besti_account_id: '' })
+  const [f, setF] = React.useState({ display_name: '', email: '', phone: '', talent_agency_id: '', agent_id: '', categories: '', internal_notes: '', besti_account_id: '' })
   const [accounts, setAccounts] = React.useState([{ platform: 'instagram', handle: '', follower_count: '', profile_url: '' }])
   const [dup, setDup] = React.useState<{ creator_id: string; display_name: string; reason: string }[] | null>(null)
   const [busy, setBusy] = React.useState(false)
@@ -105,7 +114,7 @@ export function CreatorForm({ agents, onClose }: { agents: { id: string; display
         setDup(null)
         try {
           await api('/api/campaigns/creators', { idempotencyKey: idem, body: {
-            ...f, agent_id: f.agent_id || null, categories: f.categories.split(',').map((c) => c.trim()).filter(Boolean),
+            ...f, talent_agency_id: f.talent_agency_id || null, agent_id: f.agent_id || null, categories: f.categories.split(',').map((c) => c.trim()).filter(Boolean),
             social_accounts: accounts.filter((a) => a.handle.trim()).map((a) => ({ platform: a.platform, handle: a.handle, follower_count: a.follower_count ? Number(a.follower_count.replace(/,/g, '')) : null, profile_url: a.profile_url || null })),
           } })
           toast.success('היוצר/ת נוסף/ה למאגר')
@@ -137,13 +146,92 @@ export function CreatorForm({ agents, onClose }: { agents: { id: string; display
           <Btn size="sm" tone="ghost" onClick={() => setAccounts([...accounts, { platform: 'tiktok', handle: '', follower_count: '', profile_url: '' }])}>+ חשבון נוסף</Btn>
         </fieldset>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="סוכן" htmlFor="cf-agent"><SelectInput id="cf-agent" value={f.agent_id} onChange={(e) => set('agent_id', e.target.value)}><option value="">ללא</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</SelectInput></Field>
+          <Field label="סוכנות כישרונות" htmlFor="cf-agency"><SelectInput id="cf-agency" value={f.talent_agency_id} onChange={(e) => { set('talent_agency_id', e.target.value); set('agent_id', '') }}><option value="">עצמאי/ת</option>{agencies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</SelectInput></Field>
+          <Field label="סוכן מטפל" htmlFor="cf-agent"><SelectInput id="cf-agent" value={f.agent_id} onChange={(e) => set('agent_id', e.target.value)}><option value="">ללא</option>{agents.filter((a) => !a.talent_agency_id || a.talent_agency_id === f.talent_agency_id).map((a) => <option key={a.id} value={a.id}>{a.display_name}</option>)}</SelectInput></Field>
           <Field label="קטגוריות" htmlFor="cf-cat" hint="מופרדות בפסיק"><TextInput id="cf-cat" value={f.categories} onChange={(e) => set('categories', e.target.value)} /></Field>
         </div>
         <Field label="מזהה חשבון ב-Besti (קישור ידני)" htmlFor="cf-besti"><TextInput id="cf-besti" dir="ltr" value={f.besti_account_id} onChange={(e) => set('besti_account_id', e.target.value)} /></Field>
         <Field label="הערות פנימיות" htmlFor="cf-notes"><TextArea id="cf-notes" value={f.internal_notes} onChange={(e) => set('internal_notes', e.target.value)} /></Field>
         <div className="flex gap-2"><Btn type="submit" busy={busy} disabled={!f.display_name.trim()}>שמירה</Btn><Btn tone="secondary" onClick={onClose}>ביטול</Btn></div>
       </form>
+    </Dialog>
+  )
+}
+
+type ImportPreview = {
+  rows: { line: number; status: 'ready' | 'duplicate' | 'error'; messages: string[]; display_name: string; email: string | null; phone: string | null; agency: string | null; accounts: { platform: string; handle: string }[] }[]
+  missingAgencies: string[]
+  summary: { total: number; ready: number; duplicate: number; error: number }
+}
+
+/** CSV import: choose a file → preview every row → create only the ready rows. */
+function ImportDialog({ onClose }: { onClose: () => void }) {
+  const [csv, setCsv] = React.useState<string | null>(null)
+  const [fileName, setFileName] = React.useState('')
+  const [preview, setPreview] = React.useState<ImportPreview | null>(null)
+  const [createAgencies, setCreateAgencies] = React.useState(true)
+  const [result, setResult] = React.useState<{ created: number; createdAgencies: number; failed: { line: number; message: string }[] } | null>(null)
+  const { busy, run } = useAction()
+  const STATUS_HE = { ready: 'ייווצר', duplicate: 'כפילות — ידולג', error: 'שגיאה — ידולג' }
+  return (
+    <Dialog open onClose={onClose} title="ייבוא יוצרים מקובץ">
+      {result ? (
+        <div className="space-y-3">
+          <Notice tone="good">נוצרו {result.created} יוצרים{result.createdAgencies ? ` ו-${result.createdAgencies} סוכנויות` : ''}.</Notice>
+          {result.failed.length > 0 && <Notice tone="warn">{result.failed.map((f) => `שורה ${f.line}: ${f.message}`).join(' · ')}</Notice>}
+          <Btn onClick={onClose}>סגירה</Btn>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm">קובץ CSV (באקסל: שמירה בשם → CSV UTF-8). שורה ראשונה = כותרות: <strong>שם</strong> (חובה), דוא&quot;ל, טלפון, אינסטגרם, טיקטוק, יוטיוב, עוקבים, קטגוריות, סוכנות, הערות.</p>
+          <label className="block">
+            <span className="sr-only">קובץ CSV</span>
+            <input type="file" accept=".csv,text/csv" className="block w-full text-sm" onChange={async (e) => {
+              const f = e.target.files?.[0]
+              if (!f) return
+              if (f.size > 2 * 1024 * 1024) { toast.error('הקובץ גדול מ-2MB'); return }
+              setFileName(f.name); setPreview(null)
+              const text = await f.text()
+              setCsv(text)
+              const r = await run(() => api<ImportPreview>('/api/campaigns/creators/import', { body: { mode: 'preview', csv: text } }), { refresh: false })
+              if (r) setPreview(r)
+            }} />
+          </label>
+          {busy && !preview && <p className="text-sm text-wizard-text-secondary">בודק את {fileName}…</p>}
+          {preview && (
+            <>
+              <Notice>{preview.summary.total} שורות: {preview.summary.ready} ייווצרו, {preview.summary.duplicate} כפילויות, {preview.summary.error} שגיאות. שום דבר לא נשמר עדיין.</Notice>
+              {preview.missingAgencies.length > 0 && (
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={createAgencies} onChange={(e) => setCreateAgencies(e.target.checked)} />
+                  ליצור סוכנויות חדשות: {preview.missingAgencies.join(', ')}</label>
+              )}
+              <div className="max-h-72 overflow-auto rounded-xl border border-wizard-border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-brand-pearl text-right"><tr><th scope="col" className="p-1.5">שורה</th><th scope="col" className="p-1.5">שם</th><th scope="col" className="p-1.5">פרטים</th><th scope="col" className="p-1.5">מצב</th></tr></thead>
+                  <tbody>
+                    {preview.rows.map((r) => (
+                      <tr key={r.line} className={`border-t border-wizard-border ${r.status === 'error' ? 'bg-rose-50' : r.status === 'duplicate' ? 'bg-amber-50' : ''}`}>
+                        <td className="p-1.5">{r.line}</td>
+                        <td className="p-1.5">{r.display_name || '—'}</td>
+                        <td className="p-1.5" dir="ltr">{[r.email, r.phone, ...r.accounts.map((a) => `${a.platform}:@${a.handle}`), r.agency].filter(Boolean).join(' · ')}</td>
+                        <td className="p-1.5">{STATUS_HE[r.status]}{r.messages.length ? <div className="text-[11px]">{r.messages.join('; ')}</div> : null}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex gap-2">
+                <Btn busy={busy} disabled={!csv || preview.summary.ready === 0 || (preview.missingAgencies.length > 0 && !createAgencies)} onClick={async () => {
+                  const r = await run(() => api<{ created: number; createdAgencies: number; failed: { line: number; message: string }[] }>('/api/campaigns/creators/import',
+                    { body: { mode: 'commit', csv, create_missing_agencies: createAgencies } }), { success: 'הייבוא הושלם' })
+                  if (r) setResult(r)
+                }}>ייבוא {preview.summary.ready} יוצרים</Btn>
+                <Btn tone="secondary" onClick={onClose}>ביטול</Btn>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </Dialog>
   )
 }

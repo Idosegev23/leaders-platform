@@ -12,6 +12,7 @@ import type { CampaignDetail } from '@/lib/campaigns/services/campaigns'
 
 export type ParticipationRow = {
   id: string; creator_id: string; creator_name: string; agent_id: string | null; agent_name: string | null
+  talent_agency_id: string | null; agency_name: string | null
   selection_status: string; participation_status: string; status_reason: string | null; agreed_fee: string | null; currency: string
   payment_status: string; contract_reference: string | null; contract_signature_request_id: string | null; rights_expires_at: string | null
   rights_notes: string | null; internal_notes: string | null; client_visible_notes: string | null; deliverables_summary: string | null
@@ -173,7 +174,7 @@ function ParticipationCard({ p, campaign, manage, agents }: { p: ParticipationRo
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Link href={`/campaigns/creators/${p.creator_id}`} className="font-semibold text-brand-primary hover:underline">{p.creator_name}</Link>
-            {p.agent_name && <span className="text-xs text-wizard-text-secondary">דרך הסוכן {p.agent_name}</span>}
+            {(p.agency_name || p.agent_name) && <span className="text-xs text-wizard-text-secondary">{p.agency_name ? `סוכנות ${p.agency_name}` : ''}{p.agent_name ? ` · סוכן ${p.agent_name}` : ''}</span>}
           </div>
           <div className="mt-1 flex flex-wrap gap-1.5">
             <StatusBadge status={p.selection_status} label={`בחירה: ${heStatus(p.selection_status)}`} />
@@ -290,8 +291,10 @@ function TermsDialog({ p, agents, onClose }: { p: ParticipationRow; agents: { id
 }
 
 function InviteDialog({ p, onClose }: { p: ParticipationRow; onClose: () => void }) {
-  const [via, setVia] = React.useState<'creator' | 'agent'>(p.agent_id ? 'agent' : 'creator')
-  const [name, setName] = React.useState(via === 'agent' ? p.agent_name ?? '' : p.creator_name)
+  type Via = 'creator' | 'agent' | 'agency'
+  const nameFor = (v: Via) => (v === 'agent' ? p.agent_name ?? '' : v === 'agency' ? p.agency_name ?? '' : p.creator_name)
+  const [via, setVia] = React.useState<Via>(p.talent_agency_id ? 'agency' : p.agent_id ? 'agent' : 'creator')
+  const [name, setName] = React.useState(nameFor(via))
   const [email, setEmail] = React.useState('')
   const [send, setSend] = React.useState(false)
   const [link, setLink] = React.useState<string | null>(null)
@@ -310,10 +313,12 @@ function InviteDialog({ p, onClose }: { p: ParticipationRow; onClose: () => void
         </div>
       ) : (
         <div className="space-y-3">
-          {p.agent_id && (
-            <Field label="למי לשלוח" htmlFor="inv-via">
-              <SelectInput id="inv-via" value={via} onChange={(e) => { const v = e.target.value as 'creator' | 'agent'; setVia(v); setName(v === 'agent' ? p.agent_name ?? '' : p.creator_name) }}>
-                <option value="creator">ליוצר ישירות</option><option value="agent">לסוכן ({p.agent_name})</option>
+          {(p.agent_id || p.talent_agency_id) && (
+            <Field label="למי לשלוח" htmlFor="inv-via" hint="סוכנות רואה את כל היוצרים שהיא מייצגת; סוכן רק את המוקצים לו">
+              <SelectInput id="inv-via" value={via} onChange={(e) => { const v = e.target.value as Via; setVia(v); setName(nameFor(v)) }}>
+                <option value="creator">ליוצר ישירות</option>
+                {p.agent_id && <option value="agent">לסוכן ({p.agent_name})</option>}
+                {p.talent_agency_id && <option value="agency">לסוכנות ({p.agency_name})</option>}
               </SelectInput>
             </Field>
           )}

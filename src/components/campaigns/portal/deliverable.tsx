@@ -25,7 +25,7 @@ const CREATOR_STAGE: Record<string, string> = {
   publication_reported: 'הפרסום דווח ומחכה לאימות', publication_verified: 'הפרסום אומת. תודה!', cancelled: 'התוצר בוטל',
 }
 
-export function PortalDeliverable({ data, role }: { data: Data; role: 'client' | 'creator' | 'agent' }) {
+export function PortalDeliverable({ data, role }: { data: Data; role: 'client' | 'creator' | 'agent' | 'agency' }) {
   const d = data.deliverable
   const current = data.versions.find((v) => v.id === d.current_version_id) ?? null
   const isClient = role === 'client'

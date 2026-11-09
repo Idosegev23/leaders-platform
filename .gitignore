@@ -52,3 +52,10 @@ next-env.d.ts
 /.data
 /.local-pg
 /demo-links.local.txt
+/.claude-flow/
+/.swarm/
+**/.claude-flow/
+**/.swarm/
+/ruvector.db
+/.claude/.proven-config-version
+/.claude/proven-config.json

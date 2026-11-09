@@ -8,35 +8,57 @@ import { formatDate, formatDateTime } from '@/lib/campaigns/domain/time'
 import { heStatus } from '@/lib/campaigns/domain/state-machines'
 
 type Item = { id: string; client_snapshot: { display_name: string; categories: string[]; deliverables_summary: string | null; client_visible_notes: string | null; accounts: { platform: string; handle: string; profile_url: string | null; follower_count: number | null }[] }; client_decision: string; client_feedback: string | null }
+type CampaignRow = { id: string; name: string; status: string; start_date: string | null; end_date: string | null; client_name: string; awaiting: number }
 type Data = {
-  me: { name: string }
-  campaign: { name: string; client_name: string; status: string; start_date: string | null; end_date: string | null }
-  shortlists: { id: string; version_number: number; status: string; sent_to_client_at: string | null; items: Item[] }[]
-  deliverables: { id: string; title: string; platform: string; type: string; status: string; publication_due_at: string | null; creator_name: string; awaiting_you: boolean }[]
-  reports: { id: string; published_to_client_at: string }[]
-  progress: { planned: number; approved: number; published: number }
+  me: { name: string; orgName: string; allCampaigns: boolean }
+  campaigns: CampaignRow[]
+  campaign: CampaignRow | null
+  shortlists?: { id: string; version_number: number; status: string; sent_to_client_at: string | null; items: Item[] }[]
+  deliverables?: { id: string; title: string; platform: string; type: string; status: string; publication_due_at: string | null; creator_name: string; awaiting_you: boolean }[]
+  reports?: { id: string; published_to_client_at: string }[]
+  progress?: { planned: number; approved: number; published: number }
 }
 
 export function ClientHome({ data }: { data: Data }) {
-  const open = data.shortlists.find((s) => s.status === 'client_review')
-  const waitingContent = data.deliverables.filter((d) => d.awaiting_you)
+  if (!data.campaign) {
+    return <Empty title="אין עדיין קמפיינים להצגה">קמפיינים יופיעו כאן כשהצוות של {data.me.orgName} ישתף אותם.</Empty>
+  }
+  const c = data.campaign
+  const open = data.shortlists?.find((s) => s.status === 'client_review')
+  const waitingContent = (data.deliverables ?? []).filter((d) => d.awaiting_you)
   return (
     <div className="space-y-4">
+      <p className="text-sm text-wizard-text-secondary">שלום {data.me.name}</p>
+      {data.campaigns.length > 1 && (
+        <nav aria-label="הקמפיינים שלך" className="-mx-4 overflow-x-auto px-4">
+          <ul className="flex min-w-max gap-2">
+            {data.campaigns.map((k) => (
+              <li key={k.id}>
+                <Link href={`/portal?campaign=${k.id}`} aria-current={k.id === c.id ? 'page' : undefined}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm ${k.id === c.id ? 'border-brand-primary bg-brand-primary text-white' : 'border-wizard-border bg-white'}`}>
+                  {k.name}{k.awaiting > 0 && <span className={`rounded-full px-1.5 text-[11px] font-bold ${k.id === c.id ? 'bg-white/25' : 'bg-amber-100 text-amber-900'}`}>{k.awaiting}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )}
       <div>
-        <p className="text-sm text-wizard-text-secondary">שלום {data.me.name}</p>
-        <h1 className="text-2xl font-bold">{data.campaign.name}</h1>
-        <p className="text-sm text-wizard-text-secondary">{data.campaign.client_name} · {formatDate(data.campaign.start_date)} – {formatDate(data.campaign.end_date)} · {heStatus(data.campaign.status)}</p>
+        <h1 className="text-2xl font-bold">{c.name}</h1>
+        <p className="text-sm text-wizard-text-secondary">{c.client_name} · {formatDate(c.start_date)} – {formatDate(c.end_date)} · {heStatus(c.status)}</p>
       </div>
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-xl border border-wizard-border bg-white p-3"><div className="text-xs text-wizard-text-secondary">תוצרים מתוכננים</div><div className="text-xl font-bold">{data.progress.planned}</div></div>
-        <div className="rounded-xl border border-wizard-border bg-white p-3"><div className="text-xs text-wizard-text-secondary">אושרו</div><div className="text-xl font-bold">{data.progress.approved}</div></div>
-        <div className="rounded-xl border border-wizard-border bg-white p-3"><div className="text-xs text-wizard-text-secondary">פורסמו ואומתו</div><div className="text-xl font-bold">{data.progress.published}</div></div>
-      </div>
+      {data.progress && (
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl border border-wizard-border bg-white p-3"><div className="text-xs text-wizard-text-secondary">תוצרים מתוכננים</div><div className="text-xl font-bold">{data.progress.planned}</div></div>
+          <div className="rounded-xl border border-wizard-border bg-white p-3"><div className="text-xs text-wizard-text-secondary">אושרו</div><div className="text-xl font-bold">{data.progress.approved}</div></div>
+          <div className="rounded-xl border border-wizard-border bg-white p-3"><div className="text-xs text-wizard-text-secondary">פורסמו ואומתו</div><div className="text-xl font-bold">{data.progress.published}</div></div>
+        </div>
+      )}
 
       {open ? <ShortlistDecisions shortlist={open} /> : null}
 
       <Panel title={`תכנים ממתינים להחלטתך (${waitingContent.length})`}>
-        {waitingContent.length === 0 ? <p className="text-sm text-wizard-text-secondary">אין כרגע תכנים שממתינים לך.</p> : (
+        {waitingContent.length === 0 ? <p className="text-sm text-wizard-text-secondary">אין כרגע תכנים שממתינים לך בקמפיין זה.</p> : (
           <ul className="space-y-2">
             {waitingContent.map((d) => (
               <li key={d.id}><Link href={`/portal/deliverables/${d.id}`} className="flex items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3">
@@ -49,9 +71,9 @@ export function ClientHome({ data }: { data: Data }) {
       </Panel>
 
       <Panel title="כל התכנים">
-        {data.deliverables.length === 0 ? <Empty title="עדיין אין תכנים לצפייה">תכנים יופיעו כאן אחרי בדיקה פנימית של הצוות.</Empty> : (
+        {(data.deliverables ?? []).length === 0 ? <Empty title="עדיין אין תכנים לצפייה">תכנים יופיעו כאן אחרי בדיקה פנימית של הצוות.</Empty> : (
           <ul className="divide-y divide-wizard-border">
-            {data.deliverables.map((d) => (
+            {data.deliverables!.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                 <Link href={`/portal/deliverables/${d.id}`} className="text-brand-primary underline">{d.creator_name} · {d.title}</Link>
                 <StatusBadge status={d.status} />
@@ -61,16 +83,16 @@ export function ClientHome({ data }: { data: Data }) {
         )}
       </Panel>
 
-      {data.reports.length > 0 && (
+      {(data.reports ?? []).length > 0 && (
         <Panel title="דוחות">
-          <ul className="space-y-1 text-sm">{data.reports.map((r) => <li key={r.id}><Link className="text-brand-primary underline" href={`/portal/reports/${r.id}`}>דוח מתאריך {formatDateTime(r.published_to_client_at)}</Link></li>)}</ul>
+          <ul className="space-y-1 text-sm">{data.reports!.map((r) => <li key={r.id}><Link className="text-brand-primary underline" href={`/portal/reports/${r.id}`}>דוח מתאריך {formatDateTime(r.published_to_client_at)}</Link></li>)}</ul>
         </Panel>
       )}
     </div>
   )
 }
 
-function ShortlistDecisions({ shortlist }: { shortlist: Data['shortlists'][number] }) {
+function ShortlistDecisions({ shortlist }: { shortlist: NonNullable<Data['shortlists']>[number] }) {
   const { busy, run } = useAction()
   const [ask, setAsk] = React.useState<{ item: Item; decision: 'changes_requested' | 'rejected' } | null>(null)
   const [fb, setFb] = React.useState('')

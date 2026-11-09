@@ -18,14 +18,14 @@ import { LocalStorage } from '../../src/lib/campaigns/storage/local'
 import { DevTransport } from '../../src/lib/campaigns/messaging/transport'
 import { redeemToken, resolvePortalSession } from '../../src/lib/campaigns/portal/access'
 import { createCampaign, changeCampaignStatus } from '../../src/lib/campaigns/services/campaigns'
-import { createAgent, createCreator } from '../../src/lib/campaigns/services/creators'
+import { createAgent, createCreator, createTalentAgency } from '../../src/lib/campaigns/services/creators'
 import { addCreatorsToCampaign, participationAction, respondToInvitation, updateParticipationTerms } from '../../src/lib/campaigns/services/participations'
 import { clientShortlistDecision, createShortlist, internalShortlistDecision, sendShortlistToClient } from '../../src/lib/campaigns/services/shortlists'
 import {
   addMetrics, clientContentDecision, createDeliverable, internalContentDecision, reportPublication, submitVersion, verifyPublication,
 } from '../../src/lib/campaigns/services/deliverables'
 import { completeUpload, createUploadIntent } from '../../src/lib/campaigns/services/assets'
-import { createGrant } from '../../src/lib/campaigns/services/grants'
+import { createGrant, createOrgGrant } from '../../src/lib/campaigns/services/grants'
 import { addBudgetLine } from '../../src/lib/campaigns/services/budget'
 import { upsertShipment } from '../../src/lib/campaigns/services/shipments'
 
@@ -45,13 +45,18 @@ const iso = (offsetMs: number) => at(offsetMs).toISOString()
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex')
 
-async function user(name: string, role: 'admin' | 'manager' | 'staff'): Promise<InternalActor> {
-  const id = randomUUID()
-  const email = `${name.toLowerCase().replace(/\s+/g, '.')}@leaders.example`
-  await pool.query(`insert into auth.users (id, email) values ($1,$2)`, [id, email])
-  await pool.query(`insert into users (id, email, full_name, role) values ($1,$2,$3,$4)`, [id, email, name, role === 'admin' ? 'admin' : 'user'])
-  if (role !== 'admin') await pool.query(`insert into cm_staff_roles (user_id, role) values ($1,$2)`, [id, role])
-  return { kind: 'internal', userId: id, email, name, role }
+interface Org { id: string; name: string }
+
+async function org(name: string, slug: string, settings: Record<string, unknown> = {}): Promise<Org> {
+  const { rows } = await pool.query(`insert into cm_organizations (name, slug, settings) values ($1,$2,$3) returning id`, [name, slug, settings])
+  return { id: rows[0].id, name }
+}
+
+/** A staff account (no password; local dev login only) with an active membership. */
+async function user(name: string, email: string, role: 'admin' | 'manager' | 'staff', o: Org): Promise<InternalActor> {
+  const { rows } = await pool.query(`insert into cm_accounts (email, full_name, email_verified_at) values ($1,$2,now()) returning id`, [email, name])
+  await pool.query(`insert into cm_memberships (organization_id, account_id, role) values ($1,$2,$3)`, [o.id, rows[0].id, role])
+  return { kind: 'internal', userId: rows[0].id, email, name, role, orgId: o.id, orgName: o.name }
 }
 
 async function portal(inviteUrl: string, when = new Date()): Promise<PortalActor> {
@@ -74,21 +79,33 @@ async function main() {
   const existing = await pool.query(`select count(*)::int as n from cm_campaigns`)
   if (existing.rows[0].n > 0) throw new Error('database already has campaigns; run db.ts reset first')
 
-  const admin = await user('אדמין מערכת', 'admin')
-  const noa = await user('נועה כהן', 'manager')
-  const dana = await user('דנה לוי', 'manager')
-  const staff = await user('יואב צוות', 'staff')
+  // Tenant 1: Leaders (Hub-linked). Tenant 2: another agency, to show isolation.
+  const leaders = await org('לידרס (הדגמה)', 'leaders-demo', { hub_integration: true })
+  const other = await org('סוכנות דמו ב׳', 'agency-b-demo')
+  // Platform admin: a separate account with no membership (set BRIEFLOW_PLATFORM_ADMINS=platform@brieflow.example)
+  await pool.query(`insert into cm_accounts (email, full_name, email_verified_at) values ('platform@brieflow.example', 'מנהל/ת Brieflow', now())`)
+  const admin = await user('אדמין לידרס', 'admin@leaders.example', 'admin', leaders)
+  const noa = await user('נועה כהן', 'noa@leaders.example', 'manager', leaders)
+  const dana = await user('דנה לוי', 'dana@leaders.example', 'manager', leaders)
+  const staff = await user('יואב צוות', 'yoav@leaders.example', 'staff', leaders)
+  const bAdmin = await user('מיכל (סוכנות ב׳)', 'michal@agency-b.example', 'admin', other)
+  // A consultant who works with both agencies: one account, two memberships.
+  await pool.query(`insert into cm_memberships (organization_id, account_id, role) values ($1, $2, 'staff')`, [other.id, dana.userId])
 
-  const { rows: [adidas] } = await pool.query(`insert into clients (name, name_hebrew) values ('Adidas Israel (demo)', 'אדידס ישראל (הדגמה)') returning id`)
-  const { rows: [fresh] } = await pool.query(`insert into clients (name, name_hebrew) values ('FreshJuice (demo)', 'פרשג׳וס (הדגמה)') returning id`)
+  const client = async (o: Org, name: string, secondary: string) =>
+    (await pool.query(`insert into cm_clients (organization_id, name, name_secondary) values ($1,$2,$3) returning id`, [o.id, name, secondary])).rows[0]
+  const adidas = await client(leaders, 'אדידס ישראל (הדגמה)', 'Adidas Israel')
+  const fresh = await client(leaders, 'פרשג׳וס (הדגמה)', 'FreshJuice')
   const { rows: [dt] } = await pool.query(`select id from document_types where slug = 'client-brief'`)
   const { rows: [brief] } = await pool.query(
     `insert into document_links (document_type_id, created_by_email, client_name, status, completed_at, metadata)
      values ($1, $2, 'אדידס ישראל (הדגמה)', 'completed', now(), $3) returning id`,
     [dt.id, noa.email, { salesforce_ref: 'DEMO-SF-001', submission_data: { clientName: 'אדידס ישראל', productService: 'Ultraboost 2026', campaignGoalTypes: ['מודעות', 'מכירות'], campaignGoalsDescription: 'השקת נעל ריצה לקהל צעיר', campaignLaunchDate: new Date(now).toISOString().slice(0, 10), budget: '150,000 ₪' } }])
 
-  // Agent with three creators; twelve creators total.
-  const agency = await createAgent(ctx(noa), { display_name: 'סוכנות כוכבים (הדגמה)', company: 'Stars Agency', email: 'agent@stars.example' })
+  // Talent agency representing three creators, with two agents; twelve creators total.
+  const stars = await createTalentAgency(ctx(noa), { name: 'סוכנות כוכבים (הדגמה)', email: 'office@stars.example' })
+  const roni = await createAgent(ctx(noa), { display_name: 'רוני (סוכנות כוכבים)', email: 'roni@stars.example', talent_agency_id: stars.id })
+  const shir = await createAgent(ctx(noa), { display_name: 'שיר (סוכנות כוכבים)', email: 'shir@stars.example', talent_agency_id: stars.id })
   const names = [
     ['יעל רצה', 'yael.runs', 'ספורט'], ['עומר פיט', 'omer.fit', 'ספורט'], ['מאיה סטייל', 'maya.style', 'אופנה'], ['איתי מבשל', 'itay.cooks', 'אוכל'],
     ['נועם טק', 'noam.tech', 'טכנולוגיה'], ['שירה יוגה', 'shira.yoga', 'ספורט'], ['רון טיולים', 'ron.trips', 'טיולים'], ['טל מוזיקה', 'tal.music', 'מוזיקה'],
@@ -98,7 +115,7 @@ async function main() {
   for (const [i, [n, h, cat]] of names.entries()) {
     const c = await createCreator(ctx(noa), {
       display_name: n, email: `${h}@creators.example`, phone: `05${String(20000000 + i * 1111).slice(0, 8)}`, categories: [cat],
-      agent_id: i < 3 ? agency.id : null, social_accounts: [{ platform: i % 3 === 2 ? 'tiktok' : 'instagram', handle: h, follower_count: 15000 + i * 7300 }],
+      talent_agency_id: i < 3 ? stars.id : null, agent_id: i < 2 ? roni.id : i === 2 ? shir.id : null, social_accounts: [{ platform: i % 3 === 2 ? 'tiktok' : 'instagram', handle: h, follower_count: 15000 + i * 7300 }],
     })
     creators.push(c.id)
   }
@@ -152,7 +169,7 @@ async function main() {
   for (const [i, p] of aParts.slice(0, 4).entries()) {
     const viaAgent = i < 2
     const inv = await participationAction(ctx(noa, at(-14 * D)), p, viaAgent
-      ? { action: 'invite', expected_version: (await pv(p)).version, via: 'agent', recipient_name: 'סוכנות כוכבים', recipient_email: 'agent@stars.example' }
+      ? { action: 'invite', expected_version: (await pv(p)).version, via: 'agency', recipient_name: 'סוכנות כוכבים', recipient_email: 'office@stars.example' }
       : { action: 'invite', expected_version: (await pv(p)).version, recipient_name: names[i][0], recipient_email: `${names[i][1]}@creators.example` })
     const actor = await portal(inv.invite_url!, at(-14 * D))
     creatorActors.push(actor)
@@ -217,10 +234,18 @@ async function main() {
   await addBudgetLine(ctx(dana), B, { category: 'production', description: 'סט צילום', amount: '3500', status: 'committed' })
   await changeCampaignStatus(ctx(dana), B, { to: 'active', expected_version: 3 })
 
+  // Tenant 2 has its own client, creator and campaign; Leaders never sees them.
+  const bClient = await client(other, 'לקוח של סוכנות ב׳', 'Agency B client')
+  const bCtx = ctx(bAdmin)
+  const bCampaign = (await createCampaign(bCtx, { client_id: bClient.id, name: 'קמפיין של סוכנות ב׳ (הדגמה)', approved_budget: '30000' })).id
+  const bCreator = await createCreator(bCtx, { display_name: 'יוצרת של סוכנות ב׳', email: 'yael.runs@creators.example', social_accounts: [{ platform: 'instagram', handle: 'b.creator' }] })
+  await addCreatorsToCampaign(bCtx, bCampaign, { creator_ids: [bCreator.id] })
+
   // Fresh portal links for manual testing (single use each).
   const freshLinks = {
-    clientA: (await createGrant(ctx(noa), A, { kind: 'client', recipient_name: 'רונית (אדידס) — בדיקה', recipient_email: 'ronit@adidas.example' })).inviteUrl,
-    agent: (await createGrant(ctx(noa), A, { kind: 'agent', agent_id: agency.id, recipient_name: 'סוכנות כוכבים — בדיקה' })).inviteUrl,
+    clientA: (await createOrgGrant(ctx(noa), { kind: 'client', client_id: adidas.id, recipient_name: 'רונית (אדידס) — בדיקה', recipient_email: 'ronit@adidas.example' })).inviteUrl,
+    agency: (await createOrgGrant(ctx(noa), { kind: 'agency', talent_agency_id: stars.id, recipient_name: 'סוכנות כוכבים — בדיקה', recipient_email: 'office@stars.example' })).inviteUrl,
+    agent: (await createOrgGrant(ctx(noa), { kind: 'agent', agent_id: roni.id, recipient_name: 'רוני — בדיקה', recipient_email: 'roni@stars.example' })).inviteUrl,
     creatorP2: (await createGrant(ctx(noa), A, { kind: 'creator', creator_id: creators[2], recipient_name: `${names[2][0]} — בדיקה` })).inviteUrl,
     creatorP3: (await createGrant(ctx(noa), A, { kind: 'creator', creator_id: creators[3], recipient_name: `${names[3][0]} — בדיקה` })).inviteUrl,
     clientB: (await createGrant(ctx(dana), B, { kind: 'client', recipient_name: 'אבי — בדיקה' })).inviteUrl,
@@ -228,7 +253,8 @@ async function main() {
   links.push(...Object.entries(freshLinks).map(([k, v]) => `${k.padEnd(10)} ${v}`))
 
   console.log('Seeded campaigns module (synthetic data only).')
-  console.log('Internal users (dev login): ', [admin, noa, dana, staff].map((u) => `${u.name} (${u.role})`).join(', '))
+  console.log('Organizations: ', [leaders, other].map((o) => o.name).join(' | '))
+  console.log('Staff (dev login): ', [admin, noa, dana, staff, bAdmin].map((u) => `${u.name} (${u.role}, ${u.orgName})`).join(', '), '+ platform@brieflow.example (platform admin)')
   console.log('Single-use portal links (valid 14 days, local only):')
   for (const l of links) console.log('  ' + l)
 }

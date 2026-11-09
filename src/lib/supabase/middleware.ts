@@ -77,8 +77,9 @@ export async function updateSession(request: NextRequest) {
     '/library',
     // Smart Brief Engine (employees only; recipient view is /forms/brief/*)
     '/smart-brief',
-    // Campaigns module (employees only; clients/creators use /portal/* with their own session)
-    '/campaigns',
+    // Note: /campaigns (Brieflow) and /portal handle their own sign-in: staff of
+    // any organization use emailed links, Leaders staff may also use the Hub
+    // Google session; see src/lib/campaigns/runtime.ts.
     // Note: /forms/* is intentionally public — clients without an account
     // use `/forms/client-brief?token=xxx` to fill the brief.
     // Note: /api/research-hub/workflow is intentionally public — it's

@@ -55,7 +55,7 @@ code, not a gap-fill of an existing one.
 
 | Data | Source of truth | In the MVP |
 |---|---|---|
-| Client (account) | Salesforce, mirrored in Hub `clients` | `cm_campaigns.client_id` → `clients.id`. A missing client can be created locally by a manager, flagged `metadata.created_by='campaigns'`. Salesforce ids are stored as references, never pushed. |
+| Client (account) | Salesforce, mirrored in Hub `clients` | Each organization keeps its own `cm_clients`. The Leaders org can copy a Hub client (`hub_client_id` kept as a reference; the Hub row is never written). Salesforce ids are stored as references, never pushed. (Revised 2026-11 for multi-tenancy; originally `cm_campaigns.client_id` pointed at Hub `clients`.) |
 | Commercial project | Salesforce | `external_project_reference` (text, entered by hand) |
 | Brief, decks, quotes | Hub (`document_links`, `documents`) | linked by id; the campaign stores the link, not a copy |
 | Creator account, agent, Besti deal | Besti | Hub keeps its own operational creator card; link via `cm_external_references` |

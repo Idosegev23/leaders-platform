@@ -84,7 +84,8 @@ async function main() {
     watch(m, 'manager')
     await m.setViewport({ width: 1366, height: 900 })
     await m.goto(`${BASE}/campaigns`, { waitUntil: 'networkidle2' })
-    await expectText(m, 'כניסת פיתוח מקומית', 'manager')
+    await expectText(m, 'כניסה לצוות', 'manager')
+    await expectText(m, 'פיתוח מקומי בלבד', 'manager')
     await clickText(m, 'נועה כהן')
     await m.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
     await expectText(m, 'אדידס Ultraboost', 'manager')
@@ -92,6 +93,7 @@ async function main() {
     step('manager signed in (dev login) and sees the campaign list')
 
     const campaignId = (await pool.query(`select id from cm_campaigns where name like 'אדידס%'`)).rows[0].id
+    if (/סוכנות ב׳/.test(await m.evaluate(() => document.body.innerText))) problems.push('[manager] sees another organization\'s campaign')
     for (const [tab, text] of [['overview', 'מה דורש פעולה עכשיו'], ['creators', 'משתתפים'], ['deliverables', 'ממתין ל'], ['tasks', 'לוח זמנים'], ['budget', 'יתרה זמינה'], ['report', 'איך חושב'], ['activity', 'היסטוריית פעולות'], ['access', 'הזמנות לפורטל']]) {
       await m.goto(`${BASE}/campaigns/${campaignId}?tab=${tab}`, { waitUntil: 'networkidle2' })
       await expectText(m, text, `manager/${tab}`)
@@ -164,6 +166,67 @@ async function main() {
     await expectText(c3, 'הקישור אינו בתוקף', 'client/reuse')
     await shot(c3, '10-link-reuse-refused')
     step('a used link is refused with a clear message')
+
+    // ── Talent agency (all campaigns), mobile ─────────────────────────────
+    const ag = await (await browser.createBrowserContext()).newPage()
+    watch(ag, 'agency')
+    await ag.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true })
+    await ag.goto(await freshLink('סוכנות כוכבים — בדיקה'), { waitUntil: 'networkidle2' })
+    await clickText(ag, 'כניסה', 'button')
+    await ag.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
+    await expectText(ag, 'תמונת מצב לפי יוצר', 'agency')
+    const agText = await ag.evaluate(() => document.body.innerText)
+    for (const n of ['יעל רצה', 'עומר פיט', 'מאיה סטייל']) if (!agText.includes(n)) problems.push(`[agency] missing represented creator ${n}`)
+    for (const n of ['איתי מבשל', 'נועם טק', 'יוצרת של סוכנות ב׳']) if (agText.includes(n)) problems.push(`[agency] sees non-represented creator ${n}`)
+    await shot(ag, '13-agency-dashboard-mobile')
+    step('talent agency sees all its creators across campaigns, and only them')
+
+    // ── Another organization (tenant isolation), desktop ───────────────────
+    const b = await (await browser.createBrowserContext()).newPage()
+    watch(b, 'org-b')
+    await b.setViewport({ width: 1366, height: 900 })
+    await b.goto(`${BASE}/campaigns/login`, { waitUntil: 'networkidle2' })
+    await clickText(b, 'מיכל (סוכנות ב׳)')
+    await b.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
+    await expectText(b, 'קמפיין של סוכנות ב׳', 'org-b')
+    if ((await b.evaluate(() => document.body.innerText)).includes('אדידס')) problems.push('[org-b] sees Leaders data')
+    await shot(b, '14-org-b-campaigns')
+    await b.goto(`${BASE}/campaigns/${campaignId}`, { waitUntil: 'networkidle2' })
+    await expectText(b, 'הדף לא נמצא', 'org-b/url-tamper')
+    await b.goto(`${BASE}/campaigns/creators`, { waitUntil: 'networkidle2' })
+    if ((await b.evaluate(() => document.body.innerText)).includes('עומר פיט')) problems.push('[org-b] sees Leaders creators')
+    await b.goto(`${BASE}/campaigns/settings`, { waitUntil: 'networkidle2' })
+    await expectText(b, 'חברי הארגון', 'org-b/settings')
+    await shot(b, '15-org-b-settings')
+    step('a second organization sees only its own data; a Leaders campaign URL is "not found"')
+
+    // ── Platform admin ─────────────────────────────────────────────────────
+    const pl = await (await browser.createBrowserContext()).newPage()
+    watch(pl, 'platform')
+    await pl.setViewport({ width: 1366, height: 900 })
+    await pl.goto(`${BASE}/campaigns/login`, { waitUntil: 'networkidle2' })
+    await clickText(pl, 'מנהל/ת Brieflow')
+    await pl.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
+    await pl.goto(`${BASE}/campaigns/platform`, { waitUntil: 'networkidle2' })
+    await expectText(pl, 'סוכנות דמו ב׳', 'platform')
+    await shot(pl, '16-platform-orgs')
+    step('platform admin lists organizations (no campaign data)')
+
+    // ── Creator import (manager) ───────────────────────────────────────────
+    await m.setViewport({ width: 1366, height: 900 })
+    await m.goto(`${BASE}/campaigns/creators`, { waitUntil: 'networkidle2' })
+    await clickText(m, 'ייבוא מקובץ')
+    const csvPath = path.join(OUT, 'import.csv')
+    writeFileSync(csvPath, '\uFEFFשם,דוא"ל,אינסטגרם,סוכנות\nיוצרת מיובאת,imported@example.test,@imported.one,סוכנות כוכבים (הדגמה)\nיעל רצה,yael.runs@creators.example,,\n')
+    const fileInput = await m.waitForSelector('input[type=file][accept*="csv"]')
+    await (fileInput as unknown as { uploadFile(p: string): Promise<void> }).uploadFile(csvPath)
+    await expectText(m, '1 ייווצרו', 'import')
+    await shot(m, '17-import-preview')
+    await clickText(m, 'ייבוא 1 יוצרים')
+    await expectText(m, 'נוצרו 1 יוצרים', 'import')
+    const imported = (await pool.query(`select ta.name from cm_creators c join cm_talent_agencies ta on ta.id = c.talent_agency_id where c.email = 'imported@example.test'`)).rows
+    if (imported[0]?.name !== 'סוכנות כוכבים (הדגמה)') problems.push('[import] creator not created with agency')
+    step('CSV import: preview flags the duplicate, creates the new creator under its agency')
 
     // ── Creator, mobile ───────────────────────────────────────────────────
     const ctxK = await browser.createBrowserContext()

@@ -22,7 +22,8 @@ export default async function CreatorPage({ params }: { params: { cid: string } 
           <dl className="grid grid-cols-3 gap-y-1.5 text-sm">
             <dt className="text-wizard-text-secondary">דוא״ל</dt><dd className="col-span-2" dir="ltr">{c.email ?? '—'}</dd>
             <dt className="text-wizard-text-secondary">טלפון</dt><dd className="col-span-2" dir="ltr">{c.phone ?? '—'}</dd>
-            <dt className="text-wizard-text-secondary">סוכן</dt><dd className="col-span-2">{c.agent_name ?? '—'}</dd>
+            <dt className="text-wizard-text-secondary">סוכנות</dt><dd className="col-span-2">{c.agency_name ?? 'עצמאי/ת'}</dd>
+            <dt className="text-wizard-text-secondary">סוכנים</dt><dd className="col-span-2">{(c.agents as { display_name: string }[]).map((a) => a.display_name).join(', ') || '—'}</dd>
             <dt className="text-wizard-text-secondary">קטגוריות</dt><dd className="col-span-2">{c.categories.join(', ') || '—'}</dd>
             <dt className="text-wizard-text-secondary">הערות</dt><dd className="col-span-2 whitespace-pre-wrap">{c.internal_notes ?? '—'}</dd>
           </dl>

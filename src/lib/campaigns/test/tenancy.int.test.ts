@@ -228,7 +228,7 @@ describe('staff accounts and sign-in', () => {
 
   it('creating an organization requires a platform admin (or self sign-up) and invites its first admin', async () => {
     const someone = await makeUser(pool, 'admin', 'not-platform', A.org)
-    expect(await code(createOrganization(pool, { input: { name: 'Gamma', admin_email: 'g@example.test', admin_name: 'G' }, byAccount: someone, signup: false, now, baseUrl: 'http://t' }))).toBe('FORBIDDEN')
+    expect(await code(createOrganization(pool, { input: { name: 'Gamma', admin_email: 'g@example.test', admin_name: 'G' }, byAccount: { id: someone.userId, email: someone.email }, signup: false, now, baseUrl: 'http://t' }))).toBe('FORBIDDEN')
     const r = await createOrganization(pool, { input: { name: 'Gamma Agency', admin_email: 'g@example.test', admin_name: 'G' }, byAccount: null, signup: true, now, baseUrl: 'http://t' })
     const s = await redeemLoginToken(pool, tokenFromInvite(r.inviteUrl), now)
     const ms = await loadMemberships(pool, s.accountId)
@@ -265,5 +265,36 @@ describe('end-to-end inside a second organization', () => {
     // audit rows carry the right organization
     const orgs = (await pool.query(`select distinct organization_id from cm_audit_events where campaign_id = $1`, [B.campaignId])).rows
     expect(orgs).toEqual([{ organization_id: B.org.id }])
+  })
+})
+
+describe('creator import (CSV)', () => {
+  it('previews, flags duplicates and errors, then creates only the ready rows', async () => {
+    const { previewImport, commitImport, parseCsv } = await import('../services/import')
+    expect(parseCsv('﻿שם;טלפון\r\n"כהן, דנה";050-1234567\r\n')).toEqual([['שם', 'טלפון'], ['כהן, דנה', '050-1234567']])
+    const csv = [
+      'שם,דוא"ל,טלפון,אינסטגרם,עוקבים,קטגוריות,סוכנות',
+      'נועה ספורט,noa.sport@example.test,0521112233,@noa.sport,"12,000",ספורט|ריצה,Import Agency',
+      'כפילות בקובץ,noa.sport@example.test,,,,,',
+      `קיימת במאגר,same.person@example.test,,,,,`,
+      ',missing.name@example.test,,,,,',
+      'טלפון שגוי,,12,,,,',
+    ].join('\n')
+    const ctx = w.ctx(A.manager, now)
+    const pre = await previewImport(ctx, { csv })
+    expect(pre.summary).toEqual({ total: 5, ready: 1, duplicate: 2, error: 2 })
+    expect(pre.missingAgencies).toEqual(['Import Agency'])
+    expect(await code(commitImport(ctx, { csv }))).toBe('PRECONDITION_FAILED')
+    const res = await commitImport(ctx, { csv, create_missing_agencies: true })
+    expect(res.created).toBe(1)
+    expect(res.createdAgencies).toBe(1)
+    const c = (await pool.query(`select c.phone, c.categories, ta.name as agency, s.handle, s.follower_count from cm_creators c
+      join cm_talent_agencies ta on ta.id = c.talent_agency_id join cm_creator_social_accounts s on s.creator_id = c.id
+      where c.organization_id = $1 and c.display_name = 'נועה ספורט'`, [A.org.id])).rows[0]
+    expect(c).toEqual({ phone: '+972521112233', categories: ['ספורט', 'ריצה'], agency: 'Import Agency', handle: 'noa.sport', follower_count: 12000 })
+    // importing the same file again creates nothing
+    expect((await commitImport(ctx, { csv, create_missing_agencies: true })).created).toBe(0)
+    // the import never touched organization B
+    expect((await pool.query(`select count(*)::int as n from cm_creators where organization_id = $1`, [B.org.id])).rows[0].n).toBe(1)
   })
 })

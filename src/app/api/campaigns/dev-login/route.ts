@@ -1,5 +1,5 @@
 /**
- * Local development only: sign in as one of the locally seeded users.
+ * Local development only: sign in as one of the locally seeded accounts.
  * Disabled unless CAMPAIGNS_DEV_AUTH=true, NODE_ENV is not production and the
  * database is on localhost (see devAuthEnabled). No password exists.
  */
@@ -15,8 +15,12 @@ export const runtime = 'nodejs'
 
 export async function GET() {
   if (!devAuthEnabled()) return new Response('not found', { status: 404 })
-  const users = await many(getPool(), `select u.id, u.full_name, u.email, case when u.role = 'admin' then 'admin' else r.role end as role
-    from users u left join cm_staff_roles r on r.user_id = u.id where u.role = 'admin' or r.role is not null order by u.full_name`)
+  const users = await many(getPool(), `select a.id, a.full_name, a.email,
+      coalesce(string_agg(o.name || ' · ' || m.role, ', ' order by o.name), 'ללא ארגון') as orgs
+    from cm_accounts a
+    left join cm_memberships m on m.account_id = a.id and m.status = 'active'
+    left join cm_organizations o on o.id = m.organization_id
+    where a.status = 'active' group by a.id order by a.full_name`)
   return NextResponse.json({ users })
 }
 

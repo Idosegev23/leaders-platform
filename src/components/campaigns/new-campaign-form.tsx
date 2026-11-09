@@ -6,11 +6,11 @@ import { toast } from 'sonner'
 import { api, ApiError, newIdempotencyKey } from './client-api'
 import { Btn, Field, Notice, Panel, SelectInput, TextArea, TextInput, useUnsavedGuard } from './ui'
 
-type Client = { id: string; name: string; name_hebrew: string | null; salesforce_account_id: string | null }
+type Client = { id: string; name: string; name_secondary: string | null; salesforce_account_id: string | null }
 type Brief = { id: string; client_name: string | null; status: string; created_at: string; salesforce_ref: string | null }
 type Prefill = { name: string | null; description: string | null; objectives: string | null; start_date: string | null; budget_hint: string | null; platforms: string | null; brief_status: string }
 
-export function NewCampaignForm({ managers, me }: { managers: { id: string; full_name: string }[]; me: string }) {
+export function NewCampaignForm({ managers, me, hub }: { managers: { id: string; full_name: string }[]; me: string; hub: boolean }) {
   const router = useRouter()
   const [f, setF] = React.useState({
     client_id: '', client_label: '', name: '', description: '', objectives: '', external_project_reference: '',
@@ -39,11 +39,12 @@ export function NewCampaignForm({ managers, me }: { managers: { id: string; full
   const [briefs, setBriefs] = React.useState<Brief[]>([])
   const [prefill, setPrefill] = React.useState<Prefill | null>(null)
   React.useEffect(() => {
+    if (!hub) return
     const t = setTimeout(() => {
       api<{ briefs: Brief[] }>(`/api/campaigns/briefs?q=${encodeURIComponent(briefQ)}`).then((r) => setBriefs(r.briefs)).catch(() => setBriefs([]))
     }, 250)
     return () => clearTimeout(t)
-  }, [briefQ])
+  }, [briefQ, hub])
 
   async function pickBrief(b: Brief) {
     set('brief_document_link_id', b.id)
@@ -60,10 +61,10 @@ export function NewCampaignForm({ managers, me }: { managers: { id: string; full
     const name = clientQ.trim()
     if (!name) return
     try {
-      const r = await api<{ id: string; existing: boolean }>('/api/campaigns/clients', { body: { name, name_hebrew: name } })
+      const r = await api<{ id: string; existing: boolean }>('/api/campaigns/clients', { body: { name } })
       set('client_id', r.id)
       set('client_label', name)
-      toast.success(r.existing ? 'נבחר לקוח קיים בשם זה' : 'נוצר לקוח מקומי (לא סונכרן ל-Salesforce)')
+      toast.success(r.existing ? 'נבחר לקוח קיים בשם זה' : 'הלקוח נוסף')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : 'יצירת הלקוח נכשלה')
     }
@@ -100,7 +101,7 @@ export function NewCampaignForm({ managers, me }: { managers: { id: string; full
       <Panel title="לקוח ופרויקט">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2 space-y-2">
-            <Field label="לקוח *" htmlFor="client-q" hint="מתוך רשימת הלקוחות במערכת. אם הלקוח חסר אפשר ליצור לקוח מקומי." error={fieldErr('client_id')}>
+            <Field label="לקוח *" htmlFor="client-q" hint="מתוך הלקוחות של הארגון. אם הלקוח חסר אפשר להוסיף אותו כאן." error={fieldErr('client_id')}>
               <TextInput id="client-q" value={f.client_id ? f.client_label : clientQ} placeholder="חיפוש לקוח…"
                 onChange={(e) => { setClientQ(e.target.value); if (f.client_id) { set('client_id', ''); set('client_label', '') } }}
                 aria-autocomplete="list" aria-controls="client-list" />
@@ -109,13 +110,13 @@ export function NewCampaignForm({ managers, me }: { managers: { id: string; full
               <ul id="client-list" role="listbox" aria-label="לקוחות" className="max-h-48 overflow-y-auto rounded-xl border border-wizard-border">
                 {clients.map((c) => (
                   <li key={c.id} role="option" aria-selected={false}>
-                    <button type="button" className="w-full px-3 py-2 text-right text-sm hover:bg-brand-pearl" onClick={() => { set('client_id', c.id); set('client_label', c.name_hebrew || c.name) }}>
-                      {c.name_hebrew || c.name}{c.name_hebrew && c.name_hebrew !== c.name ? <span className="text-xs text-wizard-text-secondary"> · {c.name}</span> : null}
+                    <button type="button" className="w-full px-3 py-2 text-right text-sm hover:bg-brand-pearl" onClick={() => { set('client_id', c.id); set('client_label', c.name) }}>
+                      {c.name}{c.name_secondary ? <span className="text-xs text-wizard-text-secondary"> · {c.name_secondary}</span> : null}
                     </button>
                   </li>
                 ))}
                 {clientQ.trim() && (
-                  <li><button type="button" className="w-full px-3 py-2 text-right text-sm font-medium text-brand-primary hover:bg-brand-pearl" onClick={() => void createClient()}>+ יצירת לקוח מקומי &quot;{clientQ.trim()}&quot;</button></li>
+                  <li><button type="button" className="w-full px-3 py-2 text-right text-sm font-medium text-brand-primary hover:bg-brand-pearl" onClick={() => void createClient()}>+ הוספת לקוח &quot;{clientQ.trim()}&quot;</button></li>
                 )}
               </ul>
             )}
@@ -123,13 +124,13 @@ export function NewCampaignForm({ managers, me }: { managers: { id: string; full
           <Field label="מזהה פרויקט ב-Salesforce" htmlFor="sf" hint="קישור ידני; המערכת אינה כותבת ל-Salesforce">
             <TextInput id="sf" value={f.external_project_reference} onChange={(e) => set('external_project_reference', e.target.value)} />
           </Field>
-          <Field label="קישור חיצוני לבריף (אם אין בריף במערכת)" htmlFor="brief-url" error={fieldErr('brief_url')}>
+          <Field label={hub ? 'קישור חיצוני לבריף (אם אין בריף במערכת)' : 'קישור לבריף'} htmlFor="brief-url" error={fieldErr('brief_url')}>
             <TextInput id="brief-url" type="url" dir="ltr" value={f.brief_url} onChange={(e) => set('brief_url', e.target.value)} placeholder="https://" />
           </Field>
         </div>
       </Panel>
 
-      <Panel title="בריף">
+      {hub && <Panel title="בריף מה-Hub">
         {f.brief_document_link_id ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span>בריף מקושר: <strong>{f.brief_label}</strong></span>
@@ -162,7 +163,7 @@ export function NewCampaignForm({ managers, me }: { managers: { id: string; full
             {prefill.budget_hint && <p className="border-t border-sky-200 pt-2">תקציב שצוין בבריף (טקסט חופשי, לא מועתק אוטומטית): <strong>{prefill.budget_hint}</strong></p>}
           </div>
         )}
-      </Panel>
+      </Panel>}
 
       <Panel title="פרטי הקמפיין">
         <div className="grid gap-3 sm:grid-cols-2">
