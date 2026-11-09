@@ -45,6 +45,9 @@
     },
     "src/app/api/regenerate-slide/route.ts": {
       "maxDuration": 120
+    },
+    "src/app/api/cron/campaigns/route.ts": {
+      "maxDuration": 300
     }
   },
   "crons": [
@@ -59,6 +62,10 @@
     {
       "path": "/api/cron/renew-drive-watch",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/campaigns",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

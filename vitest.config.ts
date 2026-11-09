@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // DB-backed campaigns tests run separately: npm run test:campaigns
+    exclude: ['**/node_modules/**', 'src/**/*.int.test.ts'],
   },
 })

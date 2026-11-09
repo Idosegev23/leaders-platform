@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
+import { getAuthenticatedUser } from '@/lib/auth/api-auth'
 import { uploadBufferToDriveFolder } from '@/lib/google-drive/client'
 import { DRIVE_ANCHORS } from '@/lib/google-drive/client-folders'
 import { resolveDeckInfluencers } from '@/lib/influencer-contract/deck'
@@ -44,6 +45,10 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Employee-only: this route uses the service role and creates contracts.
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+
   const { id } = await params
   const sb = service()
 
@@ -190,11 +195,14 @@ export async function POST(
   return NextResponse.json({ ok: true, quote_id: id, deck_id: deck.id, created, skipped })
 }
 
-/** GET — list contracts already cloned from this signed quote. */
+/** GET — list contracts already cloned from this signed quote. Employee-only: it returns signing tokens. */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await getAuthenticatedUser()
+  if (!user) return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+
   const { id } = await params
   const sb = service()
   const { data, error } = await sb

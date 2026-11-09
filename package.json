@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:campaigns": "vitest run --config vitest.integration.config.ts",
+    "campaigns:db:reset": "tsx scripts/campaigns/db.ts reset",
+    "campaigns:seed": "tsx scripts/campaigns/seed.ts",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.68",
@@ -39,6 +43,7 @@
     "openai": "^6.25.0",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.13.1",
     "pptxgenjs": "^4.0.1",
     "puppeteer-core": "^24.34.0",
     "react": "^18.3.1",
@@ -60,6 +65,7 @@
   "devDependencies": {
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/uuid": "^10.0.0",

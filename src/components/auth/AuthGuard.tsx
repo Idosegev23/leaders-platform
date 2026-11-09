@@ -35,7 +35,7 @@ export function dispatchReauthRequired(reason?: string) {
 
 /** Pages where AuthGuard should not run a proactive scope check (no user is
  *  expected to be signed in there). Trigger 2 (explicit event) still works. */
-const PUBLIC_PATH_PREFIXES = ['/login', '/forms/', '/sign/', '/s/']
+const PUBLIC_PATH_PREFIXES = ['/login', '/forms/', '/sign/', '/s/', '/portal']
 
 function isPublicPage(): boolean {
   if (typeof window === 'undefined') return true
@@ -121,9 +121,10 @@ function looksLikeOwnApi(input: RequestInfo | URL): boolean {
         ? input.toString()
         : (input as Request).url
     if (!url) return false
-    if (url.startsWith('/')) return url.startsWith('/api/')
+    // /api/portal/* has its own invitation-based session; a 401 there is not a Google re-auth.
+    if (url.startsWith('/')) return url.startsWith('/api/') && !url.startsWith('/api/portal/')
     const u = new URL(url)
-    return u.origin === window.location.origin && u.pathname.startsWith('/api/')
+    return u.origin === window.location.origin && u.pathname.startsWith('/api/') && !u.pathname.startsWith('/api/portal/')
   } catch {
     return false
   }
